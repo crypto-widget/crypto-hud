@@ -1,0 +1,3106 @@
+import { Button, ComboBox, LineEdit, ListView, Palette, ScrollView, SpinBox } from "std-widgets.slint";
+import { PluginMarketItem } from "models.slint";
+import { PanelTitle, SettingLabel, SettingSectionTitle, SettingsNavItem, SettingSwitch } from "shared-controls.slint";
+import "fonts/NotoSansSC-wght.ttf";
+
+component OpacitySlider inherits Rectangle {
+    in-out property <int> value;
+    in property <bool> enabled: true;
+    in property <color> accent-color;
+    in property <color> track-color;
+    in property <color> knob-color;
+    in property <color> disabled-color;
+
+    property <length> knob-x: clamp((root.value - 20) * root.width / 80 - 6px, 0px, root.width - 13px);
+    property <length> track-y: (root.height - 3px) / 2;
+
+    callback changed(int);
+    callback committed(int);
+
+    height: 20px;
+    background: transparent;
+
+    function value-from-position(x: length) -> int {
+        return 20 + round(clamp(x, 0px, root.width) * 80 / root.width);
+    }
+
+    function set-value-from-position(x: length) {
+        if root.enabled {
+            root.value = root.value-from-position(x);
+            root.changed(root.value);
+        }
+    }
+
+    Rectangle {
+        x: 0px;
+        y: root.track-y;
+        width: parent.width;
+        height: 3px;
+        border-radius: 1px;
+        background: root.enabled ? root.track-color : root.disabled-color;
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: (root.value - 20) * parent.width / 80;
+            height: parent.height;
+            border-radius: parent.border-radius;
+            background: root.enabled ? root.accent-color : root.disabled-color;
+        }
+    }
+
+    Rectangle {
+        x: root.knob-x;
+        y: (parent.height - self.height) / 2;
+        width: 13px;
+        height: 13px;
+        border-radius: 6px;
+        background: root.enabled ? root.knob-color : root.disabled-color;
+        border-width: 1px;
+        border-color: root.enabled ? root.accent-color : root.disabled-color;
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+        mouse-cursor: !root.enabled ? default : (self.pressed ? grabbing : pointer);
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.set-value-from-position(self.mouse-x);
+            } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                root.committed(root.value);
+            } else if event.kind == PointerEventKind.cancel {
+                root.committed(root.value);
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.set-value-from-position(self.mouse-x);
+            }
+        }
+    }
+}
+
+component PercentStepper inherits Rectangle {
+    in-out property <int> value;
+    in property <int> minimum: 20;
+    in property <int> maximum: 100;
+    in property <int> step-size: 1;
+    in property <bool> enabled: true;
+    in property <color> text-color;
+    in property <color> muted-color;
+    in property <color> surface-color;
+    in property <color> hover-color;
+    in property <color> control-border-color;
+
+    callback edited(int);
+
+    width: 150px;
+    height: 34px;
+    border-radius: 4px;
+    background: root.surface-color;
+    border-width: 1px;
+    border-color: root.control-border-color;
+
+    function apply-step(delta: int) {
+        if root.enabled {
+            root.value = clamp(root.value + delta, root.minimum, root.maximum);
+            root.edited(root.value);
+        }
+    }
+
+    Text {
+        x: 50px;
+        y: 10px;
+        width: 50px;
+        height: 14px;
+        text: root.value + "";
+        color: root.enabled ? root.text-color : root.muted-color;
+        font-size: 10px;
+        font-weight: 500;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+
+    Rectangle {
+        x: 49px;
+        y: 0px;
+        width: 1px;
+        height: parent.height;
+        background: root.control-border-color;
+    }
+
+    Rectangle {
+        x: 100px;
+        y: 0px;
+        width: 1px;
+        height: parent.height;
+        background: root.control-border-color;
+    }
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 49px;
+        height: parent.height;
+        background: step_down_touch.has-hover ? root.hover-color : transparent;
+
+        Text {
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            text: "-";
+            color: root.enabled ? root.muted-color : root.control-border-color;
+            font-size: 13px;
+            font-weight: 500;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        step_down_touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => { root.apply-step(-root.step-size); }
+        }
+    }
+
+    Rectangle {
+        x: 101px;
+        y: 0px;
+        width: parent.width - 101px;
+        height: parent.height;
+        background: step_up_touch.has-hover ? root.hover-color : transparent;
+
+        Text {
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            text: "+";
+            color: root.enabled ? root.muted-color : root.control-border-color;
+            font-size: 13px;
+            font-weight: 500;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        step_up_touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => { root.apply-step(root.step-size); }
+        }
+    }
+}
+
+component SettingsSmallButton inherits Rectangle {
+    in property <string> text;
+    in property <color> text-color;
+    in property <color> muted-color;
+    in property <color> surface-color;
+    in property <color> hover-color;
+    in property <color> control-border-color;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 54px;
+    height: 23px;
+    border-radius: 4px;
+    background: action_touch.has-hover && root.enabled ? root.hover-color : root.surface-color;
+    border-width: 1px;
+    border-color: root.control-border-color;
+
+    Text {
+        x: 6px;
+        y: (parent.height - self.height) / 2;
+        width: parent.width - 11px;
+        height: 13px;
+        text: root.text;
+        color: root.enabled ? root.text-color : root.muted-color;
+        font-size: 10px;
+        font-weight: 500;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+
+    action_touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component SettingsWindow inherits Window {
+    in-out property <int> settings-tab-index: 0;
+    in-out property <bool> widgets-always-on-top;
+    in-out property <bool> widget-layout-locked;
+    in-out property <int> opacity-percent;
+    in-out property <int> widget-scale-percent;
+    in property <int> widget-scale-min-percent: 50;
+    in property <int> widget-scale-max-percent: 200;
+    in-out property <string> widget-name-input-text;
+    in-out property <bool> default-widgets-always-on-top;
+    in-out property <int> default-opacity-percent;
+    in-out property <int> default-widget-scale-percent;
+    in-out property <bool> red-up-enabled;
+    in-out property <int> provider-index;
+    in-out property <bool> market-binance-enabled;
+    in-out property <bool> market-okx-enabled;
+    in-out property <bool> market-hyperliquid-enabled;
+    in-out property <int> refresh-interval-seconds;
+    in-out property <bool> market-fallback-enabled;
+    in-out property <int> selected-widget-index;
+    in-out property <bool> auto-start-enabled;
+    in-out property <bool> show-main-window-on-startup;
+    in-out property <int> shortcut-index;
+    in-out property <int> theme-index;
+    in-out property <int> language-index;
+    in-out property <bool> tray-icon-enabled;
+    in-out property <bool> tray-hover-display-enabled;
+    in-out property <bool> network-proxy-enabled;
+    in-out property <string> network-proxy-url-input-text;
+    in-out property <bool> alert-enabled;
+    in-out property <int> alert-condition-index;
+    in-out property <string> alert-threshold-input-text;
+    in-out property <bool> widget-reorder-active: false;
+    in-out property <int> widget-reorder-index: -1;
+    in-out property <int> widget-action-menu-index: -1;
+    in-out property <bool> symbol-picker-open: false;
+    in-out property <int> symbol-picker-mode: 0;
+    in-out property <string> symbol-picker-search-text;
+    in-out property <int> symbol-picker-candidate-index: 0;
+    in-out property <int> alert-symbol-index: 0;
+
+    in property <[string]> widget-list-options;
+    in property <[string]> widget-list-detail-options;
+    in property <[bool]> widget-visible-options;
+    in property <[int]> widget-preview-kinds;
+    in property <[int]> widget-scale-options;
+    in property <[int]> widget-scale-min-options;
+    in property <[int]> widget-scale-max-options;
+    property <bool> has-widgets: root.widget-list-options.length != 0;
+    in property <[string]> provider-options;
+    in property <[string]> shortcut-options;
+    in property <[string]> theme-options;
+    in property <[string]> language-options;
+    in property <[string]> alert-condition-options;
+    in property <[string]> default-symbol-values;
+    in property <[string]> widget-symbol-values;
+    in property <[string]> widget-symbol-chip-values;
+    in property <[int]> widget-symbol-chip-x;
+    in property <[int]> widget-symbol-chip-y;
+    in property <[int]> widget-symbol-chip-width;
+    in property <int> widget-symbol-add-x: 170;
+    in property <int> widget-symbol-add-y: 315;
+    in property <int> widget-symbol-status-y: 353;
+    in property <int> widget-symbol-min: 1;
+    in property <int> widget-symbol-max: 5;
+    in property <int> default-symbol-min: 1;
+    in property <int> default-symbol-max: 5;
+    in property <[string]> symbol-picker-candidate-options;
+    in property <[string]> symbol-picker-candidate-values;
+    in property <[string]> alert-symbol-options;
+    in property <[PluginMarketItem]> plugin-market-items;
+    in property <string> settings-path-text;
+    in property <string> status-text;
+    in property <string> quote-board-used-text;
+    in property <string> mini-ticker-used-text;
+
+    in property <string> window-title-text;
+    in property <string> tab-widgets-text;
+    in property <string> tab-plugin-market-text;
+    in property <string> tab-market-data-text;
+    in property <string> tab-appearance-text;
+    in property <string> tab-system-text;
+    in property <string> always-on-top-text;
+    in property <string> default-always-on-top-text;
+    in property <string> opacity-text;
+    in property <string> default-opacity-text;
+    in property <string> widget-scale-text;
+    in property <string> red-up-color-text;
+    in property <string> market-provider-text;
+    in property <string> refresh-interval-text;
+    in property <string> seconds-unit-text;
+    in property <string> market-provider-help-text;
+    in property <string> refresh-interval-help-text;
+    in property <string> default-symbols-text;
+    in property <string> market-fallback-text;
+    in property <string> market-fallback-help-text;
+    in property <string> alert-settings-text;
+    in property <string> alert-enabled-text;
+    in property <string> alert-symbol-text;
+    in property <string> alert-condition-text;
+    in property <string> alert-threshold-text;
+    in property <string> alert-clear-text;
+    in property <string> symbols-text;
+    in property <string> symbols-help-text;
+    in property <string> widget-symbol-status-text;
+    in property <string> default-symbol-status-text;
+    in property <string> symbol-search-placeholder-text;
+    in property <string> symbol-picker-title-text;
+    in property <string> symbol-picker-status-text;
+    in property <string> symbol-picker-confirm-text;
+    in property <string> symbol-picker-cancel-text;
+    in property <string> auto-start-text;
+    in property <string> show-main-window-on-startup-text;
+    in property <string> shortcut-text;
+    in property <string> tray-icon-text;
+    in property <string> tray-hover-display-text;
+    in property <string> network-proxy-settings-text;
+    in property <string> network-proxy-enabled-text;
+    in property <string> network-proxy-url-text;
+    in property <string> network-proxy-http-example-text;
+    in property <string> network-proxy-socks-example-text;
+    in property <string> network-proxy-help-text;
+    in property <string> app-version-label-text;
+    in property <string> app-version-value-text;
+    in property <string> about-us-text;
+    in property <string> icon-cache-text;
+    in property <string> icon-cache-help-text;
+    in property <string> clear-icon-cache-text;
+    in property <string> install-update-text;
+    in property <string> theme-text;
+    in property <string> language-text;
+    in property <string> appearance-interface-text;
+    in property <string> appearance-widget-defaults-text;
+    in property <string> theme-help-text;
+    in property <string> language-help-text;
+    in property <string> red-up-color-help-text;
+    in property <string> default-opacity-help-text;
+    in property <string> default-always-on-top-help-text;
+    in property <string> system-startup-text;
+    in property <string> system-tray-text;
+    in property <string> system-app-info-text;
+    in property <string> auto-start-help-text;
+    in property <string> show-main-window-on-startup-help-text;
+    in property <string> shortcut-help-text;
+    in property <string> tray-icon-help-text;
+    in property <string> tray-hover-display-help-text;
+    in property <string> apply-text;
+    in property <string> widget-library-text;
+    in property <string> my-widgets-text;
+    in property <string> selected-widget-text;
+    in property <string> selected-widget-description-text;
+    in property <string> widget-name-text;
+    in property <string> lock-position-help-text;
+    in property <string> widget-scale-help-text;
+    in property <string> opacity-help-text;
+    in property <string> widget-topmost-text;
+    in property <string> widget-topmost-help-text;
+    in property <string> advanced-options-text;
+    in property <string> reset-widget-positions-text;
+    in property <string> hide-all-widgets-text;
+    in property <string> reset-text;
+    in property <string> delete-widget-text;
+    in property <string> widget-visible-text;
+    in property <string> widget-hidden-text;
+    in property <string> preview-text;
+    in property <string> preview-pairs-text;
+    in property <string> preview-updated-text;
+    in property <string> preview-source-ok-text;
+    in property <string> app-settings-text;
+    in property <string> add-widget-text;
+    in property <string> apply-widget-text;
+    in property <string> no-widgets-text;
+    in property <string> plugin-market-description-text;
+    in property <string> my-widgets-description-text;
+    in property <string> market-settings-description-text;
+    in property <string> appearance-settings-description-text;
+    in property <string> system-settings-description-text;
+    in property <string> quote-board-title-text;
+    in property <string> quote-board-description-text;
+    in property <string> mini-ticker-title-text;
+    in property <string> mini-ticker-description-text;
+    in property <string> market-settings-text;
+    in property <string> appearance-settings-text;
+    in property <string> system-settings-text;
+    in property <string> settings-path-label-text;
+    in property <string> close-text;
+    in property <color> settings-background: #fcfcfa;
+    in property <color> settings-heading-color: #15181b;
+    in property <color> settings-label-color: #22272c;
+    in property <color> settings-muted-color: #70747a;
+    in property <color> settings-status-color: #087f78;
+    in property <color> settings-header-background: #fbfbfa;
+    in property <color> settings-nav-background: #fbfbfa;
+    in property <color> settings-content-background: #fbfbfa;
+    in property <color> settings-surface-background: #ffffff;
+    in property <color> settings-selected-background: #f0f7f5;
+    in property <color> settings-border-color: #e7e7e8;
+    in property <color> settings-divider-color: #e8e8e8;
+    in property <color> settings-accent-color: #0a7f78;
+    in property <color> settings-accent-text-color: #f8fafc;
+    in property <color> settings-track-color: #3d4a44;
+    in property <color> settings-knob-color: #f8fafc;
+    in property <color> settings-window-edge-color: #a9a9aa;
+    in property <color> settings-sidebar-top-border-color: #eeeeed;
+    in property <color> settings-nav-selected-background: #ebf1ef;
+    in property <color> settings-nav-accent-color: #0a716e;
+    in property <bool> settings-dark-mode: false;
+    in property <color> settings-preview-card-background: #111827dd;
+    in property <color> settings-preview-header-background: #0f172acc;
+    in property <color> settings-preview-border-color: #475569;
+    in property <color> settings-preview-primary-color: #f8fafc;
+    in property <color> settings-preview-source-color: #93c5fd;
+    in property <color> settings-preview-updated-color: #94a3b8;
+    property <bool> can-add-widget-symbol: root.has-widgets && root.widget-symbol-values.length < root.widget-symbol-max;
+    property <bool> can-remove-widget-symbol: root.has-widgets && root.widget-symbol-values.length > root.widget-symbol-min;
+    property <bool> can-add-default-symbol: root.default-symbol-values.length < root.default-symbol-max;
+    property <bool> can-remove-default-symbol: root.default-symbol-values.length > root.default-symbol-min;
+    property <bool> can-confirm-symbol-picker: root.symbol-picker-open && root.symbol-picker-candidate-options.length > 0;
+
+    callback apply-settings(bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool, bool);
+    callback apply-network-settings(bool, string);
+    callback apply-alert-settings(bool, string, int, string);
+    callback clear-alert-settings();
+    callback refresh-symbol-picker-candidates();
+    callback open-widget-symbol-picker();
+    callback open-default-symbol-picker();
+    callback close-symbol-picker();
+    callback confirm-symbol-picker(int, int);
+    callback remove-default-symbol(int);
+    callback remove-widget-symbol(int, int);
+    callback select-widget(int);
+    callback add-widget(int);
+    callback apply-widget-settings(int, string, bool, bool, int, int);
+    callback apply-widget-scale(int, int);
+    callback toggle-widget-visibility(int);
+    callback reset-widget-positions();
+    callback hide-all-widgets();
+    callback widget-list-press(int);
+    callback widget-list-drag(length);
+    callback widget-list-release();
+    callback delete-widget(int);
+    callback minimize-settings();
+    callback close-settings();
+    callback drag-settings(length, length);
+    callback open-about-link();
+    callback clear-icon-cache();
+    callback install-update();
+
+    width: 1120px;
+    height: 720px;
+    title: root.window-title-text;
+    no-frame: true;
+    icon: @image-url("icon.png");
+    default-font-family: "Noto Sans SC";
+    background: root.settings-background;
+
+    init => {
+        Palette.color-scheme = root.settings-dark-mode ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    changed settings-dark-mode => {
+        Palette.color-scheme = root.settings-dark-mode ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    function apply-current-settings() {
+        root.apply-settings(
+            root.red-up-enabled,
+            root.market-binance-enabled,
+            root.market-okx-enabled,
+            root.market-hyperliquid-enabled,
+            root.auto-start-enabled,
+            root.show-main-window-on-startup,
+            root.shortcut-index,
+            root.theme-index,
+            root.language-index,
+            root.default-widgets-always-on-top,
+            root.default-opacity-percent,
+            root.default-widget-scale-percent,
+            root.refresh-interval-seconds,
+            root.market-fallback-enabled,
+            root.tray-icon-enabled,
+            root.tray-hover-display-enabled
+        );
+    }
+
+    function apply-current-widget-settings() {
+        if root.has-widgets && root.selected-widget-index >= 0 {
+            root.apply-widget-settings(
+                root.selected-widget-index,
+                root.widget-name-input-text,
+                root.widgets-always-on-top,
+                root.widget-layout-locked,
+                root.opacity-percent,
+                root.widget-scale-percent
+            );
+        }
+    }
+
+    function apply-current-network-settings() {
+        root.apply-network-settings(
+            root.network-proxy-enabled,
+            root.network-proxy-url-input-text
+        );
+    }
+
+    function apply-current-alert-settings() {
+        root.apply-alert-settings(
+            root.alert-enabled,
+            root.alert-symbol-options[root.alert-symbol-index],
+            root.alert-condition-index,
+            root.alert-threshold-input-text
+        );
+    }
+
+    panel := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: root.settings-background;
+
+        titlebar := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 53px;
+            background: root.settings-background;
+
+            TouchArea {
+                width: parent.width - 92px;
+                height: parent.height;
+                mouse-cursor: self.pressed ? grabbing : grab;
+                moved => {
+                    root.drag-settings(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+            }
+
+            Text {
+                x: 49px;
+                y: 16px;
+                width: 258px;
+                text: root.window-title-text;
+                color: root.settings-heading-color;
+                font-size: 16px;
+                font-weight: 400;
+                overflow: elide;
+            }
+
+            Image {
+                x: 19px;
+                y: 17px;
+                width: 19px;
+                height: 19px;
+                source: @image-url("icon.png");
+                image-fit: contain;
+            }
+
+            minimize_button := Rectangle {
+                x: parent.width - 95px;
+                y: 14px;
+                width: 32px;
+                height: 26px;
+                border-radius: 4px;
+                background: minimize_touch.has-hover ? root.settings-selected-background : transparent;
+                border-width: 1px;
+                border-color: minimize_touch.has-hover ? root.settings-border-color : transparent;
+
+                Text {
+                    y: -6px;
+                    width: parent.width;
+                    text: "-";
+                    color: root.settings-heading-color;
+                    font-size: 31px;
+                    font-weight: 400;
+                    horizontal-alignment: center;
+                }
+
+                minimize_touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    clicked => { root.minimize-settings(); }
+                }
+            }
+
+            close_button := Rectangle {
+                x: parent.width - 47px;
+                y: 14px;
+                width: 32px;
+                height: 26px;
+                border-radius: 4px;
+                background: close_touch.has-hover ? root.settings-selected-background : transparent;
+                border-width: 1px;
+                border-color: close_touch.has-hover ? root.settings-border-color : transparent;
+
+                Text {
+                    y: 0px;
+                    width: parent.width;
+                    text: "X";
+                    color: root.settings-heading-color;
+                    font-size: 19px;
+                    font-weight: 500;
+                    horizontal-alignment: center;
+                }
+
+                close_touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    clicked => { root.close-settings(); }
+                }
+            }
+
+        }
+
+        sidebar := Rectangle {
+            x: 0px;
+            y: 53px;
+            width: 179px;
+            height: parent.height - 53px;
+            background: root.settings-nav-background;
+            border-width: 0px;
+
+            Rectangle {
+                x: parent.width - 1px;
+                y: 0px;
+                width: 1px;
+                height: parent.height;
+                background: root.settings-border-color;
+            }
+
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 1px;
+                background: root.settings-sidebar-top-border-color;
+            }
+
+            SettingsNavItem {
+                x: 6px;
+                y: 19px;
+                text: root.tab-widgets-text;
+                icon-kind: 0;
+                selected: root.settings-tab-index == 0;
+                selected-background: root.settings-nav-selected-background;
+                hover-background: root.settings-surface-background;
+                accent-color: root.settings-nav-accent-color;
+                label-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+                clicked => { root.settings-tab-index = 0; }
+            }
+
+            SettingsNavItem {
+                x: 6px;
+                y: 60px;
+                text: root.tab-plugin-market-text;
+                icon-kind: 1;
+                selected: root.settings-tab-index == 1;
+                selected-background: root.settings-nav-selected-background;
+                hover-background: root.settings-surface-background;
+                accent-color: root.settings-nav-accent-color;
+                label-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+                clicked => { root.settings-tab-index = 1; }
+            }
+
+            SettingsNavItem {
+                x: 6px;
+                y: 102px;
+                text: root.tab-market-data-text;
+                icon-kind: 2;
+                selected: root.settings-tab-index == 2;
+                selected-background: root.settings-nav-selected-background;
+                hover-background: root.settings-surface-background;
+                accent-color: root.settings-nav-accent-color;
+                label-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+                clicked => { root.settings-tab-index = 2; }
+            }
+
+            SettingsNavItem {
+                x: 6px;
+                y: 143px;
+                text: root.tab-appearance-text;
+                icon-kind: 3;
+                selected: root.settings-tab-index == 3;
+                selected-background: root.settings-nav-selected-background;
+                hover-background: root.settings-surface-background;
+                accent-color: root.settings-nav-accent-color;
+                label-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+                clicked => { root.settings-tab-index = 3; }
+            }
+
+            SettingsNavItem {
+                x: 6px;
+                y: 185px;
+                text: root.tab-system-text;
+                icon-kind: 4;
+                selected: root.settings-tab-index == 4;
+                selected-background: root.settings-nav-selected-background;
+                hover-background: root.settings-surface-background;
+                accent-color: root.settings-nav-accent-color;
+                label-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+                clicked => { root.settings-tab-index = 4; }
+            }
+
+            Rectangle {
+                x: 6px;
+                y: parent.height - 59px;
+                width: parent.width - 17px;
+                height: 1px;
+                background: root.settings-divider-color;
+            }
+
+            Text {
+                x: 19px;
+                y: parent.height - 39px;
+                width: 53px;
+                height: 13px;
+                text: root.app-version-label-text + " " + root.app-version-value-text;
+                color: root.settings-muted-color;
+                font-size: 10px;
+                font-weight: 500;
+                overflow: elide;
+            }
+
+            Rectangle {
+                x: 106px;
+                y: parent.height - 34px;
+                width: 4px;
+                height: 4px;
+                border-radius: 2px;
+                background: root.settings-accent-color;
+            }
+
+            Text {
+                x: 119px;
+                y: parent.height - 39px;
+                width: 44px;
+                height: 13px;
+                text: root.status-text;
+                color: root.settings-muted-color;
+                font-size: 10px;
+                font-weight: 500;
+                overflow: elide;
+            }
+
+        }
+
+        widget_tab := Rectangle {
+            x: 179px;
+            y: 53px;
+            width: parent.width - 179px;
+            height: parent.height - 53px;
+            background: root.settings-content-background;
+            visible: root.settings-tab-index == 0;
+
+            PanelTitle {
+                x: 17px;
+                y: 16px;
+                width: 459px;
+                title: root.my-widgets-text;
+                subtitle: root.my-widgets-description-text;
+                title-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+                visible: false;
+            }
+
+            Rectangle {
+                x: 15px;
+                y: 0px;
+                width: 401px;
+                height: 600px;
+                border-radius: 4px;
+                background: root.settings-surface-background;
+                border-width: 1px;
+                border-color: root.settings-border-color;
+
+                Text {
+                    x: 17px;
+                    y: 21px;
+                    width: parent.width - 140px;
+                    text: root.my-widgets-text;
+                    color: root.settings-heading-color;
+                    font-size: 16px;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+
+                SettingsSmallButton {
+                    x: parent.width - 178px;
+                    y: 17px;
+                    width: 77px;
+                    height: 30px;
+                    text: root.reset-widget-positions-text;
+                    text-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                    surface-color: root.settings-content-background;
+                    hover-color: root.settings-selected-background;
+                    control-border-color: root.settings-border-color;
+                    enabled: root.has-widgets;
+                    clicked => { root.reset-widget-positions(); }
+                }
+
+                SettingsSmallButton {
+                    x: parent.width - 93px;
+                    y: 17px;
+                    width: 77px;
+                    height: 30px;
+                    text: root.hide-all-widgets-text;
+                    text-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                    surface-color: root.settings-content-background;
+                    hover-color: root.settings-selected-background;
+                    control-border-color: root.settings-border-color;
+                    enabled: root.has-widgets;
+                    clicked => { root.hide-all-widgets(); }
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 64px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                ListView {
+                    x: 0px;
+                    y: 64px;
+                    width: parent.width;
+                    height: parent.height - 46px;
+
+                    for widget_label[index] in root.widget-list-options : Rectangle {
+                        width: 401px;
+                        height: root.widget-action-menu-index == index ? 95px : 66px;
+                        border-radius: 4px;
+                        background: root.selected-widget-index == index ? root.settings-selected-background : list_row_touch.has-hover ? root.settings-content-background : transparent;
+
+                        Rectangle {
+                            x: 47px;
+                            y: 24px;
+                            width: 34px;
+                            height: 19px;
+                            border-radius: 9px;
+                            background: root.widget-visible-options[index] ? root.settings-accent-color : root.settings-track-color;
+
+                            Rectangle {
+                                x: root.widget-visible-options[index] ? 17px : 2px;
+                                y: 2px;
+                                width: 13px;
+                                height: 13px;
+                                border-radius: 6px;
+                                background: root.settings-knob-color;
+                            }
+
+                            TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.widget-action-menu-index = -1;
+                                    root.toggle-widget-visibility(index);
+                                }
+                            }
+                        }
+
+                        Text {
+                            x: 97px;
+                            y: 19px;
+                            width: 165px;
+                            height: 13px;
+                            text: widget_label;
+                            color: root.widget-visible-options[index] ? root.settings-label-color : root.settings-muted-color;
+                            font-size: 11px;
+                            font-weight: 500;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: 97px;
+                            y: 40px;
+                            width: 193px;
+                            height: 11px;
+                            text: root.widget-list-detail-options[index];
+                            color: root.settings-muted-color;
+                            font-size: 9px;
+                            font-weight: 500;
+                            overflow: elide;
+                        }
+
+                        Rectangle {
+                            x: 290px;
+                            y: 17px;
+                            width: 47px;
+                            height: 21px;
+                            border-radius: 4px;
+                            background: root.widget-visible-options[index] ? root.settings-selected-background : root.settings-content-background;
+                            border-width: 1px;
+                            border-color: root.settings-border-color;
+
+                            Text {
+                                x: 4px;
+                                y: 5px;
+                                width: parent.width - 9px;
+                                height: 10px;
+                                text: root.widget-visible-options[index] ? root.widget-visible-text : root.widget-hidden-text;
+                                color: root.widget-visible-options[index] ? root.settings-status-color : root.settings-muted-color;
+                                font-size: 9px;
+                                font-weight: 500;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        more_widget_button := Rectangle {
+                            x: 361px;
+                            y: 19px;
+                            width: 27px;
+                            height: 27px;
+                            border-radius: 4px;
+                            background: more_widget_touch.has-hover || root.widget-action-menu-index == index ? root.settings-content-background : root.settings-surface-background;
+                            border-width: 1px;
+                            border-color: root.settings-border-color;
+
+                            Rectangle { x: 12px; y: 6px; width: 3px; height: 3px; border-radius: 1px; background: root.settings-label-color; }
+                            Rectangle { x: 12px; y: 12px; width: 3px; height: 3px; border-radius: 1px; background: root.settings-label-color; }
+                            Rectangle { x: 12px; y: 18px; width: 3px; height: 3px; border-radius: 1px; background: root.settings-label-color; }
+
+                            more_widget_touch := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.selected-widget-index = index;
+                                    root.select-widget(index);
+                                    if root.widget-action-menu-index == index {
+                                        root.widget-action-menu-index = -1;
+                                    } else {
+                                        root.widget-action-menu-index = index;
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            x: 269px;
+                            y: 50px;
+                            width: 97px;
+                            height: 30px;
+                            border-radius: 4px;
+                            background: root.settings-surface-background;
+                            border-width: 1px;
+                            border-color: root.settings-border-color;
+                            visible: root.widget-action-menu-index == index;
+
+                            Rectangle {
+                                x: 4px;
+                                y: 4px;
+                                width: parent.width - 9px;
+                                height: 21px;
+                                border-radius: 4px;
+                                background: remove_widget_menu_touch.has-hover ? #ef444422 : transparent;
+
+                                Text {
+                                    x: 9px;
+                                    y: 5px;
+                                    width: parent.width - 17px;
+                                    text: root.delete-widget-text;
+                                    color: #ef4444;
+                                    font-size: 9px;
+                                    font-weight: 800;
+                                    overflow: elide;
+                                }
+
+                                remove_widget_menu_touch := TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.widget-action-menu-index = -1;
+                                        root.delete-widget(index);
+                                    }
+                                }
+                            }
+                        }
+
+                        list_row_touch := TouchArea {
+                            x: 90px;
+                            y: 0px;
+                            width: 193px;
+                            height: 60px;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.widget-action-menu-index = -1;
+                                root.selected-widget-index = index;
+                                root.select-widget(index);
+                            }
+                        }
+
+                        Rectangle {
+                            x: 0px;
+                            y: parent.height - 1px;
+                            width: parent.width;
+                            height: 1px;
+                            background: root.settings-divider-color;
+                        }
+                    }
+                }
+
+                Text {
+                    x: 17px;
+                    y: 222px;
+                    width: parent.width - 34px;
+                    height: 17px;
+                    text: root.no-widgets-text;
+                    color: root.settings-muted-color;
+                    font-size: 10px;
+                    font-weight: 500;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    visible: !root.has-widgets;
+                }
+            }
+
+            Rectangle {
+                x: 429px;
+                y: 0px;
+                width: 503px;
+                height: 600px;
+                border-radius: 4px;
+                background: root.settings-surface-background;
+                border-width: 1px;
+                border-color: root.settings-border-color;
+                visible: root.has-widgets;
+
+                Text {
+                    x: 17px;
+                    y: 21px;
+                    width: parent.width - 34px;
+                    height: 21px;
+                    text: root.selected-widget-text + " " + root.widget-name-input-text;
+                    color: root.settings-heading-color;
+                    font-size: 16px;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+
+                Text {
+                    x: 17px;
+                    y: 47px;
+                    width: parent.width - 34px;
+                    height: 14px;
+                    text: root.selected-widget-description-text;
+                    color: root.settings-muted-color;
+                    font-size: 10px;
+                    overflow: elide;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 133px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 205px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 95px;
+                    width: 95px;
+                    label: root.widget-name-text;
+                    help: "";
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                LineEdit {
+                    x: 143px;
+                    y: 80px;
+                    width: parent.width - 161px;
+                    height: 39px;
+                    text <=> root.widget-name-input-text;
+                    edited(_) => { root.apply-current-widget-settings(); }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 155px;
+                    width: 186px;
+                    label: root.always-on-top-text;
+                    help: root.lock-position-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SettingSwitch {
+                    x: parent.width - 54px;
+                    y: 161px;
+                    checked <=> root.widget-layout-locked;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => { root.apply-current-widget-settings(); }
+                }
+
+                TouchArea {
+                    x: 17px;
+                    y: 139px;
+                    width: parent.width - 89px;
+                    height: 59px;
+                    clicked => {
+                        root.widget-layout-locked = !root.widget-layout-locked;
+                        root.apply-current-widget-settings();
+                    }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 215px;
+                    width: 186px;
+                    label: root.widget-topmost-text;
+                    help: root.widget-topmost-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SettingSwitch {
+                    x: parent.width - 54px;
+                    y: 222px;
+                    checked <=> root.widgets-always-on-top;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => { root.apply-current-widget-settings(); }
+                }
+
+                TouchArea {
+                    x: 17px;
+                    y: 206px;
+                    width: parent.width - 89px;
+                    height: 46px;
+                    clicked => {
+                        root.widgets-always-on-top = !root.widgets-always-on-top;
+                        root.apply-current-widget-settings();
+                    }
+                }
+
+                Text {
+                    x: 17px;
+                    y: 285px;
+                    width: 50px;
+                    height: 14px;
+                    text: root.symbols-text;
+                    color: root.settings-heading-color;
+                    font-size: 11px;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+
+                Text {
+                    x: 66px;
+                    y: 288px;
+                    width: parent.width - 83px;
+                    height: 11px;
+                    text: root.widget-symbol-status-text;
+                    color: root.settings-muted-color;
+                    font-size: 9px;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 265px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                for symbol[index] in root.widget-symbol-chip-values : Rectangle {
+                    x: root.widget-symbol-chip-x[index] * 1px;
+                    y: root.widget-symbol-chip-y[index] * 1px;
+                    width: root.widget-symbol-chip-width[index] * 1px;
+                    height: 30px;
+                    border-radius: 15px;
+                    background: root.settings-selected-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    Text {
+                        x: 11px;
+                        y: 9px;
+                        width: parent.width - 33px;
+                        text: symbol;
+                        color: root.settings-heading-color;
+                        font-size: 10px;
+                        font-weight: 500;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: parent.width - 20px;
+                        y: 7px;
+                        width: 11px;
+                        text: "x";
+                        color: root.can-remove-widget-symbol ? root.settings-muted-color : root.settings-divider-color;
+                        font-size: 11px;
+                        font-weight: 500;
+                        horizontal-alignment: center;
+                    }
+
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: root.can-remove-widget-symbol ? pointer : default;
+                        clicked => {
+                            if root.can-remove-widget-symbol {
+                                root.remove-widget-symbol(root.selected-widget-index, index);
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    x: 17px;
+                    y: root.widget-symbol-status-y * 1px;
+                    width: parent.width - 34px;
+                    height: 14px;
+                    text: root.symbols-help-text;
+                    color: root.settings-muted-color;
+                    font-size: 10px;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+
+                Rectangle {
+                    x: root.widget-symbol-add-x * 1px;
+                    y: root.widget-symbol-add-y * 1px;
+                    width: 69px;
+                    height: 30px;
+                    border-radius: 4px;
+                    background: add_widget_symbol_touch.has-hover ? root.settings-selected-background : transparent;
+                    border-width: 1px;
+                    border-color: root.can-add-widget-symbol ? root.settings-accent-color : root.settings-divider-color;
+                    visible: root.has-widgets && root.can-add-widget-symbol;
+
+                    Text {
+                        x: 0px;
+                        y: 9px;
+                        width: parent.width;
+                        text: "+ " + root.add-widget-text;
+                        color: root.can-add-widget-symbol ? root.settings-accent-color : root.settings-divider-color;
+                        font-size: 10px;
+                        font-weight: 500;
+                        horizontal-alignment: center;
+                    }
+
+                    add_widget_symbol_touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: root.can-add-widget-symbol ? pointer : default;
+                        clicked => {
+                            if root.can-add-widget-symbol {
+                                root.open-widget-symbol-picker();
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 387px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                Text {
+                    x: 17px;
+                    y: 407px;
+                    width: parent.width - 34px;
+                    height: 14px;
+                    text: root.app-settings-text;
+                    color: root.settings-heading-color;
+                    font-size: 11px;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 449px;
+                    width: 129px;
+                    label: root.widget-scale-text;
+                    help: root.widget-scale-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                PercentStepper {
+                    x: 183px;
+                    y: 430px;
+                    width: 150px;
+                    height: 34px;
+                    enabled: root.has-widgets;
+                    minimum: root.widget-scale-min-percent;
+                    maximum: root.widget-scale-max-percent;
+                    step-size: 5;
+                    value <=> root.widget-scale-percent;
+                    text-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                    surface-color: root.settings-content-background;
+                    hover-color: root.settings-selected-background;
+                    control-border-color: root.settings-border-color;
+                    edited(value) => {
+                        if root.has-widgets && root.selected-widget-index >= 0 {
+                            root.apply-widget-scale(root.selected-widget-index, value);
+                        }
+                    }
+                }
+
+                Text {
+                    x: 343px;
+                    y: 441px;
+                    width: 17px;
+                    text: "%";
+                    color: root.settings-muted-color;
+                    font-size: 10px;
+                    font-weight: 500;
+                }
+
+                SettingsSmallButton {
+                    x: parent.width - 93px;
+                    y: 430px;
+                    width: 64px;
+                    height: 34px;
+                    text: root.reset-text;
+                    text-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                    surface-color: root.settings-content-background;
+                    hover-color: root.settings-selected-background;
+                    control-border-color: root.settings-border-color;
+                    enabled: root.has-widgets;
+                    clicked => {
+                        root.widget-scale-percent = 100;
+                        if root.has-widgets && root.selected-widget-index >= 0 {
+                            root.apply-widget-scale(root.selected-widget-index, 100);
+                        }
+                    }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 502px;
+                    width: 115px;
+                    label: root.opacity-text;
+                    help: root.opacity-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                OpacitySlider {
+                    x: 193px;
+                    y: 497px;
+                    width: 179px;
+                    height: 20px;
+                    value <=> root.opacity-percent;
+                    enabled: root.has-widgets;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    disabled-color: root.settings-divider-color;
+                    changed(value) => {
+                        root.opacity-percent = value;
+                    }
+                    committed(value) => {
+                        root.opacity-percent = value;
+                        root.apply-current-widget-settings();
+                    }
+                }
+
+                Rectangle {
+                    x: parent.width - 103px;
+                    y: 485px;
+                    width: 50px;
+                    height: 34px;
+                    border-radius: 4px;
+                    background: root.settings-content-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    Text {
+                        x: 6px;
+                        y: 10px;
+                        width: parent.width - 11px;
+                        text: root.opacity-percent + "";
+                        color: root.settings-label-color;
+                        font-size: 10px;
+                        font-weight: 500;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                Text {
+                    x: parent.width - 42px;
+                    y: 496px;
+                    width: 9px;
+                    height: 13px;
+                    text: "%";
+                    color: root.settings-muted-color;
+                    font-size: 10px;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 542px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                Text {
+                    x: 17px;
+                    y: 564px;
+                    width: parent.width - 52px;
+                    height: 13px;
+                    text: root.advanced-options-text;
+                    color: root.settings-heading-color;
+                    font-size: 11px;
+                    font-weight: 500;
+                    overflow: elide;
+                }
+
+                Text {
+                    x: parent.width - 34px;
+                    y: 560px;
+                    width: 17px;
+                    height: 17px;
+                    text: ">";
+                    color: root.settings-muted-color;
+                    font-size: 14px;
+                    font-weight: 500;
+                    horizontal-alignment: center;
+                }
+
+            }
+
+            Rectangle {
+                x: 315px;
+                y: 16px;
+                width: 344px;
+                height: 433px;
+                border-radius: 4px;
+                background: root.settings-surface-background;
+                border-width: 1px;
+                border-color: root.settings-border-color;
+                visible: !root.has-widgets;
+
+                Text {
+                    x: 17px;
+                    y: 179px;
+                    width: parent.width - 34px;
+                    height: 17px;
+                    text: root.no-widgets-text;
+                    color: root.settings-muted-color;
+                    font-size: 10px;
+                    font-weight: 500;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                }
+            }
+        }
+
+
+        plugin_market_tab := Rectangle {
+            x: 179px;
+            y: 53px;
+            width: parent.width - 179px;
+            height: parent.height - 53px;
+            background: root.settings-content-background;
+            visible: root.settings-tab-index == 1;
+
+            PanelTitle {
+                x: 23px;
+                y: 16px;
+                width: 459px;
+                title: root.tab-plugin-market-text;
+                subtitle: root.plugin-market-description-text;
+                title-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+            }
+
+            ListView {
+                x: 23px;
+                y: 66px;
+                width: 642px;
+                height: parent.height - 86px;
+
+                for plugin[index] in root.plugin-market-items : Rectangle {
+                    width: 642px;
+                    height: 106px;
+                    border-radius: 6px;
+                    background: root.settings-surface-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    Rectangle {
+                        x: 16px;
+                        y: 17px;
+                        width: 123px;
+                        height: 72px;
+                        border-radius: 6px;
+                        background: root.settings-preview-card-background;
+                        border-width: 1px;
+                        border-color: root.settings-preview-border-color;
+                        visible: plugin.preview_kind == 0;
+
+                        Rectangle {
+                            x: 1px;
+                            y: 1px;
+                            width: parent.width - 1px;
+                            height: 16px;
+                            border-radius: 5px;
+                            background: root.settings-preview-header-background;
+                        }
+
+                        Text {
+                            x: 9px;
+                            y: 6px;
+                            text: plugin.builtin ? "BTC" : "SLINT";
+                            color: root.settings-preview-primary-color;
+                            font-size: 9px;
+                            font-weight: 800;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: 9px;
+                            y: 23px;
+                            text: plugin.symbol_limit == 1 ? "2620" : "106800";
+                            color: root.settings-preview-primary-color;
+                            font-size: 16px;
+                            font-weight: 900;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: 9px;
+                            y: 44px;
+                            text: plugin.symbol_limit == 1 ? "-1.36%" : "+0.03%";
+                            color: plugin.symbol_limit == 1 ? #f87171 : #22c55e;
+                            font-size: 10px;
+                            font-weight: 800;
+                        }
+
+                        Text {
+                            x: 9px;
+                            y: 57px;
+                            width: parent.width - 17px;
+                            text: plugin.status;
+                            visible: plugin.status != "";
+                            color: plugin.available ? root.settings-preview-source-color : root.settings-muted-color;
+                            font-size: 7px;
+                            overflow: elide;
+                        }
+                    }
+
+                    Rectangle {
+                        x: 16px;
+                        y: 42px;
+                        width: 123px;
+                        height: 23px;
+                        border-radius: 7px;
+                        background: #15212cf2;
+                        border-width: 1px;
+                        border-color: #62e5f0c8;
+                        clip: true;
+                        visible: plugin.preview_kind == 1;
+
+                        Rectangle { width: parent.width; height: parent.height; border-radius: 7px; background: @linear-gradient(90deg, #ffffff11 0%, #ffffff07 36%, #ffffff02 58%, #00000022 100%); }
+                        Rectangle { x: parent.width * 0.52; y: 1px; width: parent.width * 0.48 - 4px; height: parent.height - 3px; background: @linear-gradient(90deg, #00000000 0%, #00000016 70%, #0000002d 100%); }
+                        Rectangle { y: parent.height - 6px; width: parent.width; height: 6px; background: @linear-gradient(180deg, #00000000 0%, #0000003c 100%); }
+
+                        Text {
+                            x: 6px;
+                            y: 6px;
+                            width: 30px;
+                            text: "BTC/USDT";
+                            color: root.settings-preview-primary-color;
+                            font-size: 5px;
+                            font-weight: 800;
+                            overflow: elide;
+                        }
+
+                        Rectangle { x: 32px; y: 9px; width: 3px; height: 3px; border-radius: 1px; background: #45d980; }
+                        Text { x: 6px; y: 15px; width: 21px; text: "Binance"; color: #8f9aa8; font-size: 4px; overflow: elide; }
+                        Text { x: 30px; y: 15px; width: 16px; text: "3s"; color: #8f9aa8; font-size: 4px; overflow: elide; }
+
+                        Text {
+                            x: 40px;
+                            y: 4px;
+                            width: 44px;
+                            text: "106800";
+                            color: root.settings-preview-primary-color;
+                            font-size: 10px;
+                            font-weight: 900;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: 81px;
+                            y: 8px;
+                            width: 21px;
+                            text: "+0.84%";
+                            color: #45d980;
+                            font-size: 5px;
+                            font-weight: 900;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                        }
+
+                        Path {
+                            x: 100px;
+                            y: 6px;
+                            width: 19px;
+                            height: 11px;
+                            viewbox-width: 52;
+                            viewbox-height: 32;
+                            commands: "M 0 32 L 0 28 L 5 23 L 10 25 L 14 21 L 19 18 L 23 20 L 28 14 L 32 17 L 37 11 L 41 16 L 46 8 L 50 0 L 52 4";
+                            fill: @linear-gradient(180deg, #22c55e46 0%, #16a34a00 100%);
+                            stroke: #45d980;
+                            stroke-width: 2px;
+                            stroke-line-cap: round;
+                            stroke-line-join: round;
+                        }
+                    }
+
+                    Rectangle {
+                        x: 16px;
+                        y: 17px;
+                        width: 123px;
+                        height: 72px;
+                        border-radius: 6px;
+                        background: root.settings-preview-card-background;
+                        border-width: 1px;
+                        border-color: root.settings-preview-border-color;
+                        visible: plugin.preview_kind == 2;
+
+                        Rectangle {
+                            x: 1px;
+                            y: 1px;
+                            width: parent.width - 1px;
+                            height: 14px;
+                            border-radius: 5px;
+                            background: root.settings-preview-header-background;
+                        }
+
+                        Text {
+                            x: 7px;
+                            y: 4px;
+                            width: 32px;
+                            text: root.preview-pairs-text;
+                            color: root.settings-preview-primary-color;
+                            font-size: 7px;
+                            font-weight: 800;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: 62px;
+                            y: 5px;
+                            width: 52px;
+                            text: "Binance";
+                            color: root.settings-preview-source-color;
+                            font-size: 6px;
+                            horizontal-alignment: right;
+                            overflow: elide;
+                        }
+
+                        Rectangle { x: 7px; y: 32px; width: 109px; height: 1px; background: #ffffff12; }
+                        Rectangle { x: 7px; y: 49px; width: 109px; height: 1px; background: #ffffff12; }
+
+                        Text { x: 7px; y: 21px; width: 34px; text: "BTC"; color: root.settings-preview-primary-color; font-size: 6px; font-weight: 800; overflow: elide; }
+                        Text { x: 47px; y: 20px; width: 36px; text: "106800"; color: root.settings-preview-primary-color; font-size: 7px; font-weight: 800; horizontal-alignment: right; overflow: elide; }
+                        Text { x: 88px; y: 21px; width: 27px; text: "+0.03%"; color: #22c55e; font-size: 6px; font-weight: 800; horizontal-alignment: right; overflow: elide; }
+
+                        Text { x: 7px; y: 37px; width: 34px; text: "ETH"; color: root.settings-preview-primary-color; font-size: 6px; font-weight: 800; overflow: elide; }
+                        Text { x: 47px; y: 37px; width: 36px; text: "3,583"; color: root.settings-preview-primary-color; font-size: 7px; font-weight: 800; horizontal-alignment: right; overflow: elide; }
+                        Text { x: 88px; y: 37px; width: 27px; text: "+1.85%"; color: #22c55e; font-size: 6px; font-weight: 800; horizontal-alignment: right; overflow: elide; }
+
+                        Text { x: 7px; y: 54px; width: 34px; text: "XRP"; color: root.settings-preview-primary-color; font-size: 6px; font-weight: 800; overflow: elide; }
+                        Text { x: 47px; y: 53px; width: 36px; text: "1.06"; color: root.settings-preview-primary-color; font-size: 7px; font-weight: 800; horizontal-alignment: right; overflow: elide; }
+                        Text { x: 88px; y: 54px; width: 27px; text: "-2.93%"; color: #f87171; font-size: 6px; font-weight: 800; horizontal-alignment: right; overflow: elide; }
+                    }
+
+                    Rectangle {
+                        x: 16px;
+                        y: 17px;
+                        width: 123px;
+                        height: 72px;
+                        border-radius: 6px;
+                        background: #070d14f2;
+                        border-width: 1px;
+                        border-color: #4ddde6cc;
+                        clip: true;
+                        visible: plugin.preview_kind == 3;
+
+                        Rectangle { width: parent.width; height: parent.height; border-radius: 6px; background: #ffffff07; }
+
+                        Text {
+                            x: 7px;
+                            y: 6px;
+                            width: 44px;
+                            text: "BTC/USDT";
+                            color: root.settings-preview-primary-color;
+                            font-size: 6px;
+                            font-weight: 800;
+                            overflow: elide;
+                        }
+
+                        Rectangle {
+                            x: 60px;
+                            y: 4px;
+                            width: 34px;
+                            height: 10px;
+                            border-radius: 4px;
+                            background: #064e3b48;
+                            border-width: 1px;
+                            border-color: #10b98199;
+                        }
+
+                        Rectangle { x: 64px; y: 7px; width: 3px; height: 3px; border-radius: 1px; background: #50df99; }
+
+                        Text {
+                            x: 70px;
+                            y: 6px;
+                            width: 10px;
+                            text: "OK";
+                            color: #50df99;
+                            font-size: 4px;
+                            font-weight: 800;
+                            overflow: elide;
+                        }
+
+                        Text { x: 81px; y: 6px; width: 11px; text: "Bin"; color: root.settings-preview-source-color; font-size: 4px; overflow: elide; }
+                        Path { x: 103px; y: 5px; width: 7px; height: 7px; viewbox-width: 24; viewbox-height: 24; commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z"; fill: transparent; stroke: #a7b0bf; stroke-width: 1px; stroke-line-cap: round; stroke-line-join: round; }
+                        Path { x: 113px; y: 5px; width: 6px; height: 6px; viewbox-width: 24; viewbox-height: 24; commands: "M 5 5 L 19 19 M 19 5 L 5 19"; fill: transparent; stroke: #a7b0bf; stroke-width: 2px; stroke-line-cap: round; }
+                        Rectangle { x: 7px; y: 16px; width: parent.width - 14px; height: 1px; background: #ffffff18; }
+
+                        Text {
+                            x: 8px;
+                            y: 22px;
+                            width: 66px;
+                            text: "106800";
+                            color: root.settings-preview-primary-color;
+                            font-size: 14px;
+                            font-weight: 900;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: 80px;
+                            y: 34px;
+                            width: 30px;
+                            text: "+0.84% 24h";
+                            color: #50df99;
+                            font-size: 5px;
+                            font-weight: 800;
+                            horizontal-alignment: right;
+                            overflow: elide;
+                        }
+
+                        Path {
+                            x: 7px;
+                            y: 43px;
+                            width: 109px;
+                            height: 16px;
+                            viewbox-width: 152;
+                            viewbox-height: 26;
+                            commands: "M 0 26 L 0 17 L 8 9 L 14 6 L 22 13 L 32 15 L 42 11 L 51 14 L 62 10 L 73 12 L 85 8 L 96 11 L 107 7 L 118 9 L 130 6 L 142 8 L 152 3 L 152 26 Z";
+                            fill: #14b8a633;
+                            stroke-width: 0px;
+                        }
+
+                        Path {
+                            x: 7px;
+                            y: 43px;
+                            width: 109px;
+                            height: 16px;
+                            viewbox-width: 152;
+                            viewbox-height: 26;
+                            commands: "M 0 17 L 8 9 L 14 6 L 22 13 L 32 15 L 42 11 L 51 14 L 62 10 L 73 12 L 85 8 L 96 11 L 107 7 L 118 9 L 130 6 L 142 8 L 152 3";
+                            fill: transparent;
+                            stroke: #50df99;
+                            stroke-width: 1px;
+                            stroke-line-cap: round;
+                            stroke-line-join: round;
+                        }
+
+                        Rectangle { x: 7px; y: 62px; width: parent.width - 14px; height: 1px; background: #ffffff18; }
+                        Path { x: 8px; y: 64px; width: 6px; height: 6px; viewbox-width: 24; viewbox-height: 24; commands: "M 19 12 A 7 7 0 1 1 17 7 M 17 7 L 17 3 M 17 7 L 21 7"; fill: transparent; stroke: #55e6d0; stroke-width: 2px; stroke-line-cap: round; stroke-line-join: round; }
+                        Text { x: 17px; y: 64px; width: 39px; text: root.preview-updated-text; color: root.settings-preview-source-color; font-size: 4px; overflow: elide; }
+                        Text { x: 80px; y: 64px; width: 34px; text: root.preview-source-ok-text; color: root.settings-preview-updated-color; font-size: 4px; horizontal-alignment: right; overflow: elide; }
+                    }
+
+                    Rectangle {
+                        x: 42px;
+                        y: 11px;
+                        width: 80px;
+                        height: 80px;
+                        border-radius: 40px;
+                        background: transparent;
+                        clip: true;
+                        visible: plugin.preview_kind == 4;
+
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: @image-url("../plugins/com.cryptohud.orbit-pulse/ui/reference.png");
+                            image-fit: fill;
+                        }
+
+                        Rectangle { width: parent.width; height: parent.height; border-radius: 40px; background: transparent; border-width: 1px; border-color: #55e6d0cc; }
+                    }
+
+                    Rectangle {
+                        x: 42px;
+                        y: 11px;
+                        width: 80px;
+                        height: 80px;
+                        border-radius: 40px;
+                        background: transparent;
+                        clip: true;
+                        visible: plugin.preview_kind == 5;
+
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: @image-url("../plugins/com.cryptohud.market-compass/ui/reference.png");
+                            image-fit: fill;
+                        }
+
+                        Rectangle { width: parent.width; height: parent.height; border-radius: 40px; background: transparent; border-width: 1px; border-color: #55e6d0cc; }
+                    }
+
+                    Rectangle {
+                        x: 16px;
+                        y: 34px;
+                        width: 123px;
+                        height: 39px;
+                        border-radius: 6px;
+                        background: transparent;
+                        border-width: 1px;
+                        border-color: #67e8f9aa;
+                        clip: true;
+                        visible: plugin.preview_kind == 6;
+
+                        Rectangle { width: parent.width; height: parent.height; background: @linear-gradient(20deg, #0c0f16 0%, #1c242e 100%); }
+                        Rectangle { x: 0px; y: 9px; width: parent.width; height: 1px; background: #ffffff16; }
+                        Rectangle { x: 0px; y: 26px; width: parent.width; height: 1px; background: #ffffff16; }
+                        Rectangle { x: 0px; y: 0px; width: 25px; height: parent.height; background: #15a6c5; }
+                        Rectangle { x: 25px; y: 0px; width: 24px; height: parent.height; background: #2785c8; }
+                        Rectangle { x: 49px; y: 0px; width: 25px; height: parent.height; background: #f0741a; }
+                        Rectangle { x: 75px; y: 0px; width: 24px; height: parent.height; background: #d6c81c; }
+                        Rectangle { x: 99px; y: 0px; width: 24px; height: parent.height; background: #2fa05d; }
+
+                        Rectangle {
+                            width: parent.width;
+                            height: 16px;
+                            background: @linear-gradient(180deg, #ffffff66 0%, #ffffff22 46%, #ffffff00 100%);
+                        }
+
+                        Text { x: 5px; y: 6px; width: 20px; text: "BTC"; color: #ffffff; font-size: 5px; font-weight: 900; overflow: elide; }
+                        Text { x: 5px; y: 18px; width: 23px; text: "106k"; color: #ffffff; font-size: 6px; font-weight: 900; overflow: elide; }
+                        Text { x: 30px; y: 18px; width: 19px; text: "2.4k"; color: #ffffff; font-size: 6px; font-weight: 900; overflow: elide; }
+                        Text { x: 54px; y: 18px; width: 19px; text: "136"; color: #ffffff; font-size: 6px; font-weight: 900; overflow: elide; }
+                        Text { x: 79px; y: 18px; width: 19px; text: "642"; color: #111827; font-size: 6px; font-weight: 900; overflow: elide; }
+                        Text { x: 104px; y: 18px; width: 16px; text: "2.1"; color: #ffffff; font-size: 6px; font-weight: 900; overflow: elide; }
+                    }
+
+                    Text {
+                        x: 161px;
+                        y: 17px;
+                        width: 310px;
+                        text: plugin.title;
+                        color: plugin.available ? root.settings-heading-color : root.settings-muted-color;
+                        font-size: 13px;
+                        font-weight: 800;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 161px;
+                        y: 40px;
+                        width: 314px;
+                        text: plugin.description;
+                        color: root.settings-muted-color;
+                        font-size: 9px;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 161px;
+                        y: 67px;
+                        width: 158px;
+                        text: plugin.usage;
+                        color: root.settings-preview-source-color;
+                        font-size: 9px;
+                        font-weight: 700;
+                    }
+
+                    Text {
+                        x: 324px;
+                        y: 67px;
+                        width: 150px;
+                        text: plugin.status;
+                        visible: plugin.status != "";
+                        color: plugin.available ? root.settings-preview-source-color : #f87171;
+                        font-size: 9px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+
+                    Button {
+                        x: parent.width - 90px;
+                        y: 41px;
+                        width: 66px;
+                        height: 24px;
+                        text: root.add-widget-text;
+                        enabled: plugin.available;
+                        primary: true;
+                        clicked => {
+                            if plugin.available {
+                                root.add-widget(index);
+                                root.settings-tab-index = 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        market_tab := Rectangle {
+            x: 179px;
+            y: 53px;
+            width: parent.width - 179px;
+            height: parent.height - 53px;
+            background: root.settings-content-background;
+            visible: root.settings-tab-index == 2;
+
+            PanelTitle {
+                x: 17px;
+                y: 16px;
+                width: 459px;
+                title: root.market-settings-text;
+                subtitle: root.market-settings-description-text;
+                title-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+            }
+
+            Rectangle {
+                x: 17px;
+                y: 66px;
+                width: 516px;
+                height: 265px;
+                border-radius: 6px;
+                background: root.settings-surface-background;
+                border-width: 1px;
+                border-color: root.settings-border-color;
+
+                Rectangle {
+                    x: 0px;
+                    y: 52px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 103px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 205px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 11px;
+                    width: 158px;
+                    label: root.market-provider-text;
+                    help: root.market-provider-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SettingSwitch {
+                    x: 201px;
+                    y: 14px;
+                    checked <=> root.market-binance-enabled;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => {
+                        root.apply-current-settings();
+                        root.refresh-symbol-picker-candidates();
+                    }
+                }
+
+                Text {
+                    x: 235px;
+                    y: 19px;
+                    width: 57px;
+                    text: "Binance";
+                    color: root.settings-label-color;
+                    font-size: 9px;
+                    font-weight: 750;
+                    overflow: elide;
+                }
+
+                SettingSwitch {
+                    x: 304px;
+                    y: 14px;
+                    checked <=> root.market-okx-enabled;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => {
+                        root.apply-current-settings();
+                        root.refresh-symbol-picker-candidates();
+                    }
+                }
+
+                Text {
+                    x: 338px;
+                    y: 19px;
+                    width: 34px;
+                    text: "OKX";
+                    color: root.settings-label-color;
+                    font-size: 9px;
+                    font-weight: 750;
+                    overflow: elide;
+                }
+
+                SettingSwitch {
+                    x: 390px;
+                    y: 14px;
+                    checked <=> root.market-hyperliquid-enabled;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => {
+                        root.apply-current-settings();
+                        root.refresh-symbol-picker-candidates();
+                    }
+                }
+
+                Text {
+                    x: 424px;
+                    y: 19px;
+                    width: 80px;
+                    text: "Hyperliquid";
+                    color: root.settings-label-color;
+                    font-size: 9px;
+                    font-weight: 750;
+                    overflow: elide;
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 63px;
+                    width: 158px;
+                    label: root.refresh-interval-text;
+                    help: root.refresh-interval-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SpinBox {
+                    x: 201px;
+                    y: 64px;
+                    width: 63px;
+                    height: 26px;
+                    minimum: 2;
+                    maximum: 60;
+                    step-size: 1;
+                    value <=> root.refresh-interval-seconds;
+                    edited(_) => { root.apply-current-settings(); }
+                }
+
+                Text {
+                    x: 272px;
+                    y: 73px;
+                    width: 30px;
+                    text: root.seconds-unit-text;
+                    color: root.settings-muted-color;
+                    font-size: 9px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 118px;
+                    width: 158px;
+                    label: root.default-symbols-text;
+                    help: root.symbols-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                for symbol[index] in root.default-symbol-values : Rectangle {
+                    x: 201px + index * 52px;
+                    y: 116px;
+                    width: 50px;
+                    height: 19px;
+                    border-radius: 9px;
+                    background: root.settings-selected-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    Text {
+                        x: 6px;
+                        y: 4px;
+                        width: 36px;
+                        text: symbol;
+                        color: root.settings-heading-color;
+                        font-size: 8px;
+                        font-weight: 800;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 42px;
+                        y: 3px;
+                        width: 9px;
+                        text: "x";
+                        color: root.can-remove-default-symbol ? root.settings-muted-color : root.settings-divider-color;
+                        font-size: 9px;
+                        font-weight: 900;
+                        horizontal-alignment: center;
+                    }
+
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: root.can-remove-default-symbol ? pointer : default;
+                        clicked => {
+                            if root.can-remove-default-symbol {
+                                root.remove-default-symbol(index);
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: 201px + root.default-symbol-values.length * 52px + 3px;
+                    y: 116px;
+                    width: 19px;
+                    height: 19px;
+                    border-radius: 9px;
+                    background: add_default_symbol_touch.has-hover ? root.settings-selected-background : transparent;
+                    border-width: 1px;
+                    border-color: root.can-add-default-symbol ? root.settings-accent-color : root.settings-divider-color;
+
+                    Text {
+                        x: 0px;
+                        y: 1px;
+                        width: parent.width;
+                        text: "+";
+                        color: root.can-add-default-symbol ? root.settings-accent-color : root.settings-divider-color;
+                        font-size: 11px;
+                        font-weight: 850;
+                        horizontal-alignment: center;
+                    }
+
+                    add_default_symbol_touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: root.can-add-default-symbol ? pointer : default;
+                        clicked => {
+                            if root.can-add-default-symbol {
+                                root.open-default-symbol-picker();
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    x: 201px;
+                    y: 150px;
+                    width: 298px;
+                    height: 26px;
+                    text: root.default-symbol-status-text;
+                    color: root.settings-muted-color;
+                    font-size: 8px;
+                    wrap: word-wrap;
+                }
+
+            }
+        }
+
+        appearance_tab := Rectangle {
+            x: 179px;
+            y: 53px;
+            width: parent.width - 179px;
+            height: parent.height - 53px;
+            background: root.settings-content-background;
+            visible: root.settings-tab-index == 3;
+
+            PanelTitle {
+                x: 17px;
+                y: 16px;
+                width: 459px;
+                title: root.appearance-settings-text;
+                subtitle: root.appearance-settings-description-text;
+                title-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+            }
+
+            Rectangle {
+                x: 17px;
+                y: 66px;
+                width: appearance_tab.width - 34px;
+                height: 182px;
+                border-radius: 6px;
+                background: root.settings-surface-background;
+                border-width: 1px;
+                border-color: root.settings-border-color;
+
+                SettingSectionTitle {
+                    x: 17px;
+                    y: 13px;
+                    width: parent.width - 34px;
+                    title: root.appearance-interface-text;
+                    title-color: root.settings-heading-color;
+                    divider-color: root.settings-divider-color;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 93px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 138px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 54px;
+                    width: 301px;
+                    label: root.theme-text;
+                    help: root.theme-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                ComboBox {
+                    x: parent.width - 249px;
+                    y: 53px;
+                    width: 232px;
+                    model: root.theme-options;
+                    current-index <=> root.theme-index;
+                    selected(_) => { root.apply-current-settings(); }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 99px;
+                    width: 301px;
+                    label: root.language-text;
+                    help: root.language-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                ComboBox {
+                    x: parent.width - 249px;
+                    y: 97px;
+                    width: 232px;
+                    model: root.language-options;
+                    current-index <=> root.language-index;
+                    selected(_) => { root.apply-current-settings(); }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 143px;
+                    width: 301px;
+                    label: root.red-up-color-text;
+                    help: root.red-up-color-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SettingSwitch {
+                    x: parent.width - 54px;
+                    y: 142px;
+                    checked <=> root.red-up-enabled;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => { root.apply-current-settings(); }
+                }
+
+                TouchArea {
+                    x: 17px;
+                    y: 138px;
+                    width: 358px;
+                    height: 42px;
+                    clicked => {
+                        root.red-up-enabled = !root.red-up-enabled;
+                        root.apply-current-settings();
+                    }
+                }
+            }
+
+            Rectangle {
+                x: 17px;
+                y: 262px;
+                width: appearance_tab.width - 34px;
+                height: 138px;
+                border-radius: 6px;
+                background: root.settings-surface-background;
+                border-width: 1px;
+                border-color: root.settings-border-color;
+
+                SettingSectionTitle {
+                    x: 17px;
+                    y: 13px;
+                    width: parent.width - 34px;
+                    title: root.appearance-widget-defaults-text;
+                    title-color: root.settings-heading-color;
+                    divider-color: root.settings-divider-color;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 93px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 54px;
+                    width: 301px;
+                    label: root.default-opacity-text;
+                    help: root.default-opacity-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SpinBox {
+                    x: parent.width - 341px;
+                    y: 53px;
+                    width: 63px;
+                    height: 26px;
+                    minimum: 20;
+                    maximum: 100;
+                    step-size: 1;
+                    value <=> root.default-opacity-percent;
+                    edited(_) => { root.apply-current-settings(); }
+                }
+
+                Text {
+                    x: parent.width - 269px;
+                    y: 62px;
+                    text: "%";
+                    color: root.settings-muted-color;
+                    font-size: 10px;
+                    font-weight: 700;
+                }
+
+                OpacitySlider {
+                    x: parent.width - 235px;
+                    y: 57px;
+                    width: 218px;
+                    height: 20px;
+                    value <=> root.default-opacity-percent;
+                    enabled: true;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    disabled-color: root.settings-divider-color;
+                    changed(value) => {
+                        root.default-opacity-percent = value;
+                    }
+                    committed(value) => {
+                        root.default-opacity-percent = value;
+                        root.apply-current-settings();
+                    }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 99px;
+                    width: 301px;
+                    label: root.default-always-on-top-text;
+                    help: root.default-always-on-top-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SettingSwitch {
+                    x: parent.width - 54px;
+                    y: 97px;
+                    checked <=> root.default-widgets-always-on-top;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => { root.apply-current-settings(); }
+                }
+
+                TouchArea {
+                    x: 17px;
+                    y: 93px;
+                    width: 358px;
+                    height: 42px;
+                    clicked => {
+                        root.default-widgets-always-on-top = !root.default-widgets-always-on-top;
+                        root.apply-current-settings();
+                    }
+                }
+            }
+        }
+
+        system_tab := Rectangle {
+            x: 179px;
+            y: 53px;
+            width: parent.width - 179px;
+            height: parent.height - 53px;
+            background: root.settings-content-background;
+            visible: root.settings-tab-index == 4;
+
+            PanelTitle {
+                x: 17px;
+                y: 16px;
+                width: 459px;
+                title: root.system-settings-text;
+                subtitle: root.system-settings-description-text;
+                title-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+            }
+
+            ScrollView {
+                x: 17px;
+                y: 66px;
+                width: system_tab.width - 34px;
+                height: parent.height - 83px;
+                viewport-width: system_tab.width - 34px;
+                viewport-height: 787px;
+
+                Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: system_tab.width - 34px;
+                    height: 182px;
+                    border-radius: 6px;
+                    background: root.settings-surface-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    SettingSectionTitle {
+                        x: 17px;
+                        y: 13px;
+                        width: parent.width - 34px;
+                        title: root.system-startup-text;
+                        title-color: root.settings-heading-color;
+                        divider-color: root.settings-divider-color;
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 93px;
+                        width: parent.width;
+                        height: 1px;
+                        background: root.settings-divider-color;
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 138px;
+                        width: parent.width;
+                        height: 1px;
+                        background: root.settings-divider-color;
+                    }
+
+                    SettingLabel {
+                        x: 17px;
+                        y: 54px;
+                        width: 301px;
+                        label: root.auto-start-text;
+                        help: root.auto-start-help-text;
+                        label-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                    }
+
+                    SettingSwitch {
+                        x: parent.width - 54px;
+                        y: 56px;
+                        checked <=> root.auto-start-enabled;
+                        accent-color: root.settings-accent-color;
+                        track-color: root.settings-track-color;
+                        knob-color: root.settings-knob-color;
+                        toggled => { root.apply-current-settings(); }
+                    }
+
+                    TouchArea {
+                        x: 17px;
+                        y: 49px;
+                        width: 358px;
+                        height: 42px;
+                        clicked => {
+                            root.auto-start-enabled = !root.auto-start-enabled;
+                            root.apply-current-settings();
+                        }
+                    }
+
+                    SettingLabel {
+                        x: 17px;
+                        y: 99px;
+                        width: 301px;
+                        label: root.show-main-window-on-startup-text;
+                        help: root.show-main-window-on-startup-help-text;
+                        label-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                    }
+
+                    SettingSwitch {
+                        x: parent.width - 54px;
+                        y: 100px;
+                        checked <=> root.show-main-window-on-startup;
+                        accent-color: root.settings-accent-color;
+                        track-color: root.settings-track-color;
+                        knob-color: root.settings-knob-color;
+                        toggled => { root.apply-current-settings(); }
+                    }
+
+                    TouchArea {
+                        x: 17px;
+                        y: 93px;
+                        width: 358px;
+                        height: 42px;
+                        clicked => {
+                            root.show-main-window-on-startup = !root.show-main-window-on-startup;
+                            root.apply-current-settings();
+                        }
+                    }
+
+                    SettingLabel {
+                        x: 17px;
+                        y: 143px;
+                        width: 301px;
+                        label: root.shortcut-text;
+                        help: root.shortcut-help-text;
+                        label-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                    }
+
+                    ComboBox {
+                        x: parent.width - 201px;
+                        y: 142px;
+                        width: 183px;
+                        model: root.shortcut-options;
+                        current-index <=> root.shortcut-index;
+                        selected(_) => { root.apply-current-settings(); }
+                    }
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 196px;
+                    width: system_tab.width - 34px;
+                    height: 182px;
+                    border-radius: 6px;
+                    background: root.settings-surface-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    SettingSectionTitle {
+                        x: 17px;
+                        y: 13px;
+                        width: parent.width - 34px;
+                        title: root.network-proxy-settings-text;
+                        title-color: root.settings-heading-color;
+                        divider-color: root.settings-divider-color;
+                    }
+
+                    SettingSwitch {
+                        x: 17px;
+                        y: 54px;
+                        checked <=> root.network-proxy-enabled;
+                        accent-color: root.settings-accent-color;
+                        track-color: root.settings-track-color;
+                        knob-color: root.settings-knob-color;
+                        toggled => { root.apply-current-network-settings(); }
+                    }
+
+                    Text {
+                        x: 60px;
+                        y: 52px;
+                        width: parent.width - 77px;
+                        text: root.network-proxy-enabled-text;
+                        color: root.settings-label-color;
+                        font-size: 10px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 60px;
+                        y: 68px;
+                        width: parent.width - 77px;
+                        height: 21px;
+                        text: root.network-proxy-help-text;
+                        color: root.settings-muted-color;
+                        font-size: 8px;
+                        wrap: word-wrap;
+                    }
+
+                    TouchArea {
+                        x: 60px;
+                        y: 49px;
+                        width: parent.width - 77px;
+                        height: 42px;
+                        clicked => {
+                            root.network-proxy-enabled = !root.network-proxy-enabled;
+                            root.apply-current-network-settings();
+                        }
+                    }
+
+                    Text {
+                        x: 17px;
+                        y: 105px;
+                        width: parent.width - 34px;
+                        text: root.network-proxy-url-text;
+                        color: root.settings-label-color;
+                        font-size: 9px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+
+                    LineEdit {
+                        x: 17px;
+                        y: 120px;
+                        width: parent.width - 34px;
+                        height: 24px;
+                        text <=> root.network-proxy-url-input-text;
+                        edited(_) => { root.apply-current-network-settings(); }
+                    }
+
+                    Text {
+                        x: 17px;
+                        y: 156px;
+                        width: parent.width - 34px;
+                        text: root.network-proxy-http-example-text;
+                        color: root.settings-muted-color;
+                        font-size: 8px;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 17px;
+                        y: 171px;
+                        width: parent.width - 34px;
+                        text: root.network-proxy-socks-example-text;
+                        color: root.settings-muted-color;
+                        font-size: 8px;
+                        overflow: elide;
+                    }
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 393px;
+                    width: system_tab.width - 34px;
+                    height: 139px;
+                    border-radius: 6px;
+                    background: root.settings-surface-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    SettingSectionTitle {
+                        x: 17px;
+                        y: 13px;
+                        width: parent.width - 34px;
+                        title: root.system-tray-text;
+                        title-color: root.settings-heading-color;
+                        divider-color: root.settings-divider-color;
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 93px;
+                        width: parent.width;
+                        height: 1px;
+                        background: root.settings-divider-color;
+                    }
+
+                    SettingLabel {
+                        x: 17px;
+                        y: 54px;
+                        width: 301px;
+                        label: root.tray-icon-text;
+                        help: root.tray-icon-help-text;
+                        label-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                    }
+
+                    SettingSwitch {
+                        x: parent.width - 54px;
+                        y: 56px;
+                        checked <=> root.tray-icon-enabled;
+                        accent-color: root.settings-accent-color;
+                        track-color: root.settings-track-color;
+                        knob-color: root.settings-knob-color;
+                        toggled => { root.apply-current-settings(); }
+                    }
+
+                    TouchArea {
+                        x: 17px;
+                        y: 49px;
+                        width: 358px;
+                        height: 42px;
+                        clicked => {
+                            root.tray-icon-enabled = !root.tray-icon-enabled;
+                            root.apply-current-settings();
+                        }
+                    }
+
+                    SettingLabel {
+                        x: 17px;
+                        y: 99px;
+                        width: 301px;
+                        label: root.tray-hover-display-text;
+                        help: root.tray-hover-display-help-text;
+                        label-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                    }
+
+                    SettingSwitch {
+                        x: parent.width - 54px;
+                        y: 100px;
+                        checked <=> root.tray-hover-display-enabled;
+                        accent-color: root.settings-accent-color;
+                        track-color: root.settings-track-color;
+                        knob-color: root.settings-knob-color;
+                        toggled => { root.apply-current-settings(); }
+                    }
+
+                    TouchArea {
+                        x: 17px;
+                        y: 93px;
+                        width: 358px;
+                        height: 42px;
+                        clicked => {
+                            root.tray-hover-display-enabled = !root.tray-hover-display-enabled;
+                            root.apply-current-settings();
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 546px;
+                    width: system_tab.width - 34px;
+                    height: 226px;
+                    border-radius: 6px;
+                    background: root.settings-surface-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    SettingSectionTitle {
+                        x: 17px;
+                        y: 13px;
+                        width: parent.width - 34px;
+                        title: root.system-app-info-text;
+                        title-color: root.settings-heading-color;
+                        divider-color: root.settings-divider-color;
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 93px;
+                        width: parent.width;
+                        height: 1px;
+                        background: root.settings-divider-color;
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 138px;
+                        width: parent.width;
+                        height: 1px;
+                        background: root.settings-divider-color;
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 182px;
+                        width: parent.width;
+                        height: 1px;
+                        background: root.settings-divider-color;
+                    }
+
+                    Text {
+                        x: 17px;
+                        y: 57px;
+                        width: 301px;
+                        text: root.app-version-label-text;
+                        color: root.settings-label-color;
+                        font-size: 10px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: parent.width - 201px;
+                        y: 57px;
+                        width: 183px;
+                        text: root.app-version-value-text;
+                        color: root.settings-muted-color;
+                        font-size: 10px;
+                        font-weight: 700;
+                        horizontal-alignment: right;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 17px;
+                        y: 102px;
+                        width: 301px;
+                        text: root.about-us-text;
+                        color: root.settings-label-color;
+                        font-size: 10px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+
+                    about_link := Rectangle {
+                        x: parent.width - 201px;
+                        y: 96px;
+                        width: 183px;
+                        height: 26px;
+                        border-radius: 4px;
+                        background: about_link_touch.has-hover ? root.settings-selected-background : transparent;
+                        border-width: 1px;
+                        border-color: about_link_touch.has-hover ? root.settings-border-color : transparent;
+
+                        Text {
+                            x: 9px;
+                            y: 6px;
+                            width: parent.width - 17px;
+                            text: "crypto-widget/crypto-hud";
+                            color: root.settings-accent-color;
+                            font-size: 9px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        about_link_touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            mouse-cursor: pointer;
+                            clicked => { root.open-about-link(); }
+                        }
+                    }
+
+                    SettingLabel {
+                        x: 17px;
+                        y: 146px;
+                        width: 301px;
+                        label: root.icon-cache-text;
+                        help: root.icon-cache-help-text;
+                        label-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                    }
+
+                    Button {
+                        x: parent.width - 110px;
+                        y: 143px;
+                        width: 93px;
+                        height: 24px;
+                        text: root.clear-icon-cache-text;
+                        clicked => { root.clear-icon-cache(); }
+                    }
+
+                    Button {
+                        x: 17px;
+                        y: 191px;
+                        width: 87px;
+                        height: 24px;
+                        text: root.install-update-text;
+                        clicked => { root.install-update(); }
+                    }
+                }
+            }
+
+        }
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 1px;
+            background: root.settings-window-edge-color;
+        }
+
+        Rectangle {
+            x: 0px;
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: root.settings-window-edge-color;
+        }
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: 1px;
+            height: parent.height;
+            background: root.settings-window-edge-color;
+        }
+
+        Rectangle {
+            x: parent.width - 1px;
+            y: 0px;
+            width: 1px;
+            height: parent.height;
+            background: root.settings-window-edge-color;
+        }
+
+    }
+
+    Rectangle {
+        visible: root.symbol-picker-open;
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: #00000088;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => { root.close-symbol-picker(); }
+        }
+
+        Rectangle {
+            x: (root.width - 344px) / 2;
+            y: (root.height - 205px) / 2;
+            width: 344px;
+            height: 205px;
+            border-radius: 6px;
+            background: root.settings-surface-background;
+            border-width: 1px;
+            border-color: root.settings-border-color;
+
+            Text {
+                x: 17px;
+                y: 14px;
+                width: parent.width - 34px;
+                text: root.symbol-picker-title-text;
+                color: root.settings-heading-color;
+                font-size: 13px;
+                font-weight: 850;
+                overflow: elide;
+            }
+
+            Rectangle {
+                x: 0px;
+                y: 43px;
+                width: parent.width;
+                height: 1px;
+                background: root.settings-divider-color;
+            }
+
+            LineEdit {
+                x: 17px;
+                y: 60px;
+                width: parent.width - 34px;
+                height: 26px;
+                text <=> root.symbol-picker-search-text;
+                placeholder-text: root.symbol-search-placeholder-text;
+                edited(_) => { root.refresh-symbol-picker-candidates(); }
+            }
+
+            ComboBox {
+                x: 17px;
+                y: 97px;
+                width: parent.width - 34px;
+                model: root.symbol-picker-candidate-options;
+                current-index <=> root.symbol-picker-candidate-index;
+                enabled: root.symbol-picker-candidate-options.length > 0;
+            }
+
+            Text {
+                x: 17px;
+                y: 132px;
+                width: parent.width - 34px;
+                height: 24px;
+                text: root.symbol-picker-status-text;
+                color: root.settings-muted-color;
+                font-size: 9px;
+                wrap: word-wrap;
+            }
+
+            Button {
+                x: parent.width - 149px;
+                y: parent.height - 37px;
+                width: 60px;
+                height: 24px;
+                text: root.symbol-picker-cancel-text;
+                clicked => { root.close-symbol-picker(); }
+            }
+
+            Button {
+                x: parent.width - 77px;
+                y: parent.height - 37px;
+                width: 60px;
+                height: 24px;
+                text: root.symbol-picker-confirm-text;
+                enabled: root.can-confirm-symbol-picker;
+                clicked => {
+                    if root.can-confirm-symbol-picker {
+                        root.confirm-symbol-picker(root.symbol-picker-mode, root.symbol-picker-candidate-index);
+                    }
+                }
+            }
+        }
+    }
+}

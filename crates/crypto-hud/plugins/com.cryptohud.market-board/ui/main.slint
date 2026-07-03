@@ -1,0 +1,238 @@
+export struct QuoteRow {
+    symbol: string,
+    price: string,
+    change: string,
+    positive: bool,
+}
+
+export component MarketBoard inherits Window {
+    in property <string> widget-id;
+    in property <[QuoteRow]> quote-rows;
+    in property <[image]> quote-icons;
+    property <image> empty-quote-icon;
+    in property <string> pairs-heading-text;
+    in property <string> source-text;
+    in property <string> updated-text;
+    in property <string> empty-text;
+    in property <bool> pin-to-top;
+    in property <bool> layout-locked;
+    in property <int> widget-width: 300;
+    in property <int> widget-height: 250;
+    in property <bool> red-up-enabled;
+    in property <int> content-opacity;
+    in property <string> theme-name: "dark";
+    property <bool> light-theme: root.theme-name == "light";
+    property <color> card-background: root.light-theme ? #f8fafcec : #111827ee;
+    property <color> card-header-background: root.light-theme ? #e0f7f4dd : #0f172acc;
+    property <color> card-border-color: root.light-theme ? #0f8f8288 : #2dd4bf88;
+    property <color> card-primary-text-color: root.light-theme ? #0f172a : #f8fafc;
+    property <color> card-source-text-color: root.light-theme ? #047857 : #7dd3fc;
+    property <color> card-updated-text-color: root.light-theme ? #64748b : #94a3b8;
+    property <color> gain-color: root.light-theme ? #16a34a : #22c55e;
+    property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
+    in-out property <bool> card-left-drag-active: false;
+    property <float> content-scale: ((root.widget-width * 1px) / 300px) < ((root.widget-height * 1px) / 250px)
+        ? ((root.widget-width * 1px) / 300px)
+        : ((root.widget-height * 1px) / 250px);
+
+    callback drag-move(length, length);
+    callback toggle-layout-lock();
+    title: root.widget-id;
+    width: root.widget-width * 1px;
+    height: root.widget-height * 1px;
+    no-frame: true;
+    always-on-top: root.pin-to-top;
+    background: transparent;
+
+    card := Rectangle {
+        x: (root.widget-width * 1px - self.width * root.content-scale) / 2;
+        y: (root.widget-height * 1px - self.height * root.content-scale) / 2;
+        width: 300px;
+        height: 250px;
+        transform-origin: { x: 0px, y: 0px };
+        transform-scale-x: root.content-scale;
+        transform-scale-y: root.content-scale;
+        border-radius: 8px;
+        background: root.card-background;
+        border-width: 1px;
+        border-color: root.card-border-color;
+        opacity: root.content-opacity / 100;
+
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: parent.width - 2px;
+            height: 38px;
+            border-radius: 7px;
+            background: root.card-header-background;
+        }
+
+        Text {
+            x: 14px;
+            y: 11px;
+            width: 86px;
+            text: root.pairs-heading-text;
+            color: root.card-primary-text-color;
+            font-size: 13px;
+            font-weight: 800;
+            overflow: elide;
+        }
+
+        Rectangle { x: 128px; y: 17px; width: 3px; height: 3px; border-radius: 1.5px; background: root.card-updated-text-color; }
+        Rectangle { x: 136px; y: 17px; width: 3px; height: 3px; border-radius: 1.5px; background: root.card-updated-text-color; }
+        Rectangle { x: 144px; y: 17px; width: 3px; height: 3px; border-radius: 1.5px; background: root.card-updated-text-color; }
+
+        Text {
+            x: 154px;
+            y: 11px;
+            width: 126px;
+            text: root.source-text;
+            color: root.card-source-text-color;
+            font-size: 11px;
+            horizontal-alignment: right;
+            overflow: elide;
+        }
+
+        for quote[index] in root.quote-rows : Rectangle {
+            x: 12px;
+            y: 50px + index * 33px;
+            width: parent.width - 24px;
+            height: 31px;
+            visible: index < 5;
+
+            Rectangle {
+                y: 30px;
+                width: parent.width;
+                height: 1px;
+                background: root.light-theme ? #0f172a14 : #ffffff10;
+                visible: index < 4;
+            }
+
+            Text {
+                x: 26px;
+                y: 8px;
+                width: 58px;
+                text: quote.symbol;
+                color: root.card-primary-text-color;
+                font-size: 12px;
+                font-weight: 800;
+                overflow: elide;
+            }
+
+            Image {
+                x: 2px;
+                y: 7px;
+                width: 18px;
+                height: 18px;
+                source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
+                image-fit: contain;
+                visible: root.quote-icons.length > index;
+            }
+
+            Text {
+                x: 88px;
+                y: 7px;
+                width: 92px;
+                text: quote.price;
+                color: root.card-primary-text-color;
+                font-size: 13px;
+                font-weight: 800;
+                horizontal-alignment: right;
+                overflow: elide;
+            }
+
+            Text {
+                x: 190px;
+                y: 8px;
+                width: 82px;
+                text: quote.change;
+                color: quote.positive
+                    ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+                    : (root.red-up-enabled ? root.gain-color : root.loss-color);
+                font-size: 12px;
+                font-weight: 800;
+                horizontal-alignment: right;
+                overflow: elide;
+            }
+        }
+
+        Text {
+            x: 16px;
+            y: 112px;
+            width: parent.width - 32px;
+            text: root.empty-text;
+            color: root.card-updated-text-color;
+            font-size: 12px;
+            horizontal-alignment: center;
+            visible: root.quote-rows.length == 0;
+            overflow: elide;
+        }
+
+        Text {
+            x: parent.width - 60px;
+            y: parent.height - 26px;
+            width: 44px;
+            text: root.updated-text;
+            color: root.card-updated-text-color;
+            font-size: 10px;
+            horizontal-alignment: right;
+            overflow: elide;
+        }
+
+        drag_area := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+            pointer-event(event) => {
+                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    root.card-left-drag-active = true;
+                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                    root.card-left-drag-active = false;
+                }
+            }
+            moved => {
+                if !root.layout-locked && root.card-left-drag-active {
+                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+            }
+        }
+
+        lock_button := Rectangle {
+            x: parent.width - 31px;
+            y: 6px;
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            background: root.layout-locked || lock_touch.has-hover ? root.card-header-background : root.card-background;
+            border-width: 1px;
+            border-color: root.card-border-color;
+            visible: drag_area.has-hover || lock_touch.has-hover;
+
+            Path {
+                x: 4px;
+                y: 3px;
+                width: 16px;
+                height: 18px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
+                fill: root.layout-locked ? root.card-primary-text-color : transparent;
+                stroke: root.card-primary-text-color;
+                stroke-width: 2px;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+            }
+
+            lock_touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: pointer;
+                clicked => { root.toggle-layout-lock(); }
+            }
+        }
+
+
+
+
+    }
+}

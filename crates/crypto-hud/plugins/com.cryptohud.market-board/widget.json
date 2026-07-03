@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 3,
+  "id": "com.cryptohud.market-board",
+  "name": "Market Board",
+  "version": "1.0.0",
+  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "renderer": {
+    "kind": "slint",
+    "entry": "ui/main.slint",
+    "component": "MarketBoard"
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  },
+  "defaultSize": {
+    "width": 300,
+    "height": 250
+  },
+  "minSymbolLimit": 1,
+  "symbolLimit": 5,
+  "dataRequirements": [
+    {
+      "capability": "market.price"
+    }
+  ]
+}

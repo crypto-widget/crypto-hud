@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 3,
+  "id": "com.cryptohud.trust-card",
+  "name": "Trust Card",
+  "version": "1.0.0",
+  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "renderer": {
+    "kind": "slint",
+    "entry": "ui/main.slint",
+    "component": "TrustCard"
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  },
+  "defaultSize": {
+    "width": 520,
+    "height": 410
+  },
+  "minSymbolLimit": 1,
+  "symbolLimit": 1,
+  "dataRequirements": [
+    {
+      "capability": "market.price"
+    },
+    {
+      "capability": "market.candles"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+[package]
+name = "crypto-hud-shell-state"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Settings and persisted shell-state helpers for Crypto HUD"
+
+[dependencies]
+anyhow = "1.0"
+crypto-hud-core = { path = "../crypto-hud-core" }
+directories = "6.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

@@ -1,0 +1,244 @@
+# 插件开发规范
+
+本目录存放 Crypto HUD 的仓库内置插件。每个插件都是一个独立目录，包含
+`widget.json` 清单和一个 Slint 入口组件。
+
+## 目录结构
+
+每个插件使用以下结构：
+
+```text
+com.example.my-widget/
+  widget.json
+  ui/
+    main.slint
+    optional-asset.png
+```
+
+插件 id 必须稳定，使用小写 ASCII、数字、点号或连字符，例如
+`com.cryptohud.focus-ticker`。
+
+## 清单文件规范
+
+清单文件必须命名为 `widget.json`。
+
+```json
+{
+  "schemaVersion": 3,
+  "id": "com.example.my-widget",
+  "name": "My Widget",
+  "version": "1.0.0",
+  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "renderer": {
+    "kind": "slint",
+    "entry": "ui/main.slint",
+    "component": "MyWidget"
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  },
+  "defaultSize": {
+    "width": 300,
+    "height": 180
+  },
+  "minSymbolLimit": 1,
+  "symbolLimit": 1,
+  "dataRequirements": [
+    { "capability": "market.price" }
+  ]
+}
+```
+
+宿主会强制校验：
+
+- `schemaVersion` 必须为 `3`。
+- `version` 必须是合法 SemVer。
+- `hostApiVersion` 必须匹配当前宿主 API。
+- `renderer.kind` 必须为 `slint`。
+- `renderer.entry` 必须是相对路径，不能包含 `..`。
+- `permissions.network` 和 `permissions.filesystem` 当前都必须是 `false`。
+- `defaultSize` 必须在 `120x80` 到 `1200x900` 之间。
+- `minSymbolLimit` 可省略，默认 `1`，必须在 `1` 到 `symbolLimit` 之间。
+- `symbolLimit` 是最大币种数量，必须在 `1` 到 `5` 之间。
+- `dataRequirements` 当前只支持 `market.price` 和 `market.candles`。
+- 允许的文件扩展名为 `json`、`slint`、`png`、`jpg`、`jpeg`、`svg`。
+
+## Slint 组件合同
+
+`renderer.component` 指向的组件必须继承 `Window`，并暴露以下必需属性：
+
+```slint
+in property <string> widget-id;
+in property <[QuoteRow]> quote-rows;
+in property <string> pairs-heading-text;
+in property <string> source-text;
+in property <string> updated-text;
+in property <string> empty-text;
+in property <bool> pin-to-top;
+in property <bool> layout-locked;
+in property <int> widget-width;
+in property <int> widget-height;
+in property <string> theme-name;
+in property <bool> red-up-enabled;
+in property <int> content-opacity;
+```
+
+插件 Slint 文件中需要定义 `QuoteRow`：
+
+```slint
+struct QuoteRow {
+    symbol: string,
+    price: string,
+    change: string,
+    positive: bool,
+}
+```
+
+组件还必须暴露以下回调：
+
+```slint
+callback drag-move(length, length);
+callback toggle-layout-lock();
+```
+
+回调语义：
+
+- `drag-move(dx, dy)`：移动桌面小组件窗口。
+- `toggle-layout-lock()`：切换布局锁定状态。
+
+## 主题和颜色适配
+
+宿主只下发主题名称，不下发具体颜色。插件必须在自身 Slint 文件里根据
+`theme-name` 定义浅色和深色两套 palette。
+
+```slint
+in property <string> theme-name: "dark";
+
+property <bool> light-theme: root.theme-name == "light";
+property <color> card-background: root.light-theme ? #f8fafcec : #111827ee;
+property <color> card-primary-text-color: root.light-theme ? #0f172a : #f8fafc;
+property <color> gain-color: root.light-theme ? #16a34a : #22c55e;
+property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
+```
+
+`theme-name` 当前只会是：
+
+- `light`
+- `dark`
+
+如果用户设置为跟随系统，宿主会先解析系统主题，再把解析后的 `light` 或 `dark`
+下发给插件。
+
+## 行情颜色方向
+
+`red-up-enabled` 是宿主下发给所有插件的全局行情颜色方向开关。
+
+- `false`：默认，绿涨红跌。
+- `true`：红涨绿跌。
+
+插件渲染涨跌文字、K 线、折线、面积图和状态色时，都应使用同一映射：
+
+```slint
+property <color> chart-color: root.chart-positive
+    ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+    : (root.red-up-enabled ? root.gain-color : root.loss-color);
+```
+
+需要渲染 K 线或折线图的插件，可以暴露以下可选行情路径属性：
+
+```slint
+in property <string> chart-line-path;
+in property <string> chart-fill-path;
+in property <bool> chart-ready;
+in property <bool> chart-positive;
+```
+
+需要渲染币种图标的插件，可以暴露以下可选属性：
+
+```slint
+in property <[image]> quote-icons;
+```
+
+`quote-icons[index]` 与 `quote-rows[index]` 对齐。宿主会先读取本地缓存，
+缓存缺失时按 `spothq/cryptocurrency-icons`、Iconify `cryptocurrency`、
+Trust Wallet assets 的顺序后台查找；Trust Wallet 会先尝试原生链图标，再按常见
+链的 `tokenlist.json` 匹配 `logoURI`。命中后缓存到本地，后续刷新直接复用。
+这三个来源都不需要 API key 或授权。插件应在数组长度不足时隐藏图标或使用空
+`image` 兜底。
+
+## 尺寸和等比缩放
+
+`defaultSize` 是插件的标准比例。宿主会保存缩放后的宽高，并设置真实桌面窗口
+尺寸；用户从设置页调整缩放比例，插件本体不提供边缘拖拽缩放。
+
+推荐 Slint 写法：
+
+```slint
+property <float> content-scale: (root.width / 300px) < (root.height / 180px)
+    ? (root.width / 300px)
+    : (root.height / 180px);
+
+card := Rectangle {
+    x: (root.width - 300px * root.content-scale) / 2;
+    y: (root.height - 180px * root.content-scale) / 2;
+    width: 300px;
+    height: 180px;
+    transform-origin: { x: 0px, y: 0px };
+    transform-scale-x: root.content-scale * 100%;
+    transform-scale-y: root.content-scale * 100%;
+}
+```
+
+注意事项：
+
+- 内容缩放应使用 `root.width` 和 `root.height`。
+- 不要把根窗口 `width`、`height` 长期绑定到 `widget-width`、`widget-height`，否则
+  真实 OS 窗口和内部内容可能在缩放后不同步。
+- 固定版式里的文本必须设置明确宽度，必要时使用 `overflow: elide`。
+
+## 拖拽和锁定
+
+每个桌面插件应支持：
+
+- `layout-locked == false` 时可拖动。
+- 有可见或可发现的锁定入口，调用 `toggle-layout-lock()`。
+- 拖拽区域有明确 cursor 反馈。
+
+装饰层和输入区域应分离，避免 hover 或 pressed 状态改变整体布局尺寸。
+
+## 行情数据
+
+- 使用 `quote-rows` 渲染价格数据。
+- 宿主会按 `minSymbolLimit` 和 `symbolLimit` 规范化币种数量。
+- 单币种图表插件通常使用第一条 `quote-rows` 和可选 chart path 属性。
+- chart 数据未准备好时，应显示静态兜底或轻量占位。
+- 涨跌颜色需要尊重 `red-up-enabled`。
+
+## 新增插件流程
+
+1. 在 `crates/crypto-hud/plugins` 下创建插件目录。
+2. 添加 `widget.json`。
+3. 添加 `ui/main.slint`，满足必需属性和回调合同。
+4. 在插件内部定义 `light` 和 `dark` 两套颜色，不依赖宿主下发颜色。
+5. 如果设置页市场需要专属缩略图，在 `settings_window.rs` 增加 preview kind 映射，
+   并在 `price-card.slint` 增加对应缩略绘制。
+6. 涨跌文字和 K 线颜色必须尊重 `red-up-enabled`。
+
+## 验证清单
+
+提交前至少运行：
+
+```powershell
+cargo test -p crypto-hud discovers_repo_local_plugins
+cargo test --workspace
+mise run check
+```
+
+手动 GUI smoke：
+
+- 运行 `mise run run-app`。
+- 检查浅色、深色、系统主题下的显示。
+- 拖拽缩放小组件，确认窗口、内容、K 线和命中区域同步缩放。
+- 切换布局锁定，确认拖拽和缩放手柄状态正确。
+- 打开设置页市场，确认插件左侧预览形态和真实插件一致。

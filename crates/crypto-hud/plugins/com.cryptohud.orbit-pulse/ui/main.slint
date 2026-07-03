@@ -1,0 +1,300 @@
+export struct QuoteRow {
+    symbol: string,
+    price: string,
+    change: string,
+    positive: bool,
+}
+
+export component OrbitPulse inherits Window {
+    in property <string> widget-id;
+    in property <[QuoteRow]> quote-rows;
+    in property <string> pairs-heading-text;
+    in property <string> source-text;
+    in property <string> updated-text;
+    in property <string> empty-text;
+    in property <bool> pin-to-top;
+    in property <bool> layout-locked;
+    in property <int> widget-width: 480;
+    in property <int> widget-height: 480;
+    in property <bool> red-up-enabled;
+    in property <int> content-opacity;
+    in property <string> theme-name: "dark";
+    in property <string> chart-line-path;
+    in property <string> chart-fill-path;
+    in property <bool> chart-ready;
+    in property <bool> chart-positive;
+    in-out property <bool> card-left-drag-active: false;
+    property <bool> light-theme: root.theme-name == "light";
+    property <color> lock-hover-background: root.light-theme ? #f8faf0cc : #0f172acc;
+    property <color> lock-hover-border: root.light-theme ? #0f8f8277 : #55e6d077;
+    property <color> lock-icon-color: root.light-theme ? #0f172acc : #cbd5e1cc;
+    property <color> gain-color: root.light-theme ? #16a34a : #50df99;
+    property <color> loss-color: root.light-theme ? #dc2626 : #ff6b76;
+    property <color> primary-text-color: root.light-theme ? #0f172a : #f8fafc;
+    property <color> secondary-text-color: root.light-theme ? #334155 : #cbd5e1cc;
+    property <color> chart-color: root.chart-positive
+        ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+        : (root.red-up-enabled ? root.gain-color : root.loss-color);
+    property <color> displayed-change-color: root.quote-rows.length > 0 && root.quote-rows[0].positive
+        ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+        : (root.red-up-enabled ? root.gain-color : root.loss-color);
+    property <color> chart-fill-color: root.light-theme ? #16a34a30 : #14b8a633;
+    property <color> chart-glow-color: root.light-theme ? #16a34a50 : #42e6c460;
+    property <float> content-scale: ((root.widget-width * 1px) / 480px) < ((root.widget-height * 1px) / 480px)
+        ? ((root.widget-width * 1px) / 480px)
+        : ((root.widget-height * 1px) / 480px);
+
+    callback drag-move(length, length);
+    callback toggle-layout-lock();
+    title: root.widget-id;
+    width: root.widget-width * 1px;
+    height: root.widget-height * 1px;
+    no-frame: true;
+    always-on-top: root.pin-to-top;
+    background: transparent;
+
+    card := Rectangle {
+        x: (root.widget-width * 1px - 480px * root.content-scale) / 2;
+        y: (root.widget-height * 1px - 480px * root.content-scale) / 2;
+        width: 480px * root.content-scale;
+        height: 480px * root.content-scale;
+        background: transparent;
+        opacity: root.content-opacity / 100;
+
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("reference.png");
+            image-fit: fill;
+            opacity: root.light-theme ? 0.88 : 1;
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: root.light-theme ? #f8faf018 : transparent;
+        }
+
+        chart_band := Rectangle {
+            x: 98px * root.content-scale;
+            y: 252px * root.content-scale;
+            width: 296px * root.content-scale;
+            height: 88px * root.content-scale;
+            background: transparent;
+            clip: true;
+
+            Rectangle {
+                width: parent.width;
+                height: parent.height;
+                background: @radial-gradient(circle 176px at 220px 58px, root.chart-glow-color 0%, #14b8a616 36%, #14b8a600 76%);
+                opacity: root.chart-ready ? 0.86 : 0.36;
+            }
+
+            Path {
+                x: 0px;
+                y: 31px * root.content-scale;
+                width: parent.width;
+                height: 42px * root.content-scale;
+                viewbox-width: 100;
+                viewbox-height: 40;
+                fit: fill;
+                commands: root.chart-fill-path;
+                fill: root.chart-fill-color;
+                stroke-width: 0px;
+                opacity: root.chart-ready ? 0.44 : 0.24;
+            }
+
+            Path {
+                x: 0px;
+                y: 31px * root.content-scale;
+                width: parent.width;
+                height: 42px * root.content-scale;
+                viewbox-width: 100;
+                viewbox-height: 40;
+                fit: fill;
+                commands: root.chart-line-path;
+                fill: transparent;
+                stroke: root.chart-glow-color;
+                stroke-width: 3.2px * root.content-scale;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+                opacity: root.chart-ready ? 0.24 : 0.14;
+            }
+
+            Path {
+                x: 0px;
+                y: 31px * root.content-scale;
+                width: parent.width;
+                height: 42px * root.content-scale;
+                viewbox-width: 100;
+                viewbox-height: 40;
+                fit: fill;
+                commands: root.chart-line-path;
+                fill: transparent;
+                stroke: root.chart-color;
+                stroke-width: 1.55px * root.content-scale;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+                opacity: root.chart-ready ? 1 : 0.45;
+            }
+        }
+
+        for quote[index] in root.quote-rows : Rectangle {
+            visible: index == 0;
+            width: parent.width;
+            height: parent.height;
+
+            Text {
+                x: 128px * root.content-scale;
+                y: 122px * root.content-scale;
+                width: 224px * root.content-scale;
+                text: quote.symbol;
+                color: root.primary-text-color;
+                font-size: 23px * root.content-scale;
+                font-weight: 800;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+
+            Rectangle {
+                x: 236px * root.content-scale;
+                y: 154px * root.content-scale;
+                width: 8px * root.content-scale;
+                height: 8px * root.content-scale;
+                border-radius: 4px * root.content-scale;
+                background: root.chart-color;
+                drop-shadow-offset-y: 0px;
+                drop-shadow-blur: 8px * root.content-scale;
+                drop-shadow-color: root.chart-glow-color;
+            }
+
+            Text {
+                x: 82px * root.content-scale;
+                y: 174px * root.content-scale;
+                width: 316px * root.content-scale;
+                text: quote.price;
+                color: root.primary-text-color;
+                font-size: 58px * root.content-scale;
+                font-weight: 900;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: 142px * root.content-scale;
+                y: 248px * root.content-scale;
+                width: 196px * root.content-scale;
+                text: quote.change;
+                color: root.displayed-change-color;
+                font-size: 26px * root.content-scale;
+                font-weight: 900;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: 304px * root.content-scale;
+                y: 254px * root.content-scale;
+                width: 32px * root.content-scale;
+                text: "24h";
+                color: root.displayed-change-color;
+                font-size: 16px * root.content-scale;
+                font-weight: 800;
+                visible: quote.change != "--";
+                overflow: elide;
+            }
+        }
+
+        Text {
+            x: 128px * root.content-scale;
+            y: 190px * root.content-scale;
+            width: 224px * root.content-scale;
+            text: root.empty-text;
+            color: root.secondary-text-color;
+            font-size: 22px * root.content-scale;
+            font-weight: 700;
+            horizontal-alignment: center;
+            visible: root.quote-rows.length == 0;
+            overflow: elide;
+        }
+
+        Text {
+            x: 132px * root.content-scale;
+            y: 364px * root.content-scale;
+            width: 216px * root.content-scale;
+            text: root.source-text;
+            color: root.secondary-text-color;
+            font-size: 12px * root.content-scale;
+            font-weight: 600;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        Text {
+            x: 132px * root.content-scale;
+            y: 388px * root.content-scale;
+            width: 216px * root.content-scale;
+            text: root.updated-text;
+            color: root.secondary-text-color;
+            font-size: 11px * root.content-scale;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        drag_area := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+            pointer-event(event) => {
+                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    root.card-left-drag-active = true;
+                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                    root.card-left-drag-active = false;
+                }
+            }
+            moved => {
+                if !root.layout-locked && root.card-left-drag-active {
+                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                }
+            }
+        }
+
+        lock_button := Rectangle {
+            x: parent.width - 54px * root.content-scale;
+            y: 52px * root.content-scale;
+            width: 28px * root.content-scale;
+            height: 28px * root.content-scale;
+            border-radius: 14px * root.content-scale;
+            background: root.layout-locked || lock_touch.has-hover ? root.lock-hover-background : transparent;
+            border-width: 1px * root.content-scale;
+            border-color: root.layout-locked || lock_touch.has-hover ? root.lock-hover-border : transparent;
+            visible: drag_area.has-hover || lock_touch.has-hover;
+
+            Path {
+                x: 5px * root.content-scale;
+                y: 4px * root.content-scale;
+                width: 18px * root.content-scale;
+                height: 20px * root.content-scale;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
+                fill: root.layout-locked ? root.lock-icon-color : transparent;
+                stroke: root.lock-icon-color;
+                stroke-width: 2px * root.content-scale;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+            }
+
+            lock_touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: pointer;
+                clicked => { root.toggle-layout-lock(); }
+            }
+        }
+
+
+
+
+    }
+}

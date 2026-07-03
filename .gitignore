@@ -1,0 +1,16 @@
+/target/
+/.mise.local.toml
+/.env
+/.poc-state/
+/.crypto-hud-state/
+/.poc-run/
+/.audit-state/
+/.p0-verify-state-*/
+/.gui-smoke-state/
+/.package-smoke-install/
+/.update-smoke-install/
+/dist/
+/.demo-run-state/
+/.demo-theme-preview/
+/design-qa.md
+/docs/

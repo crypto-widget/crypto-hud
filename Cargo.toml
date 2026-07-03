@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/crypto-hud-core",
+    "crates/crypto-hud-market",
+    "crates/crypto-hud-runtime",
+    "crates/crypto-hud-shell-state",
+    "crates/crypto-hud",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+authors = ["Crypto HUD Contributors"]
+license = "MIT"
+repository = "https://github.com/crypto-widget/crypto-hud"
+homepage = "https://github.com/crypto-widget/crypto-hud"
+readme = "README.md"
+rust-version = "1.96"
+publish = false

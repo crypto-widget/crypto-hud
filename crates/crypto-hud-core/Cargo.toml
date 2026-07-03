@@ -1,0 +1,15 @@
+[package]
+name = "crypto-hud-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Toolkit-free domain primitives for Crypto HUD"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }

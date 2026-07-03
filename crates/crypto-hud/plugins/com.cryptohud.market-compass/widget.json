@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 3,
+  "id": "com.cryptohud.market-compass",
+  "name": "Market Compass",
+  "version": "1.0.0",
+  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "renderer": {
+    "kind": "slint",
+    "entry": "ui/main.slint",
+    "component": "MarketCompass"
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  },
+  "defaultSize": {
+    "width": 480,
+    "height": 480
+  },
+  "minSymbolLimit": 1,
+  "symbolLimit": 4,
+  "dataRequirements": [
+    {
+      "capability": "market.price"
+    },
+    {
+      "capability": "market.candles"
+    }
+  ]
+}

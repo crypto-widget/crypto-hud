@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 3,
+  "id": "com.example.stage3-price-card",
+  "name": "Stage 3 Price Card",
+  "version": "1.0.0",
+  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "renderer": {
+    "kind": "slint",
+    "entry": "ui/main.slint",
+    "component": "Stage3PriceCard"
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  },
+  "defaultSize": {
+    "width": 260,
+    "height": 170
+  },
+  "minSymbolLimit": 1,
+  "symbolLimit": 5,
+  "dataRequirements": [
+    {
+      "capability": "market.price"
+    }
+  ]
+}

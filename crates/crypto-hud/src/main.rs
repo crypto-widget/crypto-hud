@@ -1,0 +1,828 @@
+#![windows_subsystem = "windows"]
+
+mod autostart;
+mod coin_icons;
+mod desktop_shell;
+mod feature_flags;
+mod i18n;
+mod notifications;
+mod plugin;
+mod runtime_bridge;
+mod settings_window;
+mod shortcuts;
+mod state_bridge;
+mod theme;
+mod updater;
+mod widget_host;
+mod window_manager;
+
+#[cfg(test)]
+use std::collections::HashMap;
+#[cfg(test)]
+use std::path::PathBuf;
+use std::{
+    cell::RefCell,
+    env,
+    rc::Rc,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use anyhow::{Context, Result};
+use crypto_hud_market as market;
+use crypto_hud_runtime::QuoteCache;
+use crypto_hud_shell_state as settings;
+use desktop_shell::{
+    install_gui_smoke_timer, install_keepalive_window, install_single_instance_guard, install_tray,
+    parse_launch_options, refresh_tray_text, write_gui_smoke_ready_file,
+};
+use runtime_bridge::{install_runtime_event_timer, sync_widget_runtimes, RuntimeEventTimerDeps};
+#[cfg(test)]
+use settings::{
+    default_widget_config, AppSettings, LayoutStore, LegacyLayoutStore, WidgetInstance,
+    WidgetKind as WidgetType, WidgetLayout,
+};
+use settings::{save_layout_store, state_dir_for_path, state_path};
+use settings_window::{
+    apply_status_strip_auto_sizes_to_store, install_settings_window, SettingsWindowDeps,
+};
+use slint::ComponentHandle;
+#[cfg(test)]
+use state_bridge::{
+    add_plugin_instance, add_widget_instance, default_layout_for_index, default_layout_for_size,
+    default_layout_for_widget, default_symbols, layout_has_visible_area, migrate_legacy_store,
+    normalize_store, normalize_store_with_catalog, parse_symbols, parse_symbols_for_type,
+};
+use state_bridge::{load_layout_store, symbols_from_store, widget_definitions_from_catalog};
+use widget_host::WidgetRuntime;
+use window_manager::{
+    apply_tray_hover_display, enter_settings_mode, install_hotkey_poll_timer,
+    install_tray_hover_display_timer, install_widget_shell_window_maintenance_timer,
+    schedule_settings_window_raise, schedule_widget_shell_window_configuration,
+    TrayHoverDisplayState,
+};
+#[cfg(test)]
+use window_manager::{desktop_size, widget_pin_to_top};
+
+slint::include_modules!();
+
+#[cfg(test)]
+const LEGACY_DEFAULT_POSITION_X: i32 = settings::DEFAULT_WIDGET_POSITION_X;
+#[cfg(test)]
+const LEGACY_DEFAULT_POSITION_Y: i32 = settings::DEFAULT_WIDGET_POSITION_Y;
+#[cfg(test)]
+const LEGACY_DEFAULT_POSITION_STEP: i32 = settings::LEGACY_DEFAULT_POSITION_STEP;
+#[cfg(test)]
+const DEFAULT_LAYOUT_GAP: i32 = settings::DEFAULT_LAYOUT_GAP;
+pub(crate) const ABOUT_REPOSITORY_URL: &str = "https://github.com/crypto-widget/crypto-hud";
+pub(crate) const WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT: Duration = Duration::from_millis(500);
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+struct WidgetRect {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+#[cfg(test)]
+fn widget_rect(layout: &WidgetLayout, widget_type: WidgetType) -> WidgetRect {
+    let size = widget_type.default_size();
+    WidgetRect {
+        x: layout.x,
+        y: layout.y,
+        width: size.width,
+        height: size.height,
+    }
+}
+
+#[cfg(test)]
+impl WidgetRect {
+    fn overlaps(self, other: WidgetRect, gap: i32) -> bool {
+        self.x < other.x + other.width + gap
+            && self.x + self.width + gap > other.x
+            && self.y < other.y + other.height + gap
+            && self.y + self.height + gap > other.y
+    }
+}
+
+fn main() -> Result<()> {
+    if env::var_os("SLINT_BACKEND").is_none() {
+        env::set_var("SLINT_BACKEND", "software");
+    }
+
+    let single_instance = install_single_instance_guard()?;
+    if !single_instance.is_single() {
+        return Ok(());
+    }
+
+    let launch_options = parse_launch_options();
+    let requested_widget_count = launch_options.widget_count;
+    let state_path = state_path()?;
+    let state_dir = state_dir_for_path(&state_path);
+    let plugin_catalog = Rc::new(plugin::PluginCatalog::load(&state_dir));
+    for error in plugin_catalog.errors() {
+        eprintln!("plugin catalog warning: {error}");
+    }
+    let plugin_definitions = widget_definitions_from_catalog(&plugin_catalog);
+    let mut layout_store =
+        load_layout_store(&state_path, requested_widget_count, &plugin_definitions);
+    if apply_status_strip_auto_sizes_to_store(&mut layout_store) {
+        if let Err(error) = save_layout_store(&state_path, &layout_store) {
+            eprintln!("failed to save migrated status strip layout: {error:#}");
+        }
+    }
+    let layouts = Rc::new(RefCell::new(layout_store));
+    let app_settings = layouts.borrow().settings.clone().normalized();
+    let settings_status = Rc::new(RefCell::new(String::new()));
+    let shortcut_manager = Rc::new(RefCell::new(shortcuts::ShortcutManager::new()));
+    let market_feed_config = Arc::new(Mutex::new(market::MarketFeedConfig {
+        symbols: symbols_from_store(&layouts.borrow(), &plugin_catalog),
+        provider: app_settings.market_provider,
+        refresh_interval_seconds: app_settings.refresh_interval_seconds,
+        fallback_enabled: app_settings.market_fallback_enabled,
+        enabled_sources: settings::enabled_market_sources(&app_settings),
+        proxy_url: settings::effective_network_proxy_url(&app_settings),
+    }));
+    if let Err(error) = shortcut_manager.borrow_mut().apply(app_settings.shortcut) {
+        *settings_status.borrow_mut() = error;
+    }
+
+    let quote_cache = Rc::new(RefCell::new(QuoteCache::new()));
+    let coin_icons = Rc::new(coin_icons::CoinIconRegistry::new(
+        state_dir.join("coin-icons"),
+    ));
+    let widgets = Rc::new(RefCell::new(Vec::<WidgetRuntime>::new()));
+    sync_widget_runtimes(
+        &widgets,
+        &layouts,
+        &state_path,
+        quote_cache.clone(),
+        coin_icons.clone(),
+        true,
+        plugin_catalog.clone(),
+    )?;
+    schedule_widget_shell_window_configuration();
+
+    let widgets_hidden = Rc::new(RefCell::new(false));
+    let settings_mode_active = Rc::new(RefCell::new(false));
+    let tray_handle = Rc::new(RefCell::new(None));
+    let tray_hover_state = Rc::new(RefCell::new(TrayHoverDisplayState::default()));
+    let settings_window = install_settings_window(SettingsWindowDeps {
+        widgets: widgets.clone(),
+        layouts: layouts.clone(),
+        state_path: state_path.clone(),
+        settings_status: settings_status.clone(),
+        shortcut_manager: shortcut_manager.clone(),
+        market_feed_config: market_feed_config.clone(),
+        widgets_hidden: widgets_hidden.clone(),
+        settings_mode_active: settings_mode_active.clone(),
+        tray_handle: tray_handle.clone(),
+        tray_hover_state: tray_hover_state.clone(),
+        quote_cache: quote_cache.clone(),
+        coin_icons: coin_icons.clone(),
+        plugin_catalog: plugin_catalog.clone(),
+    })?;
+    let tray = install_tray(
+        widgets.clone(),
+        settings_window.as_weak(),
+        layouts.clone(),
+        state_path.clone(),
+        widgets_hidden.clone(),
+        settings_mode_active.clone(),
+        plugin_catalog.clone(),
+    )?;
+    *tray_handle.borrow_mut() = Some(tray.as_weak());
+    let show_main_window_on_startup =
+        app_settings.show_main_window_on_startup || launch_options.show_settings;
+    refresh_tray_text(&tray, app_settings);
+    apply_tray_hover_display(
+        &widgets,
+        &layouts,
+        &widgets_hidden,
+        &settings_mode_active,
+        &tray_hover_state,
+        notifications::tray_icon_hovered(),
+    );
+    if show_main_window_on_startup {
+        enter_settings_mode(&widgets, &layouts, &settings_mode_active);
+        settings_window
+            .show()
+            .context("failed to show settings window on startup")?;
+        schedule_settings_window_raise();
+    }
+    write_gui_smoke_ready_file(&widgets, &layouts, show_main_window_on_startup);
+    let keepalive_window = install_keepalive_window()?;
+    let gui_smoke_timer = install_gui_smoke_timer(launch_options.gui_smoke_exit_after);
+    let hotkey_timer = install_hotkey_poll_timer(
+        shortcut_manager.clone(),
+        widgets.clone(),
+        layouts.clone(),
+        widgets_hidden.clone(),
+        settings_mode_active.clone(),
+        tray.as_weak(),
+    );
+    let tray_hover_timer = install_tray_hover_display_timer(
+        widgets.clone(),
+        layouts.clone(),
+        widgets_hidden.clone(),
+        settings_mode_active.clone(),
+        tray_hover_state.clone(),
+    );
+    let widget_shell_window_maintenance_timer = install_widget_shell_window_maintenance_timer();
+
+    let market_updates = market::spawn_market_feed(market_feed_config);
+    let update_events = if launch_options.gui_smoke_exit_after.is_some() {
+        None
+    } else {
+        updater::UpdateCheckConfig::from_env().map(|mut config| {
+            config.proxy_url = settings::effective_network_proxy_url(
+                &layouts.borrow().settings.clone().normalized(),
+            );
+            updater::spawn_update_check(config)
+        })
+    };
+    let runtime_event_timer = install_runtime_event_timer(RuntimeEventTimerDeps {
+        widgets: widgets.clone(),
+        layouts: layouts.clone(),
+        quote_cache: quote_cache.clone(),
+        coin_icons: coin_icons.clone(),
+        plugin_catalog: plugin_catalog.clone(),
+        market_updates,
+        update_events,
+    });
+
+    let event_loop_result = slint::run_event_loop_until_quit().context("Slint event loop failed");
+    drop(runtime_event_timer);
+    drop(widget_shell_window_maintenance_timer);
+    drop(tray_hover_timer);
+    drop(hotkey_timer);
+    drop(gui_smoke_timer);
+    drop(keepalive_window);
+    drop(tray);
+    drop(settings_window);
+    drop(single_instance);
+    event_loop_result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn local_test_plugin_definition() -> plugin::PluginDefinition {
+        plugin::PluginDefinition {
+            id: "com.example.stage3-price-card".to_string(),
+            name: "Stage 3 Price Card".to_string(),
+            version: semver::Version::new(1, 0, 0),
+            source: plugin::PluginSource::LocalUnsigned,
+            renderer: plugin::PluginRendererDefinition::Slint {
+                root_dir: PathBuf::from("plugins/com.example.stage3-price-card"),
+                entry: PathBuf::from("plugins/com.example.stage3-price-card/ui/main.slint"),
+                component: "Stage3PriceCard".to_string(),
+                definition: None,
+            },
+            default_size: plugin::PluginSize {
+                width: 260,
+                height: 170,
+            },
+            min_symbol_limit: 1,
+            symbol_limit: 2,
+            data_requirements: vec![plugin::PluginDataRequirement {
+                capability: "market.price".to_string(),
+            }],
+            status: plugin::PluginStatus::Available,
+        }
+    }
+
+    #[test]
+    fn app_settings_normalize_opacity_bounds() {
+        assert_eq!(settings::MIN_OPACITY_PERCENT, 20);
+        assert_eq!(settings::clamp_opacity(12), settings::MIN_OPACITY_PERCENT);
+        assert_eq!(settings::clamp_opacity(70), 70);
+        assert_eq!(settings::clamp_opacity(140), settings::MAX_OPACITY_PERCENT);
+    }
+
+    #[test]
+    fn default_layout_uses_global_widget_settings() {
+        let settings = AppSettings {
+            widgets_always_on_top: false,
+            opacity_percent: 64,
+            widget_scale_percent: 125,
+            ..AppSettings::default()
+        };
+
+        let layout = default_layout_for_index(2, settings);
+
+        assert!(!layout.always_on_top);
+        assert_eq!(layout.opacity_percent, 64);
+        assert_eq!(layout.width, 358);
+        assert_eq!(layout.height, 290);
+    }
+
+    #[test]
+    fn default_layout_avoids_overlap_between_quote_boards() {
+        let settings = AppSettings::default();
+        let first = default_layout_for_widget(0, WidgetType::QuoteBoard, settings.clone());
+        let second = default_layout_for_widget(1, WidgetType::QuoteBoard, settings);
+
+        assert!(!widget_rect(&first, WidgetType::QuoteBoard).overlaps(
+            widget_rect(&second, WidgetType::QuoteBoard),
+            DEFAULT_LAYOUT_GAP,
+        ));
+    }
+
+    #[test]
+    fn add_widget_instance_uses_first_available_non_overlapping_layout() {
+        let settings = AppSettings::default();
+        let mut store = LayoutStore::default();
+
+        add_widget_instance(&mut store, WidgetType::QuoteBoard, &settings);
+        add_widget_instance(&mut store, WidgetType::QuoteBoard, &settings);
+
+        assert_eq!(store.widgets.len(), 2);
+        assert!(
+            !widget_rect(&store.widgets[0].layout, WidgetType::QuoteBoard).overlaps(
+                widget_rect(&store.widgets[1].layout, WidgetType::QuoteBoard),
+                DEFAULT_LAYOUT_GAP,
+            )
+        );
+    }
+
+    #[test]
+    fn add_plugin_instance_uses_local_manifest_metadata() {
+        let settings = AppSettings {
+            market_default_symbols: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
+            ..AppSettings::default()
+        };
+        let mut store = LayoutStore::default();
+        let plugin = local_test_plugin_definition();
+
+        let id = add_plugin_instance(&mut store, &plugin, &settings);
+
+        assert_eq!(id, "plugin-card-1");
+        assert_eq!(store.widgets.len(), 1);
+        assert_eq!(store.widgets[0].plugin_id, "com.example.stage3-price-card");
+        assert_eq!(store.widgets[0].name, "Stage 3 Price Card 1");
+        assert_eq!(
+            store.widgets[0].symbols,
+            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+        );
+        assert_eq!(
+            store.widgets[0].layout.x,
+            default_layout_for_size(0, (260, 170), settings).x
+        );
+    }
+
+    #[test]
+    fn normalizing_multi_widget_store_migrates_legacy_default_cascade() {
+        let mut store = LayoutStore {
+            settings: AppSettings::default(),
+            widgets: vec![
+                WidgetInstance {
+                    id: "quote-board-1".to_string(),
+                    plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+                    legacy_widget_type: None,
+                    name: String::new(),
+                    visible: true,
+                    layout: WidgetLayout {
+                        x: LEGACY_DEFAULT_POSITION_X,
+                        y: LEGACY_DEFAULT_POSITION_Y,
+                        always_on_top: true,
+                        opacity_percent: 92,
+                        ..WidgetLayout::default()
+                    },
+                    symbols: default_symbols(),
+                    config: default_widget_config(),
+                },
+                WidgetInstance {
+                    id: "quote-board-2".to_string(),
+                    plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+                    legacy_widget_type: None,
+                    name: String::new(),
+                    visible: true,
+                    layout: WidgetLayout {
+                        x: LEGACY_DEFAULT_POSITION_X + LEGACY_DEFAULT_POSITION_STEP,
+                        y: LEGACY_DEFAULT_POSITION_Y + LEGACY_DEFAULT_POSITION_STEP,
+                        always_on_top: true,
+                        opacity_percent: 92,
+                        ..WidgetLayout::default()
+                    },
+                    symbols: default_symbols(),
+                    config: default_widget_config(),
+                },
+            ],
+            ..LayoutStore::default()
+        };
+
+        normalize_store(&mut store, 0);
+
+        assert!(
+            !widget_rect(&store.widgets[0].layout, WidgetType::QuoteBoard).overlaps(
+                widget_rect(&store.widgets[1].layout, WidgetType::QuoteBoard),
+                DEFAULT_LAYOUT_GAP,
+            )
+        );
+    }
+
+    #[test]
+    fn normalizing_store_recovers_offscreen_widget_positions() {
+        let (desktop_width, desktop_height) = desktop_size();
+        let mut store = LayoutStore {
+            settings: AppSettings::default(),
+            widgets: vec![WidgetInstance {
+                id: "quote-board-1".to_string(),
+                plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+                legacy_widget_type: None,
+                name: String::new(),
+                visible: true,
+                layout: WidgetLayout {
+                    x: desktop_width + 10,
+                    y: desktop_height + 10,
+                    always_on_top: true,
+                    opacity_percent: 92,
+                    ..WidgetLayout::default()
+                },
+                symbols: default_symbols(),
+                config: default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+
+        normalize_store(&mut store, 0);
+
+        assert!(layout_has_visible_area(
+            &store.widgets[0].layout,
+            WidgetType::QuoteBoard
+        ));
+        assert_ne!(store.widgets[0].layout.x, desktop_width + 10);
+        assert_ne!(store.widgets[0].layout.y, desktop_height + 10);
+    }
+
+    #[test]
+    fn settings_mode_suspends_pinned_widgets_topmost() {
+        let instance = WidgetInstance {
+            id: "quote-board-1".to_string(),
+            plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+            legacy_widget_type: None,
+            name: String::new(),
+            visible: true,
+            layout: WidgetLayout {
+                always_on_top: true,
+                ..WidgetLayout::default()
+            },
+            symbols: default_symbols(),
+            config: default_widget_config(),
+        };
+
+        assert!(widget_pin_to_top(&instance, false));
+        assert!(!widget_pin_to_top(&instance, true));
+    }
+
+    #[test]
+    fn parses_pair_input_to_unique_base_symbols() {
+        assert_eq!(
+            parse_symbols("btc, ETHUSDT sol/usdt SOL-USDT"),
+            vec![
+                "binance:spot:BTC/USDT",
+                "binance:spot:ETH/USDT",
+                "binance:spot:SOL/USDT"
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_pair_input_uses_default_symbols() {
+        assert_eq!(parse_symbols("  , ; "), default_symbols());
+    }
+
+    #[test]
+    fn pair_input_is_capped_to_widget_capacity() {
+        assert_eq!(
+            parse_symbols("BTC, ETH, SOL, BNB, XRP, DOGE"),
+            vec![
+                "binance:spot:BTC/USDT",
+                "binance:spot:ETH/USDT",
+                "binance:spot:SOL/USDT",
+                "binance:spot:BNB/USDT",
+                "binance:spot:XRP/USDT"
+            ]
+        );
+    }
+
+    #[test]
+    fn mini_ticker_pair_input_is_capped_to_one_symbol() {
+        assert_eq!(
+            parse_symbols_for_type("BTC, ETH, SOL", WidgetType::MiniTicker),
+            vec!["binance:spot:BTC/USDT"]
+        );
+    }
+
+    #[test]
+    fn market_usage_text_follows_locale() {
+        let store = LayoutStore {
+            widgets: vec![
+                WidgetInstance {
+                    id: "quote-board-1".to_string(),
+                    plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+                    legacy_widget_type: None,
+                    name: String::new(),
+                    visible: true,
+                    layout: WidgetLayout::default(),
+                    symbols: vec!["BTC".to_string()],
+                    config: default_widget_config(),
+                },
+                WidgetInstance {
+                    id: "quote-board-2".to_string(),
+                    plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+                    legacy_widget_type: None,
+                    name: String::new(),
+                    visible: true,
+                    layout: WidgetLayout::default(),
+                    symbols: vec!["ETH".to_string()],
+                    config: default_widget_config(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            settings_window::widget_type_usage_text(
+                &store,
+                WidgetType::QuoteBoard,
+                i18n::Locale::En
+            ),
+            "Used 2"
+        );
+        assert_eq!(
+            settings_window::widget_type_usage_text(
+                &store,
+                WidgetType::QuoteBoard,
+                i18n::Locale::ZhHans
+            ),
+            "已使用 2 个"
+        );
+    }
+
+    #[test]
+    fn plugin_market_item_uses_local_plugin_metadata() {
+        let store = LayoutStore {
+            widgets: vec![WidgetInstance {
+                id: "plugin-card-1".to_string(),
+                plugin_id: "com.example.stage3-price-card".to_string(),
+                legacy_widget_type: None,
+                name: "Stage 3 Price Card 1".to_string(),
+                visible: true,
+                layout: WidgetLayout::default(),
+                symbols: vec!["BTC".to_string(), "ETH".to_string()],
+                config: default_widget_config(),
+            }],
+            ..Default::default()
+        };
+        let plugin = local_test_plugin_definition();
+
+        let item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::En);
+
+        assert_eq!(item.title.as_str(), "Stage 3 Price Card");
+        assert_eq!(item.usage.as_str(), "Used 1");
+        assert_eq!(item.status.as_str(), "");
+        assert!(item.available);
+        assert!(!item.builtin);
+        assert_eq!(item.symbol_limit, 2);
+        assert_eq!(item.preview_kind, 0);
+        assert!(item.description.as_str().contains("260x170"));
+    }
+
+    #[test]
+    fn plugin_market_item_maps_design_preview_kinds() {
+        let store = LayoutStore::default();
+        for (plugin_id, expected_preview_kind) in [
+            ("com.cryptohud.focus-ticker", 1),
+            ("com.cryptohud.market-board", 2),
+            ("com.cryptohud.trust-card", 3),
+            ("com.cryptohud.orbit-pulse", 4),
+            ("com.cryptohud.market-compass", 5),
+            ("com.cryptohud.status-strip", 6),
+        ] {
+            let mut plugin = local_test_plugin_definition();
+            plugin.id = plugin_id.to_string();
+
+            let item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::En);
+
+            assert_eq!(item.preview_kind, expected_preview_kind);
+        }
+    }
+
+    #[test]
+    fn local_plugin_symbols_are_capped_by_plugin_definition() {
+        let plugin = local_test_plugin_definition();
+        let catalog = plugin::PluginCatalog::from_plugins_for_tests(vec![plugin]);
+        let mut store = LayoutStore {
+            widgets: vec![WidgetInstance {
+                id: "plugin-card-1".to_string(),
+                plugin_id: "com.example.stage3-price-card".to_string(),
+                legacy_widget_type: None,
+                name: "Stage 3 Price Card 1".to_string(),
+                visible: true,
+                layout: WidgetLayout::default(),
+                symbols: vec![
+                    "BTC".to_string(),
+                    "ETH".to_string(),
+                    "SOL".to_string(),
+                    "BNB".to_string(),
+                ],
+                config: default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+
+        normalize_store_with_catalog(&mut store, 0, Some(&catalog));
+
+        assert_eq!(
+            store.widgets[0].symbols,
+            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+        );
+        assert_eq!(
+            symbols_from_store(&store, &catalog),
+            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+        );
+        assert_eq!(
+            settings_window::symbols_help_text(
+                settings_window::symbol_min_for_instance(&store.widgets[0], Some(&catalog)),
+                settings_window::symbol_limit_for_instance(&store.widgets[0], Some(&catalog)),
+                i18n::Locale::En
+            ),
+            "Up to 2 pairs"
+        );
+    }
+
+    #[test]
+    fn default_widget_names_are_localized_only_for_display() {
+        let widget = WidgetInstance {
+            id: "quote-board-7".to_string(),
+            plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+            legacy_widget_type: None,
+            name: settings_window::default_widget_name(WidgetType::QuoteBoard, 7),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["BTC".to_string()],
+            config: default_widget_config(),
+        };
+
+        assert_eq!(
+            settings_window::widget_display_name(&widget, 0, i18n::Locale::En),
+            "Quote Board 7"
+        );
+        assert_eq!(
+            settings_window::widget_display_name(&widget, 0, i18n::Locale::ZhHans),
+            "行情面板 7"
+        );
+        assert_eq!(
+            settings_window::normalize_widget_name(
+                "行情面板 7",
+                WidgetType::QuoteBoard,
+                7,
+                i18n::Locale::ZhHans
+            ),
+            "Quote Board 7"
+        );
+
+        let custom = WidgetInstance {
+            name: "Trading Desk".to_string(),
+            ..widget
+        };
+        assert_eq!(
+            settings_window::widget_display_name(&custom, 0, i18n::Locale::ZhHans),
+            "Trading Desk"
+        );
+    }
+
+    #[test]
+    fn normalizing_empty_store_creates_requested_default_instances() {
+        let mut store = LayoutStore::default();
+
+        normalize_store(&mut store, 2);
+
+        assert_eq!(store.widgets.len(), 2);
+        assert_eq!(store.widgets[0].id, "quote-board-1");
+        assert_eq!(store.widgets[1].id, "quote-board-2");
+        assert_eq!(store.selected_widget_id.as_deref(), Some("quote-board-1"));
+        assert_eq!(store.widgets[0].symbols, default_symbols());
+    }
+
+    #[test]
+    fn legacy_layout_store_migrates_to_widget_instances() {
+        let mut layouts = HashMap::new();
+        layouts.insert(
+            "price-card-1".to_string(),
+            WidgetLayout {
+                x: 24,
+                y: 48,
+                always_on_top: false,
+                opacity_percent: 64,
+                ..WidgetLayout::default()
+            },
+        );
+        let legacy = LegacyLayoutStore {
+            settings: AppSettings::default(),
+            symbols: vec!["eth".to_string(), "ETHUSDT".to_string()],
+            widgets: layouts,
+        };
+
+        let store = migrate_legacy_store(legacy);
+
+        assert_eq!(store.widgets.len(), 1);
+        assert_eq!(store.widgets[0].id, "price-card-1");
+        assert_eq!(store.widgets[0].widget_type(), WidgetType::QuoteBoard);
+        assert_eq!(store.widgets[0].layout.x, 24);
+        assert_eq!(store.widgets[0].layout.y, 48);
+        assert!(!store.widgets[0].layout.always_on_top);
+        assert_eq!(store.widgets[0].layout.opacity_percent, 64);
+        assert_eq!(store.widgets[0].symbols, vec!["binance:spot:ETH/USDT"]);
+    }
+
+    #[test]
+    fn legacy_widget_type_field_migrates_to_plugin_id() {
+        let mut store = serde_json::from_str::<LayoutStore>(
+            r#"{
+              "widgets": [
+                {
+                  "id": "mini-ticker-1",
+                  "widget_type": "mini_ticker",
+                  "name": "Mini Ticker 1",
+                  "symbols": ["ETH", "BTC"]
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        normalize_store(&mut store, 0);
+
+        assert_eq!(
+            store.widgets[0].plugin_id,
+            plugin::BUILTIN_MINI_TICKER_PLUGIN_ID
+        );
+        assert_eq!(store.widgets[0].widget_type(), WidgetType::MiniTicker);
+        assert_eq!(store.widgets[0].symbols, vec!["binance:spot:ETH/USDT"]);
+        assert_eq!(store.widgets[0].config, default_widget_config());
+
+        let serialized = serde_json::to_string(&store).unwrap();
+        assert!(serialized.contains(r#""plugin_id":"builtin.mini-ticker""#));
+        assert!(!serialized.contains("widget_type"));
+    }
+
+    #[test]
+    fn market_symbols_ignore_alert_rules_while_disabled() {
+        let store = LayoutStore {
+            widgets: vec![
+                WidgetInstance {
+                    id: "quote-board-1".to_string(),
+                    plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+                    legacy_widget_type: None,
+                    name: String::new(),
+                    visible: true,
+                    layout: WidgetLayout::default(),
+                    symbols: vec!["BTC".to_string(), "ETH".to_string()],
+                    config: default_widget_config(),
+                },
+                WidgetInstance {
+                    id: "mini-ticker-2".to_string(),
+                    plugin_id: WidgetType::MiniTicker.plugin_id().to_string(),
+                    legacy_widget_type: None,
+                    name: String::new(),
+                    visible: true,
+                    layout: WidgetLayout::default(),
+                    symbols: vec!["ETH".to_string()],
+                    config: default_widget_config(),
+                },
+            ],
+            settings: AppSettings {
+                alert_rules: vec![
+                    settings::AlertRule {
+                        id: "sol-breakout".to_string(),
+                        symbol: "SOL".to_string(),
+                        condition: settings::AlertCondition::PriceAbove,
+                        threshold: 150.0,
+                        enabled: true,
+                    },
+                    settings::AlertRule {
+                        id: "bnb-disabled".to_string(),
+                        symbol: "BNB".to_string(),
+                        condition: settings::AlertCondition::PriceBelow,
+                        threshold: 400.0,
+                        enabled: false,
+                    },
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let catalog = plugin::PluginCatalog::builtins();
+        assert_eq!(
+            symbols_from_store(&store, &catalog),
+            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+        );
+    }
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 3,
+  "id": "com.cryptohud.focus-ticker",
+  "name": "Focus Ticker",
+  "version": "1.0.0",
+  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "renderer": {
+    "kind": "slint",
+    "entry": "ui/main.slint",
+    "component": "FocusTicker"
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  },
+  "defaultSize": {
+    "width": 820,
+    "height": 156
+  },
+  "minSymbolLimit": 1,
+  "symbolLimit": 1,
+  "dataRequirements": [
+    {
+      "capability": "market.price"
+    },
+    {
+      "capability": "market.candles"
+    }
+  ]
+}

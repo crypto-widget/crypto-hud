@@ -1,0 +1,237 @@
+export component SettingSwitch inherits Rectangle {
+    in-out property <bool> checked;
+    in property <color> accent-color;
+    in property <color> track-color;
+    in property <color> knob-color;
+    callback toggled();
+
+    width: 37px;
+    height: 20px;
+    border-radius: 10px;
+    background: root.checked ? root.accent-color : root.track-color;
+
+    Rectangle {
+        x: root.checked ? 19px : 2px;
+        y: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.knob-color;
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}
+
+export component SettingsNavItem inherits Rectangle {
+    in property <string> text;
+    in property <int> icon-kind: 0;
+    in property <bool> selected;
+    in property <color> selected-background;
+    in property <color> hover-background;
+    in property <color> accent-color;
+    in property <color> label-color;
+    in property <color> muted-color;
+    property <color> icon-color: root.muted-color;
+    callback clicked();
+
+    width: 165px;
+    height: 40px;
+    border-radius: 4px;
+    background: root.selected ? root.selected-background : nav_touch.has-hover ? root.hover-background : transparent;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 4px;
+        height: parent.height;
+        border-radius: 2px;
+        background: root.selected ? root.accent-color : transparent;
+    }
+
+    Rectangle {
+        x: 19px;
+        y: 11px;
+        width: 18px;
+        height: 18px;
+        background: transparent;
+
+        Path {
+            width: 19px;
+            height: 19px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M 3 3 H 10 V 10 H 3 Z M 14 3 H 21 V 10 H 14 Z M 3 14 H 10 V 21 H 3 Z M 14 14 H 21 V 21 H 14 Z";
+            fill: transparent;
+            stroke: root.icon-color;
+            stroke-width: 1.8px;
+            stroke-line-join: round;
+            visible: root.icon-kind == 0;
+        }
+
+        Path {
+            width: 19px;
+            height: 19px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M 7 8 C 7.4 5.6 9.4 4 12 4 C 14.6 4 16.6 5.6 17 8 M 4 9 H 20 V 14 H 4 Z M 3 14 H 10 V 21 H 3 Z M 14 14 H 21 V 21 H 14 Z";
+            fill: transparent;
+            stroke: root.icon-color;
+            stroke-width: 1.8px;
+            stroke-line-join: round;
+            visible: root.icon-kind == 1;
+        }
+
+        Rectangle { x: 3px; y: 11px; width: 2px; height: 6px; border-radius: 1px; background: root.icon-color; visible: root.icon-kind == 2; }
+        Rectangle { x: 8px; y: 7px; width: 2px; height: 10px; border-radius: 1px; background: root.icon-color; visible: root.icon-kind == 2; }
+        Rectangle { x: 13px; y: 3px; width: 2px; height: 14px; border-radius: 1px; background: root.icon-color; visible: root.icon-kind == 2; }
+
+        Path {
+            width: 19px;
+            height: 19px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M 5 7 H 19 C 20 7 21 8 21 9 V 13 C 21 14 20 15 19 15 H 5 C 4 15 3 14 3 13 V 9 C 3 8 4 7 5 7 Z M 8 7 V 5 M 16 7 V 5 M 12 15 V 21";
+            fill: transparent;
+            stroke: root.icon-color;
+            stroke-width: 1.8px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            visible: root.icon-kind == 3;
+        }
+
+        Path {
+            x: 1px;
+            y: 1px;
+            width: 16px;
+            height: 16px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M 12 15.5 A 3.5 3.5 0 1 0 12 8.5 A 3.5 3.5 0 0 0 12 15.5 M 19.4 15 A 1.65 1.65 0 0 0 19.73 16.82 L 19.77 16.89 A 2 2 0 0 1 19.4 19.4 A 2 2 0 0 1 16.89 19.77 L 16.82 19.73 A 1.65 1.65 0 0 0 15 19.4 A 1.65 1.65 0 0 0 14 20.9 V 21 A 2 2 0 0 1 10 21 V 20.9 A 1.65 1.65 0 0 0 9 19.4 A 1.65 1.65 0 0 0 7.18 19.73 L 7.11 19.77 A 2 2 0 0 1 4.6 19.4 A 2 2 0 0 1 4.23 16.89 L 4.27 16.82 A 1.65 1.65 0 0 0 4.6 15 A 1.65 1.65 0 0 0 3.1 14 H 3 A 2 2 0 0 1 3 10 H 3.1 A 1.65 1.65 0 0 0 4.6 9 A 1.65 1.65 0 0 0 4.27 7.18 L 4.23 7.11 A 2 2 0 0 1 4.6 4.6 A 2 2 0 0 1 7.11 4.23 L 7.18 4.27 A 1.65 1.65 0 0 0 9 4.6 A 1.65 1.65 0 0 0 10 3.1 V 3 A 2 2 0 0 1 14 3 V 3.1 A 1.65 1.65 0 0 0 15 4.6 A 1.65 1.65 0 0 0 16.82 4.27 L 16.89 4.23 A 2 2 0 0 1 19.4 4.6 A 2 2 0 0 1 19.77 7.11 L 19.73 7.18 A 1.65 1.65 0 0 0 19.4 9 A 1.65 1.65 0 0 0 20.9 10 H 21 A 2 2 0 0 1 21 14 H 20.9 A 1.65 1.65 0 0 0 19.4 15";
+            fill: transparent;
+            stroke: root.icon-color;
+            stroke-width: 1.7px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            visible: root.icon-kind == 4;
+        }
+    }
+
+    Text {
+        x: 50px;
+        y: 12px;
+        width: parent.width - 64px;
+        text: root.text;
+        color: root.selected ? root.label-color : root.muted-color;
+        font-size: 14px;
+        font-weight: 400;
+        overflow: elide;
+    }
+
+    nav_touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component PanelTitle inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <color> title-color;
+    in property <color> muted-color;
+
+    width: 258px;
+    height: 40px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        text: root.title;
+        color: root.title-color;
+        font-size: 14px;
+        font-weight: 500;
+        overflow: elide;
+    }
+
+    Text {
+        x: 0px;
+        y: 21px;
+        width: parent.width;
+        text: root.subtitle;
+        color: root.muted-color;
+        font-size: 9px;
+        overflow: elide;
+    }
+}
+
+export component SettingSectionTitle inherits Rectangle {
+    in property <string> title;
+    in property <color> title-color;
+    in property <color> divider-color;
+
+    height: 34px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        text: root.title;
+        color: root.title-color;
+        font-size: 11px;
+        font-weight: 500;
+        overflow: elide;
+    }
+
+    Rectangle {
+        x: 0px;
+        y: 26px;
+        width: parent.width;
+        height: 1px;
+        background: root.divider-color;
+    }
+}
+
+export component SettingLabel inherits Rectangle {
+    in property <string> label;
+    in property <string> help;
+    in property <color> label-color;
+    in property <color> muted-color;
+
+    width: 158px;
+    height: 33px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        text: root.label;
+        color: root.label-color;
+        font-size: 12px;
+        font-weight: 500;
+        overflow: elide;
+    }
+
+    Text {
+        x: 0px;
+        y: 17px;
+        width: parent.width;
+        height: 13px;
+        text: root.help;
+        color: root.muted-color;
+        font-size: 11px;
+        overflow: elide;
+    }
+}

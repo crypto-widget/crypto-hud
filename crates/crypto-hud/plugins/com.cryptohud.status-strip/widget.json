@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 3,
+  "id": "com.cryptohud.status-strip",
+  "name": "Status Strip",
+  "version": "1.0.0",
+  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "renderer": {
+    "kind": "slint",
+    "entry": "ui/main.slint",
+    "component": "StatusStrip"
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  },
+  "defaultSize": {
+    "width": 688,
+    "height": 92
+  },
+  "minSymbolLimit": 1,
+  "symbolLimit": 5,
+  "dataRequirements": [
+    {
+      "capability": "market.price"
+    }
+  ]
+}

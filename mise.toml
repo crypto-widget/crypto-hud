@@ -1,0 +1,22 @@
+[tools]
+rust = "1.96.0"
+
+[tasks.check]
+description = "Check the Slint native widget app"
+run = "cargo check --workspace"
+
+[tasks.run-app]
+description = "Run the Slint native 10-widget app"
+run = "cargo run -p crypto-hud -- --widgets 10"
+
+[tasks.format]
+description = "Format Rust sources"
+run = "cargo fmt --all"
+
+[tasks.format-check]
+description = "Check Rust formatting"
+run = "cargo fmt --all --check"
+
+[tasks.test]
+description = "Run the workspace test suite"
+run = "cargo test --workspace"
