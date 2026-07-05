@@ -16,6 +16,7 @@ export component TrustCard inherits Window {
     in property <bool> layout-locked;
     in property <int> widget-width: 520;
     in property <int> widget-height: 410;
+    in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
@@ -39,12 +40,13 @@ export component TrustCard inherits Window {
         : (root.red-up-enabled ? root.gain-color : root.loss-color);
     property <color> chart-glow-color: root.light-theme ? #16a34a4c : #42e6c455;
     property <color> chart-fill-color: root.light-theme ? #16a34a30 : #14b8a633;
-    property <float> content-scale: ((root.widget-width * 1px) / 520px) < ((root.widget-height * 1px) / 410px)
-        ? ((root.widget-width * 1px) / 520px)
-        : ((root.widget-height * 1px) / 410px);
+    property <float> content-scale: root.widget-scale;
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
+    function s(value: length) -> length {
+        return value * root.content-scale;
+    }
     title: root.widget-id;
     width: root.widget-width * 1px;
     height: root.widget-height * 1px;
@@ -52,28 +54,43 @@ export component TrustCard inherits Window {
     always-on-top: root.pin-to-top;
     background: transparent;
 
+    drag_area := TouchArea {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+        pointer-event(event) => {
+            if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.card-left-drag-active = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                root.card-left-drag-active = false;
+            }
+        }
+        moved => {
+            if !root.layout-locked && root.card-left-drag-active {
+                root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+
     card := Rectangle {
-        x: (root.widget-width * 1px - 520px * root.content-scale) / 2 + 20px * root.content-scale;
-        y: (root.widget-height * 1px - 410px * root.content-scale) / 2 + 20px * root.content-scale;
-        width: 480px;
-        height: 375px;
-        transform-origin: { x: 0px, y: 0px };
-        transform-scale-x: root.content-scale;
-        transform-scale-y: root.content-scale;
-        border-radius: 13px;
+        x: (root.widget-width * 1px - root.s(520px)) / 2 + root.s(20px);
+        y: (root.widget-height * 1px - root.s(410px)) / 2 + root.s(20px);
+        width: root.s(480px);
+        height: root.s(375px);
+        border-radius: root.s(13px);
         background: root.card-background;
-        border-width: 1px;
+        border-width: root.s(1px);
         border-color: root.card-border-color;
         opacity: root.content-opacity / 100;
-        drop-shadow-offset-y: 18px;
-        drop-shadow-blur: 28px;
+        drop-shadow-offset-y: root.s(18px);
+        drop-shadow-blur: root.s(28px);
         drop-shadow-color: #0000007a;
         clip: true;
 
         Rectangle {
             width: parent.width;
             height: parent.height;
-            border-radius: 13px;
+            border-radius: root.s(13px);
             background: #ffffff07;
         }
 
@@ -83,136 +100,136 @@ export component TrustCard inherits Window {
             visible: index == 0;
 
             Text {
-                x: 26px;
-                y: 24px;
-                width: 190px;
+                x: root.s(26px);
+                y: root.s(24px);
+                width: root.s(190px);
                 text: quote.symbol;
                 color: root.card-primary-text-color;
-                font-size: 25px;
+                font-size: root.s(25px);
                 font-weight: 800;
                 overflow: elide;
             }
 
             pill := Rectangle {
-                x: 238px;
-                y: 17px;
-                width: 136px;
-                height: 32px;
-                border-radius: 13px;
+                x: root.s(238px);
+                y: root.s(17px);
+                width: root.s(136px);
+                height: root.s(32px);
+                border-radius: root.s(13px);
                 background: #064e3b48;
-                border-width: 1px;
+                border-width: root.s(1px);
                 border-color: #10b98199;
 
                 Rectangle {
-                    x: 15px;
-                    y: 11px;
-                    width: 10px;
-                    height: 10px;
-                    border-radius: 5px;
+                    x: root.s(15px);
+                    y: root.s(11px);
+                    width: root.s(10px);
+                    height: root.s(10px);
+                    border-radius: root.s(5px);
                     background: root.gain-color;
                     drop-shadow-offset-y: 0px;
-                    drop-shadow-blur: 8px;
+                    drop-shadow-blur: root.s(8px);
                     drop-shadow-color: #50df99aa;
                 }
 
                 Text {
-                    x: 36px;
-                    y: 6px;
-                    width: 34px;
+                    x: root.s(36px);
+                    y: root.s(6px);
+                    width: root.s(34px);
                     text: "OK";
                     color: root.gain-color;
-                    font-size: 17px;
+                    font-size: root.s(17px);
                     font-weight: 800;
                     overflow: elide;
                 }
 
                 Text {
-                    x: 72px;
-                    y: 6px;
-                    width: 54px;
+                    x: root.s(72px);
+                    y: root.s(6px);
+                    width: root.s(54px);
                     text: root.source-text;
                     color: root.card-source-text-color;
-                    font-size: 15px;
+                    font-size: root.s(15px);
                     font-weight: 500;
                     overflow: elide;
                 }
 
                 Rectangle {
-                    x: 65px;
-                    y: 15px;
-                    width: 3px;
-                    height: 3px;
-                    border-radius: 1.5px;
+                    x: root.s(65px);
+                    y: root.s(15px);
+                    width: root.s(3px);
+                    height: root.s(3px);
+                    border-radius: root.s(1.5px);
                     background: root.card-updated-text-color;
                 }
             }
 
             close_icon := Path {
-                x: parent.width - 46px;
-                y: 22px;
-                width: 23px;
-                height: 23px;
+                x: parent.width - root.s(46px);
+                y: root.s(22px);
+                width: root.s(23px);
+                height: root.s(23px);
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 5 5 L 19 19 M 19 5 L 5 19";
                 fill: transparent;
                 stroke: #a7b0bf;
-                stroke-width: 2.2px;
+                stroke-width: root.s(2.2px);
                 stroke-line-cap: round;
             }
 
             Rectangle {
-                x: 24px;
-                y: 70px;
-                width: parent.width - 48px;
-                height: 1px;
+                x: root.s(24px);
+                y: root.s(70px);
+                width: parent.width - root.s(48px);
+                height: root.s(1px);
                 background: #ffffff18;
             }
 
             Text {
-                x: 26px;
-                y: 88px;
-                width: parent.width - 52px;
+                x: root.s(26px);
+                y: root.s(88px);
+                width: parent.width - root.s(52px);
                 text: quote.price;
                 color: root.card-primary-text-color;
-                font-size: 64px;
+                font-size: root.s(64px);
                 font-weight: 900;
                 overflow: elide;
             }
 
             Text {
-                x: 28px;
-                y: 158px;
-                width: 174px;
+                x: root.s(28px);
+                y: root.s(158px);
+                width: root.s(174px);
                 text: quote.change;
                 color: root.chart-color;
-                font-size: 27px;
+                font-size: root.s(27px);
                 font-weight: 800;
                 overflow: elide;
             }
 
             chart := Rectangle {
-                x: 24px;
-                y: 198px;
-                width: parent.width - 48px;
-                height: 94px;
+                x: root.s(24px);
+                y: root.s(198px);
+                width: parent.width - root.s(48px);
+                height: root.s(94px);
                 background: transparent;
 
                 for dot[i] in 38 : Rectangle {
-                    x: i * 11px;
-                    y: 8px;
-                    width: 2px;
-                    height: 2px;
-                    border-radius: 1px;
+                    x: i * root.s(11px);
+                    y: root.s(8px);
+                    width: root.s(2px);
+                    height: root.s(2px);
+                    border-radius: root.s(1px);
                     background: root.light-theme ? #0f172a26 : #ffffff28;
                 }
 
                 for dot[i] in 38 : Rectangle {
-                    x: i * 11px;
-                    y: 78px;
-                    width: 2px;
-                    height: 2px;
-                    border-radius: 1px;
+                    x: i * root.s(11px);
+                    y: root.s(78px);
+                    width: root.s(2px);
+                    height: root.s(2px);
+                    border-radius: root.s(1px);
                     background: root.light-theme ? #0f172a20 : #ffffff22;
                 }
 
@@ -220,7 +237,7 @@ export component TrustCard inherits Window {
                     x: 0px;
                     y: 0px;
                     width: parent.width;
-                    height: 90px;
+                    height: root.s(90px);
                     viewbox-width: 100;
                     viewbox-height: 40;
                     fit: fill;
@@ -234,99 +251,99 @@ export component TrustCard inherits Window {
                     x: 0px;
                     y: 0px;
                     width: parent.width;
-                    height: 90px;
+                    height: root.s(90px);
                     viewbox-width: 100;
                     viewbox-height: 40;
                     fit: fill;
                     commands: root.chart-line-path;
                     fill: transparent;
                     stroke: root.chart-color;
-                    stroke-width: 2.4px;
+                    stroke-width: root.s(2.4px);
                     stroke-line-cap: round;
                     stroke-line-join: round;
                     opacity: root.chart-ready ? 1 : 0.42;
                 }
 
                 Rectangle {
-                    x: parent.width - 13px;
-                    y: root.chart-end-y-ratio * parent.height / 1000 - 6px;
-                    width: 13px;
-                    height: 13px;
-                    border-radius: 6.5px;
+                    x: parent.width - root.s(13px);
+                    y: root.chart-end-y-ratio * parent.height / 1000 - root.s(6px);
+                    width: root.s(13px);
+                    height: root.s(13px);
+                    border-radius: root.s(6.5px);
                     background: root.chart-glow-color;
-                    border-width: 2px;
+                    border-width: root.s(2px);
                     border-color: root.chart-color;
                     opacity: root.chart-ready ? 1 : 0.38;
                 }
             }
 
             Rectangle {
-                x: 24px;
-                    y: 304px;
-                width: parent.width - 48px;
-                height: 1px;
+                x: root.s(24px);
+                y: root.s(304px);
+                width: parent.width - root.s(48px);
+                height: root.s(1px);
                 background: root.light-theme ? #0f172a18 : #ffffff18;
             }
 
             refresh_icon := Path {
-                x: 28px;
-                y: 318px;
-                width: 21px;
-                height: 21px;
+                x: root.s(28px);
+                y: root.s(318px);
+                width: root.s(21px);
+                height: root.s(21px);
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 19 12 A 7 7 0 1 1 17 7 M 17 7 L 17 3 M 17 7 L 21 7 M 10 12 L 14 12 M 12 10 L 12 14";
                 fill: transparent;
                 stroke: #55e6d0;
-                stroke-width: 2.2px;
+                stroke-width: root.s(2.2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }
 
             Text {
-                x: 62px;
-                y: 316px;
-                width: 150px;
+                x: root.s(62px);
+                y: root.s(316px);
+                width: root.s(150px);
                 text: root.updated-text;
                 color: root.card-source-text-color;
-                font-size: 18px;
+                font-size: root.s(18px);
                 font-weight: 500;
                 overflow: elide;
             }
 
             bell_icon := Path {
-                x: 28px;
-                y: 342px;
-                width: 21px;
-                height: 21px;
+                x: root.s(28px);
+                y: root.s(342px);
+                width: root.s(21px);
+                height: root.s(21px);
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 6 17 L 18 17 M 8 17 L 8 10 A 4 4 0 0 1 16 10 L 16 17 M 10 19 A 2 2 0 0 0 14 19 M 12 4 L 12 2";
                 fill: transparent;
                 stroke: #fbbf24;
-                stroke-width: 2.2px;
+                stroke-width: root.s(2.2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }
 
             Text {
-                x: 62px;
-                y: 340px;
-                width: 160px;
+                x: root.s(62px);
+                y: root.s(340px);
+                width: root.s(160px);
                 text: root.source-text;
                 color: root.card-source-text-color;
-                font-size: 18px;
+                font-size: root.s(18px);
                 font-weight: 500;
                 overflow: elide;
             }
 
             Text {
-                x: parent.width - 150px;
-                y: 340px;
-                width: 126px;
+                x: parent.width - root.s(150px);
+                y: root.s(340px);
+                width: root.s(126px);
                 text: root.updated-text;
                 color: root.card-updated-text-color;
-                font-size: 16px;
+                font-size: root.s(16px);
                 font-weight: 500;
                 horizontal-alignment: right;
                 overflow: elide;
@@ -334,57 +351,39 @@ export component TrustCard inherits Window {
         }
 
         Text {
-            x: 28px;
-            y: 150px;
-            width: parent.width - 56px;
+            x: root.s(28px);
+            y: root.s(150px);
+            width: parent.width - root.s(56px);
             text: root.empty-text;
             color: root.card-updated-text-color;
-            font-size: 18px;
+            font-size: root.s(18px);
             horizontal-alignment: center;
             visible: root.quote-rows.length == 0;
             overflow: elide;
         }
 
-        drag_area := TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
-            pointer-event(event) => {
-                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                    root.card-left-drag-active = true;
-                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
-                    root.card-left-drag-active = false;
-                }
-            }
-            moved => {
-                if !root.layout-locked && root.card-left-drag-active {
-                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
-        }
-
         lock_button := Rectangle {
-            x: parent.width - 96px;
-            y: 16px;
-            width: 34px;
-            height: 34px;
-            border-radius: 9px;
+            x: parent.width - root.s(96px);
+            y: root.s(16px);
+            width: root.s(34px);
+            height: root.s(34px);
+            border-radius: root.s(9px);
             background: root.layout-locked || lock_touch.has-hover ? #07111dcc : transparent;
-            border-width: 1px;
+            border-width: root.s(1px);
             border-color: root.layout-locked || lock_touch.has-hover ? #ffffff66 : transparent;
             visible: drag_area.has-hover || lock_touch.has-hover;
 
             Path {
-                x: 5px;
-                y: 4px;
-                width: 24px;
-                height: 25px;
+                x: root.s(5px);
+                y: root.s(4px);
+                width: root.s(24px);
+                height: root.s(25px);
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
                 fill: root.layout-locked ? #a7b0bf : transparent;
                 stroke: #a7b0bf;
-                stroke-width: 2px;
+                stroke-width: root.s(2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }

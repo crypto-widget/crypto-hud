@@ -16,6 +16,7 @@ export component OrbitPulse inherits Window {
     in property <bool> layout-locked;
     in property <int> widget-width: 480;
     in property <int> widget-height: 480;
+    in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
@@ -40,9 +41,7 @@ export component OrbitPulse inherits Window {
         : (root.red-up-enabled ? root.gain-color : root.loss-color);
     property <color> chart-fill-color: root.light-theme ? #16a34a30 : #14b8a633;
     property <color> chart-glow-color: root.light-theme ? #16a34a50 : #42e6c460;
-    property <float> content-scale: ((root.widget-width * 1px) / 480px) < ((root.widget-height * 1px) / 480px)
-        ? ((root.widget-width * 1px) / 480px)
-        : ((root.widget-height * 1px) / 480px);
+    property <float> content-scale: root.widget-scale;
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
@@ -53,11 +52,32 @@ export component OrbitPulse inherits Window {
     always-on-top: root.pin-to-top;
     background: transparent;
 
+    drag_area := TouchArea {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+        pointer-event(event) => {
+            if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.card-left-drag-active = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                root.card-left-drag-active = false;
+            }
+        }
+        moved => {
+            if !root.layout-locked && root.card-left-drag-active {
+                root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+
     card := Rectangle {
         x: (root.widget-width * 1px - 480px * root.content-scale) / 2;
         y: (root.widget-height * 1px - 480px * root.content-scale) / 2;
-        width: 480px * root.content-scale;
-        height: 480px * root.content-scale;
+        width: 480px;
+        height: 480px;
+        transform-origin: { x: 0px, y: 0px };
+        transform-scale-x: root.content-scale;
+        transform-scale-y: root.content-scale;
         background: transparent;
         opacity: root.content-opacity / 100;
 
@@ -76,10 +96,10 @@ export component OrbitPulse inherits Window {
         }
 
         chart_band := Rectangle {
-            x: 98px * root.content-scale;
-            y: 252px * root.content-scale;
-            width: 296px * root.content-scale;
-            height: 88px * root.content-scale;
+            x: 98px;
+            y: 252px;
+            width: 296px;
+            height: 88px;
             background: transparent;
             clip: true;
 
@@ -92,9 +112,9 @@ export component OrbitPulse inherits Window {
 
             Path {
                 x: 0px;
-                y: 31px * root.content-scale;
+                y: 31px;
                 width: parent.width;
-                height: 42px * root.content-scale;
+                height: 42px;
                 viewbox-width: 100;
                 viewbox-height: 40;
                 fit: fill;
@@ -106,16 +126,16 @@ export component OrbitPulse inherits Window {
 
             Path {
                 x: 0px;
-                y: 31px * root.content-scale;
+                y: 31px;
                 width: parent.width;
-                height: 42px * root.content-scale;
+                height: 42px;
                 viewbox-width: 100;
                 viewbox-height: 40;
                 fit: fill;
                 commands: root.chart-line-path;
                 fill: transparent;
                 stroke: root.chart-glow-color;
-                stroke-width: 3.2px * root.content-scale;
+                stroke-width: 3.2px;
                 stroke-line-cap: round;
                 stroke-line-join: round;
                 opacity: root.chart-ready ? 0.24 : 0.14;
@@ -123,16 +143,16 @@ export component OrbitPulse inherits Window {
 
             Path {
                 x: 0px;
-                y: 31px * root.content-scale;
+                y: 31px;
                 width: parent.width;
-                height: 42px * root.content-scale;
+                height: 42px;
                 viewbox-width: 100;
                 viewbox-height: 40;
                 fit: fill;
                 commands: root.chart-line-path;
                 fill: transparent;
                 stroke: root.chart-color;
-                stroke-width: 1.55px * root.content-scale;
+                stroke-width: 1.55px;
                 stroke-line-cap: round;
                 stroke-line-join: round;
                 opacity: root.chart-ready ? 1 : 0.45;
@@ -145,60 +165,60 @@ export component OrbitPulse inherits Window {
             height: parent.height;
 
             Text {
-                x: 128px * root.content-scale;
-                y: 122px * root.content-scale;
-                width: 224px * root.content-scale;
+                x: 128px;
+                y: 122px;
+                width: 224px;
                 text: quote.symbol;
                 color: root.primary-text-color;
-                font-size: 23px * root.content-scale;
+                font-size: 23px;
                 font-weight: 800;
                 horizontal-alignment: center;
                 overflow: elide;
             }
 
             Rectangle {
-                x: 236px * root.content-scale;
-                y: 154px * root.content-scale;
-                width: 8px * root.content-scale;
-                height: 8px * root.content-scale;
-                border-radius: 4px * root.content-scale;
+                x: 236px;
+                y: 154px;
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
                 background: root.chart-color;
                 drop-shadow-offset-y: 0px;
-                drop-shadow-blur: 8px * root.content-scale;
+                drop-shadow-blur: 8px;
                 drop-shadow-color: root.chart-glow-color;
             }
 
             Text {
-                x: 82px * root.content-scale;
-                y: 174px * root.content-scale;
-                width: 316px * root.content-scale;
+                x: 82px;
+                y: 174px;
+                width: 316px;
                 text: quote.price;
                 color: root.primary-text-color;
-                font-size: 58px * root.content-scale;
+                font-size: 58px;
                 font-weight: 900;
                 horizontal-alignment: center;
                 overflow: elide;
             }
 
             Text {
-                x: 142px * root.content-scale;
-                y: 248px * root.content-scale;
-                width: 196px * root.content-scale;
+                x: 142px;
+                y: 248px;
+                width: 196px;
                 text: quote.change;
                 color: root.displayed-change-color;
-                font-size: 26px * root.content-scale;
+                font-size: 26px;
                 font-weight: 900;
                 horizontal-alignment: center;
                 overflow: elide;
             }
 
             Text {
-                x: 304px * root.content-scale;
-                y: 254px * root.content-scale;
-                width: 32px * root.content-scale;
+                x: 304px;
+                y: 254px;
+                width: 32px;
                 text: "24h";
                 color: root.displayed-change-color;
-                font-size: 16px * root.content-scale;
+                font-size: 16px;
                 font-weight: 800;
                 visible: quote.change != "--";
                 overflow: elide;
@@ -206,12 +226,12 @@ export component OrbitPulse inherits Window {
         }
 
         Text {
-            x: 128px * root.content-scale;
-            y: 190px * root.content-scale;
-            width: 224px * root.content-scale;
+            x: 128px;
+            y: 190px;
+            width: 224px;
             text: root.empty-text;
             color: root.secondary-text-color;
-            font-size: 22px * root.content-scale;
+            font-size: 22px;
             font-weight: 700;
             horizontal-alignment: center;
             visible: root.quote-rows.length == 0;
@@ -219,68 +239,50 @@ export component OrbitPulse inherits Window {
         }
 
         Text {
-            x: 132px * root.content-scale;
-            y: 364px * root.content-scale;
-            width: 216px * root.content-scale;
+            x: 132px;
+            y: 364px;
+            width: 216px;
             text: root.source-text;
             color: root.secondary-text-color;
-            font-size: 12px * root.content-scale;
+            font-size: 12px;
             font-weight: 600;
             horizontal-alignment: center;
             overflow: elide;
         }
 
         Text {
-            x: 132px * root.content-scale;
-            y: 388px * root.content-scale;
-            width: 216px * root.content-scale;
+            x: 132px;
+            y: 388px;
+            width: 216px;
             text: root.updated-text;
             color: root.secondary-text-color;
-            font-size: 11px * root.content-scale;
+            font-size: 11px;
             horizontal-alignment: center;
             overflow: elide;
         }
 
-        drag_area := TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
-            pointer-event(event) => {
-                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                    root.card-left-drag-active = true;
-                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
-                    root.card-left-drag-active = false;
-                }
-            }
-            moved => {
-                if !root.layout-locked && root.card-left-drag-active {
-                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
-        }
-
         lock_button := Rectangle {
-            x: parent.width - 54px * root.content-scale;
-            y: 52px * root.content-scale;
-            width: 28px * root.content-scale;
-            height: 28px * root.content-scale;
-            border-radius: 14px * root.content-scale;
+            x: parent.width - 54px;
+            y: 52px;
+            width: 28px;
+            height: 28px;
+            border-radius: 14px;
             background: root.layout-locked || lock_touch.has-hover ? root.lock-hover-background : transparent;
-            border-width: 1px * root.content-scale;
+            border-width: 1px;
             border-color: root.layout-locked || lock_touch.has-hover ? root.lock-hover-border : transparent;
             visible: drag_area.has-hover || lock_touch.has-hover;
 
             Path {
-                x: 5px * root.content-scale;
-                y: 4px * root.content-scale;
-                width: 18px * root.content-scale;
-                height: 20px * root.content-scale;
+                x: 5px;
+                y: 4px;
+                width: 18px;
+                height: 20px;
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
                 fill: root.layout-locked ? root.lock-icon-color : transparent;
                 stroke: root.lock-icon-color;
-                stroke-width: 2px * root.content-scale;
+                stroke-width: 2px;
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }

@@ -89,6 +89,10 @@ pub struct UiText {
     pub lock_position_help: &'static str,
     pub widget_scale_help: &'static str,
     pub opacity_help: &'static str,
+    pub widget_show_coin_logos: &'static str,
+    pub widget_show_coin_logos_help: &'static str,
+    pub widget_hide_quote_asset: &'static str,
+    pub widget_hide_quote_asset_help: &'static str,
     pub widget_topmost: &'static str,
     pub widget_topmost_help: &'static str,
     pub advanced_options: &'static str,
@@ -130,8 +134,6 @@ pub struct UiText {
     pub widget_visible: &'static str,
     pub widget_hidden: &'static str,
     pub delete_widget: &'static str,
-    pub status_ready: &'static str,
-    pub status_saved: &'static str,
     pub status_alert_invalid: &'static str,
     pub status_update_started: &'static str,
     pub status_update_failed: &'static str,
@@ -144,9 +146,9 @@ pub struct UiText {
 
 const EN_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
-    tray_settings: "Settings",
+    tray_settings: "Main Window",
     tray_quit: "Quit",
-    settings_title: "Crypto HUD Settings",
+    settings_title: "Crypto HUD",
     tab_widgets: "Widgets",
     tab_plugin_market: "Widget Library",
     tab_market_data: "Market Data",
@@ -196,7 +198,7 @@ const EN_TEXT: UiText = UiText {
     language: "Language",
     appearance_interface: "Interface",
     appearance_widget_defaults: "Widget Defaults",
-    theme_help: "Updates colors for settings and desktop widgets.",
+    theme_help: "Updates colors for the main window and desktop widgets.",
     language_help: "Refreshes interface text right away.",
     red_up_color_help: "Shows gains in red and losses in green.",
     default_opacity_help: "Sets how transparent new widgets appear.",
@@ -205,9 +207,9 @@ const EN_TEXT: UiText = UiText {
     system_tray: "Tray",
     system_app_info: "App Info",
     auto_start_help: "Runs Crypto HUD after you sign in.",
-    show_main_window_on_startup_help: "Opens the settings window on app launch.",
+    show_main_window_on_startup_help: "Opens the main window on app launch.",
     shortcut_help: "Use Alt+C to hide or restore widgets.",
-    tray_icon_help: "Keeps quick access for settings and quit.",
+    tray_icon_help: "Keeps quick access for the main window and quit.",
     tray_hover_display_help: "Temporarily shows widgets while hovering the tray icon.",
     apply: "Apply",
     widget_library: "Widget Library",
@@ -218,6 +220,10 @@ const EN_TEXT: UiText = UiText {
     lock_position_help: "Keep this widget fixed at its current position.",
     widget_scale_help: "Adjust the overall widget size.",
     opacity_help: "Adjust widget transparency.",
+    widget_show_coin_logos: "Show coin logos",
+    widget_show_coin_logos_help: "Display token icons beside pairs.",
+    widget_hide_quote_asset: "Hide quote asset",
+    widget_hide_quote_asset_help: "Show BTC instead of BTC/USDC.",
     widget_topmost: "Always on top",
     widget_topmost_help: "Keep this widget above other windows.",
     advanced_options: "Advanced options",
@@ -260,8 +266,6 @@ const EN_TEXT: UiText = UiText {
     widget_visible: "Shown",
     widget_hidden: "Hidden",
     delete_widget: "Remove widget",
-    status_ready: "Saved",
-    status_saved: "Saved",
     status_alert_invalid: "Alert rule is incomplete",
     status_update_started: "Update installer started",
     status_update_failed: "Update install failed",
@@ -274,9 +278,9 @@ const EN_TEXT: UiText = UiText {
 
 const ZH_HANS_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
-    tray_settings: "设置",
+    tray_settings: "主界面",
     tray_quit: "退出",
-    settings_title: "Crypto HUD 设置",
+    settings_title: "Crypto HUD",
     tab_widgets: "小组件",
     tab_plugin_market: "组件库",
     tab_market_data: "行情",
@@ -326,7 +330,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     language: "语言",
     appearance_interface: "界面",
     appearance_widget_defaults: "小组件默认值",
-    theme_help: "同步调整设置窗口和桌面小组件配色。",
+    theme_help: "同步调整主界面和桌面小组件配色。",
     language_help: "切换后界面文案会立即刷新。",
     red_up_color_help: "开启后上涨显示红色，下跌显示绿色。",
     default_opacity_help: "控制新建小组件默认透明度。",
@@ -335,9 +339,9 @@ const ZH_HANS_TEXT: UiText = UiText {
     system_tray: "托盘",
     system_app_info: "应用信息",
     auto_start_help: "登录 Windows 后自动运行应用。",
-    show_main_window_on_startup_help: "启动应用时同时打开设置窗口。",
+    show_main_window_on_startup_help: "启动应用时同时打开主界面。",
     shortcut_help: "按 Alt+C 快速隐藏或恢复小组件。",
-    tray_icon_help: "保留托盘入口，方便打开设置或退出。",
+    tray_icon_help: "保留托盘入口，方便打开主界面或退出。",
     tray_hover_display_help: "鼠标悬停托盘图标时临时显示小组件。",
     apply: "应用",
     widget_library: "小组件库",
@@ -348,6 +352,10 @@ const ZH_HANS_TEXT: UiText = UiText {
     lock_position_help: "锁定后将固定在当前位置。",
     widget_scale_help: "调整小组件整体大小。",
     opacity_help: "调整小组件透明度。",
+    widget_show_coin_logos: "显示币种 Logo",
+    widget_show_coin_logos_help: "在交易对旁显示币种图标。",
+    widget_hide_quote_asset: "隐藏报价币",
+    widget_hide_quote_asset_help: "如 BTC/USDC 仅显示 BTC。",
     widget_topmost: "总在最前",
     widget_topmost_help: "始终显示在其他窗口之上。",
     advanced_options: "高级选项",
@@ -389,8 +397,6 @@ const ZH_HANS_TEXT: UiText = UiText {
     widget_visible: "已显示",
     widget_hidden: "已隐藏",
     delete_widget: "移除小组件",
-    status_ready: "已保存",
-    status_saved: "已保存",
     status_alert_invalid: "告警规则不完整",
     status_update_started: "更新安装器已启动",
     status_update_failed: "更新安装失败",
@@ -579,6 +585,8 @@ mod tests {
         assert_eq!(en.preview_pairs, "Pairs");
         assert_eq!(en.preview_updated, "Updated 3s");
         assert_eq!(en.preview_source_ok, "Source OK");
+        assert_eq!(en.widget_show_coin_logos, "Show coin logos");
+        assert_eq!(en.widget_hide_quote_asset, "Hide quote asset");
         assert_eq!(en.source_prefix, "Live feed");
         assert_eq!(en.runtime_source_error, "Source issue");
         assert_eq!(
@@ -635,6 +643,8 @@ mod tests {
         assert_eq!(zh.preview_pairs, "交易对");
         assert_eq!(zh.preview_updated, "3秒前更新");
         assert_eq!(zh.preview_source_ok, "数据正常");
+        assert_eq!(zh.widget_show_coin_logos, "显示币种 Logo");
+        assert_eq!(zh.widget_hide_quote_asset, "隐藏报价币");
         assert_eq!(zh.market_settings, "行情设置");
         assert_eq!(
             widget_title(Locale::ZhHans, WidgetText::QuoteBoard),

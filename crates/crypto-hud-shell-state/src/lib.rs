@@ -12,6 +12,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 pub use crypto_hud_core::{
     clamp_refresh_interval, default_enabled_market_sources, default_market_symbols,
@@ -32,17 +33,26 @@ pub const LEGACY_DEFAULT_POSITION_STEP: i32 = 32;
 pub const DEFAULT_LAYOUT_MARGIN_X: i32 = 96;
 pub const DEFAULT_LAYOUT_MARGIN_Y: i32 = 96;
 pub const DEFAULT_LAYOUT_GAP: i32 = 24;
+pub const WIDGET_CONFIG_SHOW_COIN_LOGOS: &str = "show_coin_logos";
+pub const WIDGET_CONFIG_HIDE_QUOTE_ASSET: &str = "hide_quote_asset";
 pub const QUOTE_BOARD_WIDTH: i32 = 286;
-pub const QUOTE_BOARD_HEIGHT: i32 = 232;
+pub const QUOTE_BOARD_HEIGHT: i32 = 194;
 pub const MINI_TICKER_WIDTH: i32 = 236;
 pub const MINI_TICKER_HEIGHT: i32 = 112;
+const QUOTE_BOARD_WIDTH_WITHOUT_COIN_LOGOS: i32 = 274;
+const QUOTE_BOARD_WIDTH_WITHOUT_QUOTE_ASSET: i32 = 246;
+const QUOTE_BOARD_WIDTH_COMPACT_SYMBOLS: i32 = 224;
+const QUOTE_BOARD_ONE_ROW_HEIGHT: i32 = 80;
+const QUOTE_BOARD_MULTI_ROW_BASE_HEIGHT: i32 = 70;
+const QUOTE_BOARD_ROW_HEIGHT_STEP: i32 = 31;
+const LEGACY_QUOTE_BOARD_HEIGHT_WITH_FOOTER: i32 = 232;
 pub const DEFAULT_LAYOUT_SCAN_SLOTS: usize = 80;
-pub const MIN_VISIBLE_WIDGET_PX: i32 = 48;
-pub const MIN_WIDGET_WIDTH: i32 = 160;
-pub const MIN_WIDGET_HEIGHT: i32 = 80;
+pub const MIN_VISIBLE_WIDGET_PX: i32 = 8;
+pub const MIN_WIDGET_WIDTH: i32 = 12;
+pub const MIN_WIDGET_HEIGHT: i32 = 8;
 pub const MAX_WIDGET_WIDTH: i32 = 6000;
 pub const MAX_WIDGET_HEIGHT: i32 = 4000;
-pub const MIN_WIDGET_SCALE_PERCENT: i32 = 50;
+pub const MIN_WIDGET_SCALE_PERCENT: i32 = 10;
 pub const MAX_WIDGET_SCALE_PERCENT: i32 = 300;
 pub const DEFAULT_WIDGET_SCALE_PERCENT: i32 = 100;
 pub const PARKED_WIDGET_X: i32 = -32_000;
@@ -134,11 +144,109 @@ impl From<(i32, i32)> for WidgetSize {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetSizePolicy {
+    #[default]
+    Fixed,
+    SymbolBlocks {
+        block_width: i32,
+        block_height: i32,
+        padding_width: i32,
+        padding_height: i32,
+    },
+    SymbolGrid {
+        cell_width: i32,
+        cell_height: i32,
+        content_padding_width: i32,
+        content_padding_height: i32,
+        columns: Option<usize>,
+        rows: Option<usize>,
+    },
+}
+
+impl WidgetSizePolicy {
+    fn size_for_symbol_count(
+        self,
+        default_size: WidgetSize,
+        symbol_count: usize,
+        min_symbols: usize,
+        max_symbols: usize,
+    ) -> WidgetSize {
+        match self {
+            Self::Fixed => default_size,
+            Self::SymbolBlocks {
+                block_width,
+                block_height,
+                padding_width,
+                padding_height,
+            } => {
+                let max_symbols = max_symbols.max(1);
+                let min_symbols = min_symbols.clamp(1, max_symbols);
+                let count = symbol_count.clamp(min_symbols, max_symbols) as i32;
+                WidgetSize {
+                    width: block_width
+                        .saturating_mul(count)
+                        .saturating_add(padding_width),
+                    height: block_height.saturating_add(padding_height),
+                }
+            }
+            Self::SymbolGrid {
+                cell_width,
+                cell_height,
+                content_padding_width,
+                content_padding_height,
+                columns,
+                rows,
+            } => {
+                let max_symbols = max_symbols.max(1);
+                let min_symbols = min_symbols.clamp(1, max_symbols);
+                let count = symbol_count.clamp(min_symbols, max_symbols);
+                let (columns, rows) = symbol_grid_tracks(count, columns, rows);
+                WidgetSize {
+                    width: cell_width
+                        .saturating_mul(columns as i32)
+                        .saturating_add(content_padding_width),
+                    height: cell_height
+                        .saturating_mul(rows as i32)
+                        .saturating_add(content_padding_height),
+                }
+            }
+        }
+    }
+}
+
+fn symbol_grid_tracks(
+    symbol_count: usize,
+    columns: Option<usize>,
+    rows: Option<usize>,
+) -> (usize, usize) {
+    let count = symbol_count.max(1);
+    match (columns, rows) {
+        (Some(max_columns), Some(max_rows)) => {
+            let columns = count.min(max_columns).max(1);
+            let rows = count.div_ceil(max_columns).min(max_rows).max(1);
+            (columns, rows)
+        }
+        (Some(max_columns), None) => {
+            let columns = count.min(max_columns).max(1);
+            let rows = count.div_ceil(max_columns).max(1);
+            (columns, rows)
+        }
+        (None, Some(max_rows)) => {
+            let rows = count.min(max_rows).max(1);
+            let columns = count.div_ceil(max_rows).max(1);
+            (columns, rows)
+        }
+        (None, None) => (count, 1),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WidgetDefinition {
     pub id: String,
     pub name: String,
     pub default_size: WidgetSize,
+    pub size_policy: WidgetSizePolicy,
     pub min_symbol_limit: usize,
     pub symbol_limit: usize,
 }
@@ -149,6 +257,7 @@ impl WidgetDefinition {
             id: widget_type.plugin_id().to_string(),
             name: persisted_widget_title(widget_type).to_string(),
             default_size: widget_type.default_size(),
+            size_policy: WidgetSizePolicy::Fixed,
             min_symbol_limit: widget_type.min_symbol_limit(),
             symbol_limit: widget_type.symbol_limit(),
         }
@@ -181,6 +290,8 @@ pub struct WidgetLayout {
     #[serde(default)]
     pub locked: bool,
     #[serde(default)]
+    pub scale_percent: i32,
+    #[serde(default)]
     pub width: i32,
     #[serde(default)]
     pub height: i32,
@@ -194,6 +305,7 @@ impl Default for WidgetLayout {
             always_on_top: default_widgets_always_on_top(),
             opacity_percent: default_opacity_percent(),
             locked: false,
+            scale_percent: DEFAULT_WIDGET_SCALE_PERCENT,
             width: QUOTE_BOARD_WIDTH,
             height: QUOTE_BOARD_HEIGHT,
         }
@@ -368,7 +480,7 @@ pub struct AppSettings {
     pub market_fallback_enabled: bool,
     #[serde(default)]
     pub auto_start_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_show_main_window_on_startup")]
     pub show_main_window_on_startup: bool,
     #[serde(default)]
     pub shortcut: ShortcutPreference,
@@ -403,7 +515,7 @@ impl Default for AppSettings {
             market_default_symbols: default_market_symbols(),
             market_fallback_enabled: default_market_fallback_enabled(),
             auto_start_enabled: false,
-            show_main_window_on_startup: false,
+            show_main_window_on_startup: default_show_main_window_on_startup(),
             shortcut: ShortcutPreference::default(),
             theme: ThemePreference::default(),
             language: LanguagePreference::default(),
@@ -465,6 +577,10 @@ pub fn default_widgets_always_on_top() -> bool {
 
 pub fn default_opacity_percent() -> i32 {
     DEFAULT_OPACITY_PERCENT
+}
+
+pub fn default_show_main_window_on_startup() -> bool {
+    true
 }
 
 pub fn clamp_opacity(value: i32) -> i32 {
@@ -553,7 +669,57 @@ pub fn default_widget_visible() -> bool {
 }
 
 pub fn default_widget_config() -> serde_json::Value {
-    serde_json::Value::Object(serde_json::Map::new())
+    Value::Object(Map::new())
+}
+
+pub fn widget_show_coin_logos(instance: &WidgetInstance) -> bool {
+    widget_config_show_coin_logos(&instance.config)
+}
+
+pub fn widget_hide_quote_asset(instance: &WidgetInstance) -> bool {
+    widget_config_hide_quote_asset(&instance.config)
+}
+
+pub fn set_widget_display_config(
+    instance: &mut WidgetInstance,
+    show_coin_logos: bool,
+    hide_quote_asset: bool,
+) {
+    let config = widget_config_object_mut(instance);
+    config.insert(
+        WIDGET_CONFIG_SHOW_COIN_LOGOS.to_string(),
+        Value::Bool(show_coin_logos),
+    );
+    config.insert(
+        WIDGET_CONFIG_HIDE_QUOTE_ASSET.to_string(),
+        Value::Bool(hide_quote_asset),
+    );
+}
+
+fn widget_config_show_coin_logos(config: &serde_json::Value) -> bool {
+    widget_config_bool(config, WIDGET_CONFIG_SHOW_COIN_LOGOS, true)
+}
+
+fn widget_config_hide_quote_asset(config: &serde_json::Value) -> bool {
+    widget_config_bool(config, WIDGET_CONFIG_HIDE_QUOTE_ASSET, false)
+}
+
+fn widget_config_bool(config: &serde_json::Value, key: &str, default: bool) -> bool {
+    config
+        .as_object()
+        .and_then(|config| config.get(key))
+        .and_then(Value::as_bool)
+        .unwrap_or(default)
+}
+
+fn widget_config_object_mut(instance: &mut WidgetInstance) -> &mut Map<String, Value> {
+    if !instance.config.is_object() {
+        instance.config = default_widget_config();
+    }
+    instance
+        .config
+        .as_object_mut()
+        .expect("widget config should be an object")
 }
 
 pub fn normalize_alert_rules(rules: Vec<AlertRule>) -> Vec<AlertRule> {
@@ -804,8 +970,19 @@ pub fn normalize_store_with_catalog(
 
     if store.widgets.is_empty() && requested_widget_count > 0 {
         let settings = store.settings.clone();
-        for _ in 0..requested_widget_count {
+        for index in 0..requested_widget_count {
             add_widget_instance(store, WidgetKind::QuoteBoard, &settings, desktop_size);
+            if let Some(instance) = store.widgets.last_mut() {
+                instance.symbols =
+                    initial_widget_symbols_for_slot(WidgetKind::QuoteBoard, &settings, index);
+                let size = widget_size_from_scale_percent(
+                    default_widget_size_for_instance(instance, catalog),
+                    settings.widget_scale_percent,
+                );
+                instance.layout.scale_percent = settings.widget_scale_percent;
+                instance.layout.width = size.width;
+                instance.layout.height = size.height;
+            }
         }
         store.selected_widget_id = store.widgets.first().map(|widget| widget.id.clone());
     }
@@ -841,10 +1018,33 @@ pub fn normalize_store_with_catalog(
         if instance.name.trim().is_empty() {
             instance.name = default_persisted_widget_name(instance.widget_type(), index as u64 + 1);
         }
+        instance.symbols = normalized_symbols_for_instance(instance, catalog);
         let default_size = default_widget_size_for_instance(instance, catalog);
-        let fallback_size =
-            widget_size_from_scale_percent(default_size, store.settings.widget_scale_percent);
-        normalize_layout_size(&mut instance.layout, fallback_size);
+        let has_missing_scale_with_persisted_size =
+            instance.layout.scale_percent <= 0 && layout_has_persisted_size(&instance.layout);
+        let defer_quote_board_size_migration = has_missing_scale_with_persisted_size
+            && instance.widget_type() == WidgetKind::QuoteBoard;
+        let defer_dynamic_size_migration = has_missing_scale_with_persisted_size
+            && definition_for_instance(instance, catalog)
+                .map(|definition| definition.size_policy != WidgetSizePolicy::Fixed)
+                .unwrap_or(false);
+        normalize_layout_size_and_scale(
+            &mut instance.layout,
+            default_size,
+            store.settings.widget_scale_percent,
+            defer_quote_board_size_migration || defer_dynamic_size_migration,
+        );
+        migrate_legacy_quote_board_footer_size(instance);
+        migrate_quote_board_display_size(instance);
+        if defer_quote_board_size_migration && instance.layout.scale_percent <= 0 {
+            let default_size = default_widget_size_for_instance(instance, catalog);
+            normalize_layout_size_and_scale(
+                &mut instance.layout,
+                default_size,
+                store.settings.widget_scale_percent,
+                false,
+            );
+        }
         let instance_size = widget_size_for_instance(instance, catalog);
         if should_migrate_legacy_default_cascade
             && is_legacy_default_layout(&instance.layout, index)
@@ -861,7 +1061,6 @@ pub fn normalize_store_with_catalog(
             instance.layout.y = layout.y;
         }
         instance.layout.opacity_percent = clamp_opacity(instance.layout.opacity_percent);
-        instance.symbols = normalized_symbols_for_instance(instance, catalog);
     }
 
     if store.next_widget_number <= max_suffix {
@@ -886,19 +1085,48 @@ pub fn add_widget_instance(
 ) -> String {
     let number = next_widget_number(store, widget_type);
     let id = format!("{}-{number}", widget_type.id_prefix());
+    let symbols = default_symbols_for_type_from_settings(widget_type, settings);
+    let config = default_widget_config();
+    let size = widget_size_from_scale_percent(
+        default_widget_size_for_parts(
+            Some(widget_type),
+            widget_type.default_size(),
+            &symbols,
+            &config,
+        ),
+        settings.widget_scale_percent,
+    );
     let instance = WidgetInstance {
         id: id.clone(),
         plugin_id: widget_type.plugin_id().to_string(),
         legacy_widget_type: None,
         name: default_persisted_widget_name(widget_type, number),
         visible: true,
-        layout: next_available_layout(store, widget_type, settings.clone(), desktop_size),
-        symbols: default_symbols_for_type_from_settings(widget_type, settings),
-        config: default_widget_config(),
+        layout: next_available_layout_for_size(store, size, settings.clone(), desktop_size),
+        symbols,
+        config,
     };
     store.selected_widget_id = Some(id.clone());
     store.widgets.push(instance);
     id
+}
+
+fn initial_widget_symbols_for_slot(
+    widget_type: WidgetKind,
+    settings: &AppSettings,
+    slot: usize,
+) -> Vec<String> {
+    let defaults = default_symbols_for_type_from_settings(widget_type, settings);
+    defaults
+        .get(slot % defaults.len().max(1))
+        .cloned()
+        .map(|symbol| vec![symbol])
+        .unwrap_or_else(|| {
+            default_symbols_for_type(widget_type)
+                .into_iter()
+                .take(1)
+                .collect()
+        })
 }
 
 pub fn add_plugin_instance(
@@ -914,19 +1142,19 @@ pub fn add_plugin_instance(
     let prefix = plugin_instance_id_prefix(&plugin.id);
     let number = next_instance_number(store, &prefix);
     let id = format!("{prefix}-{number}");
+    let symbols = default_symbols_for_definition_from_settings(plugin, settings);
+    let size = widget_size_from_scale_percent(
+        widget_definition_size_for_symbols(plugin, &symbols),
+        settings.widget_scale_percent,
+    );
     let instance = WidgetInstance {
         id: id.clone(),
         plugin_id: plugin.id.clone(),
         legacy_widget_type: None,
         name: format!("{} {number}", plugin.name),
         visible: true,
-        layout: next_available_layout_for_size(
-            store,
-            widget_size_from_scale_percent(plugin.default_size, settings.widget_scale_percent),
-            settings.clone(),
-            desktop_size,
-        ),
-        symbols: default_symbols_for_definition_from_settings(plugin, settings),
+        layout: next_available_layout_for_size(store, size, settings.clone(), desktop_size),
+        symbols,
         config: default_widget_config(),
     };
     store.selected_widget_id = Some(id.clone());
@@ -943,10 +1171,19 @@ pub fn layout_for_instance(
 ) -> WidgetLayout {
     let size = widget_size_for_instance(instance, catalog);
     if layout_needs_recovery_for_size(&instance.layout, size, desktop_size) {
-        default_layout_for_size(index, size, settings, desktop_size)
+        let mut layout = default_layout_for_size(index, size, settings.clone(), desktop_size);
+        layout.scale_percent =
+            widget_scale_percent_for_instance(instance, catalog, settings.widget_scale_percent);
+        layout
     } else {
         let mut layout = instance.layout.clone();
         layout.opacity_percent = clamp_opacity(layout.opacity_percent);
+        layout.width = size.width;
+        layout.height = size.height;
+        if layout.scale_percent <= 0 {
+            layout.scale_percent =
+                widget_scale_percent_for_instance(instance, catalog, settings.widget_scale_percent);
+        }
         layout
     }
 }
@@ -994,6 +1231,7 @@ pub fn default_layout_for_size(
         always_on_top: settings.widgets_always_on_top,
         opacity_percent: settings.opacity_percent,
         locked: false,
+        scale_percent: clamp_default_widget_scale_percent(settings.widget_scale_percent),
         width: size.width,
         height: size.height,
     }
@@ -1016,6 +1254,16 @@ pub fn next_available_layout_for_size(
     settings: AppSettings,
     desktop_size: (i32, i32),
 ) -> WidgetLayout {
+    next_available_layout_for_size_with_catalog(store, size, settings, &[], desktop_size)
+}
+
+pub fn next_available_layout_for_size_with_catalog(
+    store: &LayoutStore,
+    size: WidgetSize,
+    settings: AppSettings,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+) -> WidgetLayout {
     for slot in 0..DEFAULT_LAYOUT_SCAN_SLOTS {
         let candidate = default_layout_for_size(slot, size, settings.clone(), desktop_size);
         if !layout_overlaps_existing_for_size(
@@ -1023,6 +1271,7 @@ pub fn next_available_layout_for_size(
             &candidate,
             size,
             settings.clone(),
+            catalog,
             desktop_size,
         ) {
             return candidate;
@@ -1080,6 +1329,73 @@ pub fn widget_size_from_scale_percent(default_size: WidgetSize, scale_percent: i
     })
 }
 
+pub fn widget_layout_scale_percent_for_size(
+    layout: &WidgetLayout,
+    default_size: WidgetSize,
+    fallback_scale_percent: i32,
+) -> i32 {
+    if layout.scale_percent > 0 {
+        let (min_scale, max_scale) = widget_scale_percent_bounds(default_size);
+        return layout.scale_percent.clamp(min_scale, max_scale);
+    }
+
+    let has_persisted_size = layout.width > 0 || layout.height > 0;
+    if has_persisted_size {
+        let size = clamp_widget_size(WidgetSize {
+            width: if layout.width > 0 {
+                layout.width
+            } else {
+                default_size.width
+            },
+            height: if layout.height > 0 {
+                layout.height
+            } else {
+                default_size.height
+            },
+        });
+        return widget_content_scale_percent_for_size(size, default_size);
+    }
+
+    let (min_scale, max_scale) = widget_scale_percent_bounds(default_size);
+    fallback_scale_percent.clamp(min_scale, max_scale)
+}
+
+pub fn widget_scale_percent_for_instance(
+    instance: &WidgetInstance,
+    catalog: &[WidgetDefinition],
+    fallback_scale_percent: i32,
+) -> i32 {
+    widget_layout_scale_percent_for_size(
+        &instance.layout,
+        default_widget_size_for_instance(instance, catalog),
+        fallback_scale_percent,
+    )
+}
+
+pub fn resize_widget_to_content(
+    instance: &mut WidgetInstance,
+    catalog: &[WidgetDefinition],
+    scale_percent: i32,
+) {
+    let default_size = default_widget_size_for_instance(instance, catalog);
+    let (min_scale, max_scale) = widget_scale_percent_bounds(default_size);
+    let scale_percent = scale_percent.clamp(min_scale, max_scale);
+    let size = widget_size_from_scale_percent(default_size, scale_percent);
+    instance.layout.scale_percent = scale_percent;
+    instance.layout.width = size.width;
+    instance.layout.height = size.height;
+}
+
+pub fn resize_widget_to_current_content(
+    instance: &mut WidgetInstance,
+    catalog: &[WidgetDefinition],
+    fallback_scale_percent: i32,
+) {
+    let scale_percent =
+        widget_scale_percent_for_instance(instance, catalog, fallback_scale_percent);
+    resize_widget_to_content(instance, catalog, scale_percent);
+}
+
 pub fn widget_scale_percent_for_size(size: WidgetSize, default_size: WidgetSize) -> i32 {
     let width = default_size.width.max(1);
     let height = default_size.height.max(1);
@@ -1088,6 +1404,15 @@ pub fn widget_scale_percent_for_size(size: WidgetSize, default_size: WidgetSize)
     let scale = div_round_i32(width_scale + height_scale, 2);
     let (min_scale, max_scale) = widget_scale_percent_bounds(default_size);
     scale.clamp(min_scale, max_scale)
+}
+
+pub fn widget_content_scale_percent_for_size(size: WidgetSize, default_size: WidgetSize) -> i32 {
+    let width = default_size.width.max(1);
+    let height = default_size.height.max(1);
+    let width_scale = div_round_i32(size.width.max(1) * 100, width);
+    let height_scale = div_round_i32(size.height.max(1) * 100, height);
+    let (min_scale, max_scale) = widget_scale_percent_bounds(default_size);
+    width_scale.min(height_scale).clamp(min_scale, max_scale)
 }
 
 pub fn layout_needs_recovery_for_size(
@@ -1260,7 +1585,7 @@ pub fn normalized_symbols_with_bounds(
 
     for symbol in fallback
         .into_iter()
-        .chain(default_market_symbols().into_iter())
+        .chain(default_market_symbols())
         .filter_map(|symbol| crypto_hud_core::normalize_market_pair_key(&symbol))
     {
         if normalized.len() >= min {
@@ -1346,6 +1671,9 @@ pub fn widget_size_for_instance(
     catalog: &[WidgetDefinition],
 ) -> WidgetSize {
     let default_size = default_widget_size_for_instance(instance, catalog);
+    if instance.layout.scale_percent > 0 {
+        return widget_size_from_scale_percent(default_size, instance.layout.scale_percent);
+    }
     clamp_widget_size(WidgetSize {
         width: if instance.layout.width > 0 {
             instance.layout.width
@@ -1364,9 +1692,46 @@ pub fn default_widget_size_for_instance(
     instance: &WidgetInstance,
     catalog: &[WidgetDefinition],
 ) -> WidgetSize {
-    definition_for_instance(instance, catalog)
-        .map(|definition| definition.default_size)
-        .unwrap_or_else(|| instance.widget_type().default_size())
+    let builtin_type = WidgetKind::from_plugin_id(&instance.plugin_id);
+    let default_size = definition_for_instance(instance, catalog)
+        .map(|definition| widget_definition_size_for_symbols(definition, &instance.symbols))
+        .unwrap_or_else(|| builtin_type.unwrap_or_default().default_size());
+    default_widget_size_for_parts(
+        builtin_type,
+        default_size,
+        &instance.symbols,
+        &instance.config,
+    )
+}
+
+fn default_widget_size_for_parts(
+    widget_type: Option<WidgetKind>,
+    default_size: WidgetSize,
+    symbols: &[String],
+    config: &serde_json::Value,
+) -> WidgetSize {
+    if widget_type == Some(WidgetKind::QuoteBoard) {
+        quote_board_display_size(
+            default_size,
+            widget_config_show_coin_logos(config),
+            widget_config_hide_quote_asset(config),
+            quote_board_row_count_for_symbols(symbols),
+        )
+    } else {
+        default_size
+    }
+}
+
+pub fn widget_definition_size_for_symbols(
+    definition: &WidgetDefinition,
+    symbols: &[String],
+) -> WidgetSize {
+    definition.size_policy.size_for_symbol_count(
+        definition.default_size,
+        symbols.len(),
+        definition.min_symbol_limit,
+        definition.symbol_limit,
+    )
 }
 
 pub fn widget_id_suffix(id: &str) -> Option<u64> {
@@ -1378,6 +1743,7 @@ fn layout_overlaps_existing_for_size(
     candidate: &WidgetLayout,
     size: WidgetSize,
     settings: AppSettings,
+    catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
 ) -> bool {
     let candidate_rect = widget_rect_for_size(candidate, size);
@@ -1385,29 +1751,176 @@ fn layout_overlaps_existing_for_size(
         if is_parked_position(instance.layout.x, instance.layout.y) {
             return false;
         }
-        let layout = layout_for_instance(instance, index, settings.clone(), &[], desktop_size);
+        let layout = layout_for_instance(instance, index, settings.clone(), catalog, desktop_size);
         candidate_rect.overlaps(
-            widget_rect_for_size(&layout, widget_size_for_instance(instance, &[])),
+            widget_rect_for_size(&layout, widget_size_for_instance(instance, catalog)),
             DEFAULT_LAYOUT_GAP,
         )
     })
 }
 
-fn normalize_layout_size(layout: &mut WidgetLayout, fallback_size: WidgetSize) {
-    let size = clamp_widget_size(WidgetSize {
-        width: if layout.width > 0 {
-            layout.width
-        } else {
-            fallback_size.width
-        },
-        height: if layout.height > 0 {
-            layout.height
-        } else {
-            fallback_size.height
-        },
-    });
+fn layout_has_persisted_size(layout: &WidgetLayout) -> bool {
+    layout.width > 0 || layout.height > 0
+}
+
+fn normalize_layout_size_and_scale(
+    layout: &mut WidgetLayout,
+    default_size: WidgetSize,
+    fallback_scale_percent: i32,
+    defer_dynamic_size_migration: bool,
+) {
+    let had_explicit_scale = layout.scale_percent > 0;
+    let had_persisted_size = layout_has_persisted_size(layout);
+    let scale_percent =
+        widget_layout_scale_percent_for_size(layout, default_size, fallback_scale_percent);
+
+    if defer_dynamic_size_migration && had_persisted_size && !had_explicit_scale {
+        let size = clamp_widget_size(WidgetSize {
+            width: if layout.width > 0 {
+                layout.width
+            } else {
+                default_size.width
+            },
+            height: if layout.height > 0 {
+                layout.height
+            } else {
+                default_size.height
+            },
+        });
+        layout.scale_percent = 0;
+        layout.width = size.width;
+        layout.height = size.height;
+        return;
+    }
+
+    layout.scale_percent = scale_percent;
+    let size = widget_size_from_scale_percent(default_size, scale_percent);
     layout.width = size.width;
     layout.height = size.height;
+}
+
+fn migrate_legacy_quote_board_footer_size(instance: &mut WidgetInstance) {
+    if instance.widget_type() != WidgetKind::QuoteBoard {
+        return;
+    }
+
+    let current_size = WidgetSize {
+        width: instance.layout.width,
+        height: instance.layout.height,
+    };
+    let legacy_default_size = WidgetSize {
+        width: QUOTE_BOARD_WIDTH,
+        height: LEGACY_QUOTE_BOARD_HEIGHT_WITH_FOOTER,
+    };
+    let scale_percent = widget_scale_percent_for_size(current_size, legacy_default_size);
+    let legacy_size = widget_size_from_scale_percent(legacy_default_size, scale_percent);
+    if current_size != legacy_size {
+        return;
+    }
+
+    let new_size =
+        widget_size_from_scale_percent(WidgetKind::QuoteBoard.default_size(), scale_percent);
+    instance.layout.scale_percent = scale_percent;
+    instance.layout.width = new_size.width;
+    instance.layout.height = new_size.height;
+}
+
+fn migrate_quote_board_display_size(instance: &mut WidgetInstance) {
+    if instance.widget_type() != WidgetKind::QuoteBoard {
+        return;
+    }
+
+    let current_size = WidgetSize {
+        width: instance.layout.width,
+        height: instance.layout.height,
+    };
+    let full_default_size = WidgetKind::QuoteBoard.default_size();
+    let previous_display_size = quote_board_previous_display_size(
+        full_default_size,
+        widget_show_coin_logos(instance),
+        widget_hide_quote_asset(instance),
+    );
+    let Some(scale_percent) = quote_board_matching_display_scale(
+        current_size,
+        &[previous_display_size, full_default_size],
+    ) else {
+        return;
+    };
+
+    let display_size = widget_size_from_scale_percent(
+        quote_board_display_size(
+            full_default_size,
+            widget_show_coin_logos(instance),
+            widget_hide_quote_asset(instance),
+            quote_board_row_count_for_symbols(&instance.symbols),
+        ),
+        scale_percent,
+    );
+    instance.layout.scale_percent = scale_percent;
+    instance.layout.width = display_size.width;
+    instance.layout.height = display_size.height;
+}
+
+fn quote_board_matching_display_scale(
+    current_size: WidgetSize,
+    base_sizes: &[WidgetSize],
+) -> Option<i32> {
+    base_sizes.iter().find_map(|base_size| {
+        let scale_percent = widget_scale_percent_for_size(current_size, *base_size);
+        let scaled_size = widget_size_from_scale_percent(*base_size, scale_percent);
+        (current_size == scaled_size).then_some(scale_percent)
+    })
+}
+
+fn quote_board_previous_display_size(
+    default_size: WidgetSize,
+    show_coin_logos: bool,
+    hide_quote_asset: bool,
+) -> WidgetSize {
+    WidgetSize {
+        width: quote_board_display_width(default_size, show_coin_logos, hide_quote_asset),
+        height: default_size.height,
+    }
+}
+
+fn quote_board_display_size(
+    default_size: WidgetSize,
+    show_coin_logos: bool,
+    hide_quote_asset: bool,
+    row_count: usize,
+) -> WidgetSize {
+    WidgetSize {
+        width: quote_board_display_width(default_size, show_coin_logos, hide_quote_asset),
+        height: quote_board_height_for_row_count(row_count),
+    }
+}
+
+fn quote_board_display_width(
+    default_size: WidgetSize,
+    show_coin_logos: bool,
+    hide_quote_asset: bool,
+) -> i32 {
+    match (show_coin_logos, hide_quote_asset) {
+        (true, false) => default_size.width,
+        (false, false) => QUOTE_BOARD_WIDTH_WITHOUT_COIN_LOGOS,
+        (true, true) => QUOTE_BOARD_WIDTH_WITHOUT_QUOTE_ASSET,
+        (false, true) => QUOTE_BOARD_WIDTH_COMPACT_SYMBOLS,
+    }
+}
+
+fn quote_board_row_count_for_symbols(symbols: &[String]) -> usize {
+    symbols
+        .len()
+        .clamp(MIN_SYMBOLS_PER_WIDGET, MAX_SYMBOLS_PER_WIDGET)
+}
+
+fn quote_board_height_for_row_count(row_count: usize) -> i32 {
+    let row_count = row_count.clamp(MIN_SYMBOLS_PER_WIDGET, MAX_SYMBOLS_PER_WIDGET) as i32;
+    if row_count <= 1 {
+        QUOTE_BOARD_ONE_ROW_HEIGHT
+    } else {
+        QUOTE_BOARD_MULTI_ROW_BASE_HEIGHT + (row_count - 1) * QUOTE_BOARD_ROW_HEIGHT_STEP
+    }
 }
 
 fn div_ceil_i32(value: i32, divisor: i32) -> i32 {
@@ -1509,7 +2022,7 @@ mod tests {
         assert_eq!(settings.market_default_symbols, default_market_symbols());
         assert!(settings.market_fallback_enabled);
         assert!(!settings.auto_start_enabled);
-        assert!(!settings.show_main_window_on_startup);
+        assert!(settings.show_main_window_on_startup);
         assert_eq!(settings.shortcut, ShortcutPreference::AltC);
         assert_eq!(settings.theme, ThemePreference::System);
         assert_eq!(settings.language, LanguagePreference::En);
@@ -1518,6 +2031,194 @@ mod tests {
         assert!(!settings.network_proxy_enabled);
         assert!(settings.network_proxy_url.is_empty());
         assert!(settings.alert_rules.is_empty());
+    }
+
+    #[test]
+    fn widget_display_config_defaults_and_updates() {
+        let mut widget = WidgetInstance {
+            id: "quote-board-1".to_string(),
+            plugin_id: WidgetKind::QuoteBoard.plugin_id().to_string(),
+            legacy_widget_type: None,
+            name: "Quote Board 1".to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["binance:spot:BTC/USDC".to_string()],
+            config: default_widget_config(),
+        };
+
+        assert!(widget_show_coin_logos(&widget));
+        assert!(!widget_hide_quote_asset(&widget));
+
+        set_widget_display_config(&mut widget, false, true);
+
+        assert!(!widget_show_coin_logos(&widget));
+        assert!(widget_hide_quote_asset(&widget));
+        assert_eq!(
+            widget.config[WIDGET_CONFIG_SHOW_COIN_LOGOS],
+            Value::Bool(false)
+        );
+        assert_eq!(
+            widget.config[WIDGET_CONFIG_HIDE_QUOTE_ASSET],
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn quote_board_default_size_tracks_display_config_and_rows() {
+        let mut widget = WidgetInstance {
+            id: "quote-board-1".to_string(),
+            plugin_id: WidgetKind::QuoteBoard.plugin_id().to_string(),
+            legacy_widget_type: None,
+            name: "Quote Board 1".to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["binance:spot:BTC/USDC".to_string()],
+            config: default_widget_config(),
+        };
+
+        assert_eq!(
+            default_widget_size_for_instance(&widget, &[]),
+            WidgetSize {
+                width: 286,
+                height: QUOTE_BOARD_ONE_ROW_HEIGHT,
+            }
+        );
+
+        set_widget_display_config(&mut widget, false, false);
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).width, 274);
+        assert_eq!(
+            default_widget_size_for_instance(&widget, &[]).height,
+            QUOTE_BOARD_ONE_ROW_HEIGHT
+        );
+
+        set_widget_display_config(&mut widget, true, true);
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).width, 246);
+
+        set_widget_display_config(&mut widget, false, true);
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).width, 224);
+
+        widget.symbols = vec![
+            "binance:spot:BTC/USDT".to_string(),
+            "binance:spot:ETH/USDT".to_string(),
+        ];
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 101);
+
+        widget.symbols = vec![
+            "binance:spot:BTC/USDT".to_string(),
+            "binance:spot:ETH/USDT".to_string(),
+            "binance:spot:SOL/USDT".to_string(),
+            "binance:spot:BNB/USDT".to_string(),
+            "binance:spot:DOGE/USDT".to_string(),
+        ];
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 194);
+    }
+
+    #[test]
+    fn plugin_symbol_block_size_policy_tracks_symbols_without_quote_board_config() {
+        let catalog = vec![WidgetDefinition {
+            id: "com.example.status-strip".to_string(),
+            name: "Status Strip".to_string(),
+            default_size: WidgetSize {
+                width: 688,
+                height: 92,
+            },
+            size_policy: WidgetSizePolicy::SymbolBlocks {
+                block_width: 136,
+                block_height: 84,
+                padding_width: 8,
+                padding_height: 8,
+            },
+            min_symbol_limit: 1,
+            symbol_limit: 5,
+        }];
+        let mut widget = WidgetInstance {
+            id: "plugin-strip-1".to_string(),
+            plugin_id: "com.example.status-strip".to_string(),
+            legacy_widget_type: None,
+            name: "Status Strip 1".to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            config: default_widget_config(),
+        };
+
+        set_widget_display_config(&mut widget, false, true);
+
+        assert_eq!(
+            default_widget_size_for_instance(&widget, &catalog),
+            WidgetSize {
+                width: 144,
+                height: 92,
+            }
+        );
+
+        widget.symbols = vec![
+            "binance:spot:BTC/USDT".to_string(),
+            "binance:spot:ETH/USDT".to_string(),
+            "binance:spot:SOL/USDT".to_string(),
+        ];
+        assert_eq!(
+            default_widget_size_for_instance(&widget, &catalog),
+            WidgetSize {
+                width: 416,
+                height: 92,
+            }
+        );
+    }
+
+    #[test]
+    fn plugin_symbol_grid_size_policy_tracks_rows_and_columns() {
+        let catalog = vec![WidgetDefinition {
+            id: "com.example.grid".to_string(),
+            name: "Grid".to_string(),
+            default_size: WidgetSize {
+                width: 416,
+                height: 176,
+            },
+            size_policy: WidgetSizePolicy::SymbolGrid {
+                cell_width: 136,
+                cell_height: 84,
+                content_padding_width: 8,
+                content_padding_height: 8,
+                columns: Some(3),
+                rows: None,
+            },
+            min_symbol_limit: 1,
+            symbol_limit: 5,
+        }];
+        let mut widget = WidgetInstance {
+            id: "plugin-grid-1".to_string(),
+            plugin_id: "com.example.grid".to_string(),
+            legacy_widget_type: None,
+            name: "Grid 1".to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            config: default_widget_config(),
+        };
+
+        assert_eq!(
+            default_widget_size_for_instance(&widget, &catalog),
+            WidgetSize {
+                width: 144,
+                height: 92,
+            }
+        );
+
+        widget.symbols = vec![
+            "binance:spot:BTC/USDT".to_string(),
+            "binance:spot:ETH/USDT".to_string(),
+            "binance:spot:SOL/USDT".to_string(),
+            "binance:spot:BNB/USDT".to_string(),
+            "binance:spot:DOGE/USDT".to_string(),
+        ];
+        assert_eq!(
+            default_widget_size_for_instance(&widget, &catalog),
+            WidgetSize {
+                width: 416,
+                height: 176,
+            }
+        );
     }
 
     #[test]
@@ -1610,6 +2311,16 @@ mod tests {
                 "binance:spot:SOL/USDT",
             ]
         );
+
+        let low_scale_settings = AppSettings {
+            widget_scale_percent: 1,
+            ..AppSettings::default()
+        }
+        .normalized();
+        assert_eq!(
+            low_scale_settings.widget_scale_percent,
+            MIN_WIDGET_SCALE_PERCENT
+        );
     }
 
     #[test]
@@ -1618,21 +2329,205 @@ mod tests {
             width: QUOTE_BOARD_WIDTH,
             height: QUOTE_BOARD_HEIGHT,
         };
+        let scaled_10 = widget_size_from_scale_percent(default_size, 10);
+        assert_eq!(scaled_10.width, 29);
+        assert_eq!(scaled_10.height, 19);
+        assert_eq!(widget_scale_percent_for_size(scaled_10, default_size), 10);
+
         let scaled = widget_size_from_scale_percent(default_size, 125);
 
         assert_eq!(scaled.width, 358);
-        assert_eq!(scaled.height, 290);
+        assert_eq!(scaled.height, 243);
         assert_eq!(widget_scale_percent_for_size(scaled, default_size), 125);
 
         let scaled_300 = widget_size_from_scale_percent(default_size, 300);
         assert_eq!(scaled_300.width, 858);
-        assert_eq!(scaled_300.height, 696);
+        assert_eq!(scaled_300.height, 582);
         assert_eq!(widget_scale_percent_for_size(scaled_300, default_size), 300);
 
         let mini_ticker_size = WidgetKind::MiniTicker.default_size();
         let (min_scale, max_scale) = widget_scale_percent_bounds(mini_ticker_size);
-        assert_eq!(min_scale, 72);
+        assert_eq!(min_scale, MIN_WIDGET_SCALE_PERCENT);
         assert_eq!(max_scale, MAX_WIDGET_SCALE_PERCENT);
+    }
+
+    #[test]
+    fn normalizes_missing_layout_scale_from_legacy_size() {
+        let mut store = serde_json::from_str::<LayoutStore>(
+            r#"{
+              "widgets": [
+                {
+                  "id": "quote-board-1",
+                  "plugin_id": "builtin.quote-board",
+                  "name": "Quote Board 1",
+                  "layout": {
+                    "x": 24,
+                    "y": 48,
+                    "always_on_top": false,
+                    "opacity_percent": 92,
+                    "width": 429,
+                    "height": 120
+                  },
+                  "symbols": ["BTC"]
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        normalize_store(&mut store, 0);
+
+        assert_eq!(store.widgets[0].layout.scale_percent, 150);
+        assert_eq!(store.widgets[0].layout.width, 429);
+        assert_eq!(store.widgets[0].layout.height, 120);
+    }
+
+    #[test]
+    fn resize_widget_to_content_preserves_explicit_scale() {
+        let mut widget = WidgetInstance {
+            id: "quote-board-1".to_string(),
+            plugin_id: WidgetKind::QuoteBoard.plugin_id().to_string(),
+            legacy_widget_type: None,
+            name: "Quote Board 1".to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            config: default_widget_config(),
+        };
+
+        resize_widget_to_content(&mut widget, &[], 150);
+        widget.symbols.push("binance:spot:ETH/USDT".to_string());
+        resize_widget_to_current_content(&mut widget, &[], DEFAULT_WIDGET_SCALE_PERCENT);
+
+        assert_eq!(widget.layout.scale_percent, 150);
+        assert_eq!(widget.layout.width, 429);
+        assert_eq!(widget.layout.height, 152);
+    }
+
+    #[test]
+    fn widget_content_scale_uses_smaller_dimension_ratio() {
+        let default_size = WidgetSize {
+            width: 286,
+            height: 80,
+        };
+
+        assert_eq!(
+            widget_content_scale_percent_for_size(
+                WidgetSize {
+                    width: 572,
+                    height: 240,
+                },
+                default_size,
+            ),
+            200
+        );
+        assert_eq!(
+            widget_content_scale_percent_for_size(
+                WidgetSize {
+                    width: 858,
+                    height: 120,
+                },
+                default_size,
+            ),
+            150
+        );
+    }
+
+    #[test]
+    fn normalizes_legacy_quote_board_footer_height() {
+        let mut store = serde_json::from_str::<LayoutStore>(
+            r#"{
+              "widgets": [
+                {
+                  "id": "quote-board-1",
+                  "plugin_id": "builtin.quote-board",
+                  "name": "Quote Board 1",
+                  "layout": {
+                    "x": 24,
+                    "y": 48,
+                    "always_on_top": false,
+                    "opacity_percent": 92,
+                    "width": 286,
+                    "height": 232
+                  },
+                  "symbols": ["BTC"]
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        normalize_store(&mut store, 0);
+
+        assert_eq!(store.widgets[0].layout.width, QUOTE_BOARD_WIDTH);
+        assert_eq!(store.widgets[0].layout.height, QUOTE_BOARD_ONE_ROW_HEIGHT);
+    }
+
+    #[test]
+    fn normalizes_quote_board_display_width() {
+        let mut store = serde_json::from_str::<LayoutStore>(
+            r#"{
+              "widgets": [
+                {
+                  "id": "quote-board-1",
+                  "plugin_id": "builtin.quote-board",
+                  "name": "Quote Board 1",
+                  "layout": {
+                    "x": 24,
+                    "y": 48,
+                    "always_on_top": false,
+                    "opacity_percent": 92,
+                    "width": 286,
+                    "height": 194
+                  },
+                  "symbols": ["BTC"],
+                  "config": {
+                    "show_coin_logos": false,
+                    "hide_quote_asset": true
+                  }
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        normalize_store(&mut store, 0);
+
+        assert_eq!(
+            store.widgets[0].layout.width,
+            QUOTE_BOARD_WIDTH_COMPACT_SYMBOLS
+        );
+        assert_eq!(store.widgets[0].layout.height, QUOTE_BOARD_ONE_ROW_HEIGHT);
+    }
+
+    #[test]
+    fn normalizes_quote_board_display_height_from_symbol_count() {
+        let mut store = serde_json::from_str::<LayoutStore>(
+            r#"{
+              "widgets": [
+                {
+                  "id": "quote-board-1",
+                  "plugin_id": "builtin.quote-board",
+                  "name": "Quote Board 1",
+                  "layout": {
+                    "x": 24,
+                    "y": 48,
+                    "always_on_top": false,
+                    "opacity_percent": 92,
+                    "width": 286,
+                    "height": 194
+                  },
+                  "symbols": ["BTC", "ETH"]
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        normalize_store(&mut store, 0);
+
+        assert_eq!(store.widgets[0].layout.width, QUOTE_BOARD_WIDTH);
+        assert_eq!(store.widgets[0].layout.height, 101);
     }
 
     #[test]
@@ -1701,10 +2596,14 @@ mod tests {
 
         assert!(!store.widgets[0].layout.locked);
         assert_eq!(store.widgets[0].layout.width, QUOTE_BOARD_WIDTH);
-        assert_eq!(store.widgets[0].layout.height, QUOTE_BOARD_HEIGHT);
+        assert_eq!(store.widgets[0].layout.height, QUOTE_BOARD_ONE_ROW_HEIGHT);
         assert!(store.widgets[1].layout.locked);
-        assert_eq!(store.widgets[1].layout.width, MIN_WIDGET_WIDTH);
-        assert_eq!(store.widgets[1].layout.height, MAX_WIDGET_HEIGHT);
+        assert_eq!(
+            store.widgets[1].layout.scale_percent,
+            MIN_WIDGET_SCALE_PERCENT
+        );
+        assert_eq!(store.widgets[1].layout.width, 24);
+        assert_eq!(store.widgets[1].layout.height, 11);
     }
 
     #[test]
@@ -1737,6 +2636,7 @@ mod tests {
                 width: 300,
                 height: 180,
             },
+            size_policy: WidgetSizePolicy::Fixed,
             min_symbol_limit: 2,
             symbol_limit: 3,
         }];

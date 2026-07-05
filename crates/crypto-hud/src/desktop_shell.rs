@@ -24,6 +24,7 @@ const DEFAULT_SINGLE_INSTANCE_ID: &str = "com.crypto-hud";
 #[derive(Debug, Clone)]
 pub(crate) struct LaunchOptions {
     pub(crate) widget_count: usize,
+    pub(crate) each_widget: bool,
     pub(crate) show_settings: bool,
     pub(crate) gui_smoke_exit_after: Option<Duration>,
 }
@@ -40,6 +41,7 @@ pub(crate) fn install_single_instance_guard() -> Result<SingleInstance> {
 pub(crate) fn parse_launch_options() -> LaunchOptions {
     let mut options = LaunchOptions {
         widget_count: DEFAULT_WIDGET_COUNT,
+        each_widget: false,
         show_settings: false,
         gui_smoke_exit_after: None,
     };
@@ -49,7 +51,12 @@ pub(crate) fn parse_launch_options() -> LaunchOptions {
             "--widgets" => {
                 if let Some(value) = args.next().and_then(|value| value.parse::<usize>().ok()) {
                     options.widget_count = value.max(1);
+                    options.each_widget = false;
                 }
+            }
+            "--each-widget" => {
+                options.each_widget = true;
+                options.widget_count = 0;
             }
             "--show-settings" => {
                 options.show_settings = true;
@@ -105,8 +112,11 @@ pub(crate) fn write_gui_smoke_ready_file(
                 "locked": instance.layout.locked,
                 "layoutWidth": instance.layout.width,
                 "layoutHeight": instance.layout.height,
+                "scalePercent": instance.layout.scale_percent,
                 "runtimeWidth": runtime_size.width,
                 "runtimeHeight": runtime_size.height,
+                "symbolCount": runtime.symbols.len(),
+                "widgetScale": runtime.widget_scale,
             }))
         })
         .collect::<Vec<_>>();

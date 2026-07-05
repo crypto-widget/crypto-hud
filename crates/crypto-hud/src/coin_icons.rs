@@ -236,12 +236,7 @@ impl CoinIconRegistry {
     }
 
     fn discard_results(&self) {
-        loop {
-            match self.results.borrow_mut().try_recv() {
-                Ok(_) => {}
-                Err(_) => break,
-            }
-        }
+        while self.results.borrow_mut().try_recv().is_ok() {}
     }
 }
 
@@ -320,35 +315,29 @@ fn download_icon(
     let candidates = icon_candidates(key);
 
     for candidate in candidates {
-        match fetch_icon_bytes(&agent, &candidate.url, candidate.extension) {
-            Ok(bytes) => {
-                let path = cache_file_path(cache_dir, key, candidate.extension);
-                persist_icon(&path, &bytes).map_err(|error| {
-                    format!(
-                        "failed to cache {:?} icon at {:?}: {error}",
-                        candidate.source, path
-                    )
-                })?;
-                return Ok(Some(path));
-            }
-            Err(_) => {}
+        if let Ok(bytes) = fetch_icon_bytes(&agent, &candidate.url, candidate.extension) {
+            let path = cache_file_path(cache_dir, key, candidate.extension);
+            persist_icon(&path, &bytes).map_err(|error| {
+                format!(
+                    "failed to cache {:?} icon at {:?}: {error}",
+                    candidate.source, path
+                )
+            })?;
+            return Ok(Some(path));
         }
     }
 
     for url in trust_wallet_index.logo_urls_for_symbol(&agent, key) {
         let extension = icon_extension_from_url(&url);
-        match fetch_icon_bytes(&agent, &url, extension) {
-            Ok(bytes) => {
-                let path = cache_file_path(cache_dir, key, extension);
-                persist_icon(&path, &bytes).map_err(|error| {
-                    format!(
-                        "failed to cache TrustWallet token icon at {:?}: {error}",
-                        path
-                    )
-                })?;
-                return Ok(Some(path));
-            }
-            Err(_) => {}
+        if let Ok(bytes) = fetch_icon_bytes(&agent, &url, extension) {
+            let path = cache_file_path(cache_dir, key, extension);
+            persist_icon(&path, &bytes).map_err(|error| {
+                format!(
+                    "failed to cache TrustWallet token icon at {:?}: {error}",
+                    path
+                )
+            })?;
+            return Ok(Some(path));
         }
     }
 

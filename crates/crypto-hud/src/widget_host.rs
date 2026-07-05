@@ -20,6 +20,9 @@ pub(crate) struct WidgetRuntime {
     pub(crate) plugin_id: String,
     pub(crate) ui: WidgetUi,
     pub(crate) symbols: Vec<String>,
+    pub(crate) show_coin_logos: bool,
+    pub(crate) display_options: widget_runtime::WidgetDisplayOptions,
+    pub(crate) widget_scale: f32,
 }
 
 pub(crate) enum WidgetUi {
@@ -130,6 +133,24 @@ impl WidgetUi {
         }
     }
 
+    fn set_hide_quote_asset(&self, value: bool) {
+        match self {
+            Self::BuiltinPriceCard(ui) => ui.set_hide_quote_asset(value),
+            Self::DynamicSlint(ui) => {
+                ui.set_optional_property("hide-quote-asset", Value::Bool(value));
+            }
+        }
+    }
+
+    fn set_show_coin_logos(&self, value: bool) {
+        match self {
+            Self::BuiltinPriceCard(ui) => ui.set_show_coin_logos(value),
+            Self::DynamicSlint(ui) => {
+                ui.set_optional_property("show-coin-logos", Value::Bool(value));
+            }
+        }
+    }
+
     pub(crate) fn set_pairs_heading_text(&self, value: SharedString) {
         match self {
             Self::BuiltinPriceCard(ui) => ui.set_pairs_heading_text(value),
@@ -185,6 +206,15 @@ impl WidgetUi {
             Self::DynamicSlint(ui) => {
                 ui.set_required_property("widget-width", Value::Number(width.into()));
                 ui.set_required_property("widget-height", Value::Number(height.into()));
+            }
+        }
+    }
+
+    pub(crate) fn set_widget_scale(&self, scale: f32) {
+        match self {
+            Self::BuiltinPriceCard(ui) => ui.set_widget_scale(scale),
+            Self::DynamicSlint(ui) => {
+                ui.set_optional_property("widget-scale", Value::Number(scale as f64));
             }
         }
     }
@@ -274,6 +304,7 @@ impl DynamicWidgetUi {
 
 fn bail_plugin_unavailable(plugin: &plugin::PluginDefinition) -> Result<WidgetUi> {
     let reason = match &plugin.status {
+        plugin::PluginStatus::Disabled(reason) => reason.as_str(),
         plugin::PluginStatus::Unavailable(reason) => reason.as_str(),
         plugin::PluginStatus::Available => "Slint renderer is not compiled",
     };
@@ -398,12 +429,22 @@ pub(crate) fn apply_runtime_view_to_widget(
     ui: &WidgetUi,
     view: &widget_runtime::WidgetRuntimeView,
     quote_icons: &[Image],
+    show_coin_logos: bool,
+    display_options: widget_runtime::WidgetDisplayOptions,
+    widget_scale: f32,
 ) {
+    let cell_width_basis = if widget_scale.is_finite() && widget_scale > 0.0 {
+        (ui.window().size().width as f32 / widget_scale).round() as i32
+    } else {
+        ui.window().size().width as i32
+    };
     ui.set_quote_rows(quote_rows_model(&view.quote_rows));
     ui.set_quote_icons(quote_icons_model(quote_icons));
+    ui.set_show_coin_logos(show_coin_logos);
+    ui.set_hide_quote_asset(display_options.hide_quote_asset);
     ui.set_quote_cell_widths(quote_cell_widths(
         &view.quote_rows,
-        ui.window().size().width as i32 - STATUS_STRIP_WINDOW_PADDING * 2,
+        cell_width_basis - STATUS_STRIP_WINDOW_PADDING * 2,
     ));
     ui.set_source_text(view.source_text.clone().into());
     ui.set_updated_text(view.updated_text.clone().into());
@@ -450,14 +491,81 @@ mod tests {
             "compact mini ticker should not reserve the quote board header"
         );
         assert!(
-            source.contains(
-                "y: root.compact-mode ? 16px * root.content-scale : (38px + index * 34px) * root.content-scale;"
-            ),
+            source.contains("y: root.s(root.compact-mode ? 16px : 32px + index * 31px);"),
             "compact mini ticker should use its own row y offset"
         );
         assert!(
-            source.contains("root.compact-mode ? 36px : 24px"),
+            source.contains("root.s(root.compact-mode ? 36px : 24px)"),
             "compact mini ticker should use its own footer offset"
+        );
+        assert!(
+            source.contains("visible: root.compact-mode;"),
+            "quote board should hide the footer while compact mini ticker keeps it"
+        );
+        assert!(
+            source.contains("in property <bool> hide-quote-asset;"),
+            "quote board layout should receive the quote-asset display option"
+        );
+        assert!(
+            source.contains("in property <bool> show-coin-logos: true;"),
+            "quote board layout should receive the coin-logo display option"
+        );
+        assert!(
+            source.contains("(root.show-coin-logos ? 246px : 224px)"),
+            "compact quote board width should be the unscaled quote board scale basis"
+        );
+        assert!(
+            source.contains("root.quote-icon-space-visible ? 27px : 5px"),
+            "hidden quote icons should not reserve their original symbol offset"
+        );
+        assert!(
+            source.contains("property <length> quote-board-base-height:"),
+            "quote board should derive its height scale basis from row count"
+        );
+        assert!(
+            source.contains("visible: root.show-coin-logos && root.quote-icons.length > index;"),
+            "hidden quote icons should not render into the compacted symbol column"
+        );
+        assert!(
+            source.contains(
+                "quote-board-change-x: root.quote-board-price-x + root.quote-board-price-width + root.s(4px)"
+            ),
+            "change column should follow the compacted price column"
+        );
+        assert!(
+            source.contains("in property <float> widget-scale: 1.0;"),
+            "builtin widgets should receive scale from the host"
+        );
+        assert!(
+            source.contains("property <float> content-scale: root.widget-scale;"),
+            "content scale should come from the externally supplied widget scale"
+        );
+        assert!(
+            source.contains("function s(value: length) -> length")
+                && source.contains("return value * root.content-scale;"),
+            "builtin quote board should use a shared helper for direct scaled layout"
+        );
+        assert!(
+            source.contains("width: root.s(root.content-width);")
+                && source.contains("height: root.s(root.content-height);"),
+            "the card should render at the externally scaled content size"
+        );
+        assert!(
+            source.find("drag_area := TouchArea").unwrap()
+                < source.find("card := Rectangle").unwrap(),
+            "dragging should stay in the unscaled root coordinate space"
+        );
+        assert!(
+            !source.contains("transform-scale-x: root.content-scale;")
+                && !source.contains("transform-scale-y: root.content-scale;"),
+            "quote board should avoid transform scaling because the tiny live window clips it"
+        );
+        assert!(
+            source.contains("font-size: root.s(root.compact-mode ? 13px : 12px);")
+                && source.contains(
+                    "width: root.compact-mode ? root.s(44px) : root.quote-board-symbol-width;"
+                ),
+            "row content should scale from the same standard content metrics as the card"
         );
     }
 }

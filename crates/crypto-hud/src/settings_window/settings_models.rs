@@ -87,6 +87,10 @@ fn widget_plugin_status_suffix(
         }),
         Some(definition) => match &definition.status {
             plugin::PluginStatus::Available => None,
+            plugin::PluginStatus::Disabled(reason) => Some(match locale {
+                i18n::Locale::ZhHans => format!("插件已禁用：{reason}"),
+                i18n::Locale::En => format!("Plugin disabled: {reason}"),
+            }),
             plugin::PluginStatus::Unavailable(reason) => Some(match locale {
                 i18n::Locale::ZhHans => format!("插件不可用：{reason}"),
                 i18n::Locale::En => format!("Plugin unavailable: {reason}"),
@@ -259,6 +263,10 @@ fn plugin_market_status(definition: &plugin::PluginDefinition, locale: i18n::Loc
             (plugin::PluginSource::LocalUnsigned, _) => String::new(),
             (plugin::PluginSource::TrustedSigned, i18n::Locale::ZhHans) => "已信任".to_string(),
             (plugin::PluginSource::TrustedSigned, i18n::Locale::En) => "Trusted".to_string(),
+        },
+        plugin::PluginStatus::Disabled(reason) => match locale {
+            i18n::Locale::ZhHans => format!("已禁用：{reason}"),
+            i18n::Locale::En => format!("Disabled: {reason}"),
         },
         plugin::PluginStatus::Unavailable(reason) => match locale {
             i18n::Locale::ZhHans => format!("不可用：{reason}"),

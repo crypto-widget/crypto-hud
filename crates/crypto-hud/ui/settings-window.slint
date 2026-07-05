@@ -241,7 +241,9 @@ export component SettingsWindow inherits Window {
     in-out property <bool> widget-layout-locked;
     in-out property <int> opacity-percent;
     in-out property <int> widget-scale-percent;
-    in property <int> widget-scale-min-percent: 50;
+    in-out property <bool> widget-show-coin-logos;
+    in-out property <bool> widget-hide-quote-asset;
+    in property <int> widget-scale-min-percent: 10;
     in property <int> widget-scale-max-percent: 200;
     in-out property <string> widget-name-input-text;
     in-out property <bool> default-widgets-always-on-top;
@@ -284,6 +286,7 @@ export component SettingsWindow inherits Window {
     in property <[int]> widget-scale-min-options;
     in property <[int]> widget-scale-max-options;
     property <bool> has-widgets: root.widget-list-options.length != 0;
+    property <length> widget-settings-scrollbar-gutter: 18px;
     in property <[string]> provider-options;
     in property <[string]> shortcut-options;
     in property <[string]> theme-options;
@@ -390,6 +393,10 @@ export component SettingsWindow inherits Window {
     in property <string> lock-position-help-text;
     in property <string> widget-scale-help-text;
     in property <string> opacity-help-text;
+    in property <string> widget-show-coin-logos-text;
+    in property <string> widget-show-coin-logos-help-text;
+    in property <string> widget-hide-quote-asset-text;
+    in property <string> widget-hide-quote-asset-help-text;
     in property <string> widget-topmost-text;
     in property <string> widget-topmost-help-text;
     in property <string> advanced-options-text;
@@ -467,7 +474,7 @@ export component SettingsWindow inherits Window {
     callback remove-widget-symbol(int, int);
     callback select-widget(int);
     callback add-widget(int);
-    callback apply-widget-settings(int, string, bool, bool, int, int);
+    callback apply-widget-settings(int, string, bool, bool, int, int, bool, bool);
     callback apply-widget-scale(int, int);
     callback toggle-widget-visibility(int);
     callback reset-widget-positions();
@@ -528,7 +535,9 @@ export component SettingsWindow inherits Window {
                 root.widgets-always-on-top,
                 root.widget-layout-locked,
                 root.opacity-percent,
-                root.widget-scale-percent
+                root.widget-scale-percent,
+                root.widget-show-coin-logos,
+                root.widget-hide-quote-asset
             );
         }
     }
@@ -750,13 +759,14 @@ export component SettingsWindow inherits Window {
 
             Text {
                 x: 19px;
-                y: parent.height - 39px;
-                width: 53px;
-                height: 13px;
-                text: root.app-version-label-text + " " + root.app-version-value-text;
+                y: parent.height - 40px;
+                width: root.status-text == "" ? parent.width - 38px : 53px;
+                height: 15px;
+                text: "v" + root.app-version-value-text;
                 color: root.settings-muted-color;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: 500;
+                horizontal-alignment: center;
                 overflow: elide;
             }
 
@@ -767,6 +777,7 @@ export component SettingsWindow inherits Window {
                 height: 4px;
                 border-radius: 2px;
                 background: root.settings-accent-color;
+                visible: root.status-text != "";
             }
 
             Text {
@@ -779,6 +790,7 @@ export component SettingsWindow inherits Window {
                 font-size: 10px;
                 font-weight: 500;
                 overflow: elide;
+                visible: root.status-text != "";
             }
 
         }
@@ -861,7 +873,7 @@ export component SettingsWindow inherits Window {
                     background: root.settings-divider-color;
                 }
 
-                ListView {
+                widget_list := ListView {
                     x: 0px;
                     y: 64px;
                     width: parent.width;
@@ -869,7 +881,7 @@ export component SettingsWindow inherits Window {
 
                     for widget_label[index] in root.widget-list-options : Rectangle {
                         width: 401px;
-                        height: root.widget-action-menu-index == index ? 95px : 66px;
+                        height: 66px;
                         border-radius: 4px;
                         background: root.selected-widget-index == index ? root.settings-selected-background : list_row_touch.has-hover ? root.settings-content-background : transparent;
 
@@ -904,7 +916,7 @@ export component SettingsWindow inherits Window {
                         Text {
                             x: 97px;
                             y: 19px;
-                            width: 165px;
+                            width: 247px;
                             height: 13px;
                             text: widget_label;
                             color: root.widget-visible-options[index] ? root.settings-label-color : root.settings-muted-color;
@@ -916,37 +928,13 @@ export component SettingsWindow inherits Window {
                         Text {
                             x: 97px;
                             y: 40px;
-                            width: 193px;
+                            width: 247px;
                             height: 11px;
                             text: root.widget-list-detail-options[index];
                             color: root.settings-muted-color;
                             font-size: 9px;
                             font-weight: 500;
                             overflow: elide;
-                        }
-
-                        Rectangle {
-                            x: 290px;
-                            y: 17px;
-                            width: 47px;
-                            height: 21px;
-                            border-radius: 4px;
-                            background: root.widget-visible-options[index] ? root.settings-selected-background : root.settings-content-background;
-                            border-width: 1px;
-                            border-color: root.settings-border-color;
-
-                            Text {
-                                x: 4px;
-                                y: 5px;
-                                width: parent.width - 9px;
-                                height: 10px;
-                                text: root.widget-visible-options[index] ? root.widget-visible-text : root.widget-hidden-text;
-                                color: root.widget-visible-options[index] ? root.settings-status-color : root.settings-muted-color;
-                                font-size: 9px;
-                                font-weight: 500;
-                                horizontal-alignment: center;
-                                overflow: elide;
-                            }
                         }
 
                         more_widget_button := Rectangle {
@@ -979,48 +967,6 @@ export component SettingsWindow inherits Window {
                             }
                         }
 
-                        Rectangle {
-                            x: 269px;
-                            y: 50px;
-                            width: 97px;
-                            height: 30px;
-                            border-radius: 4px;
-                            background: root.settings-surface-background;
-                            border-width: 1px;
-                            border-color: root.settings-border-color;
-                            visible: root.widget-action-menu-index == index;
-
-                            Rectangle {
-                                x: 4px;
-                                y: 4px;
-                                width: parent.width - 9px;
-                                height: 21px;
-                                border-radius: 4px;
-                                background: remove_widget_menu_touch.has-hover ? #ef444422 : transparent;
-
-                                Text {
-                                    x: 9px;
-                                    y: 5px;
-                                    width: parent.width - 17px;
-                                    text: root.delete-widget-text;
-                                    color: #ef4444;
-                                    font-size: 9px;
-                                    font-weight: 800;
-                                    overflow: elide;
-                                }
-
-                                remove_widget_menu_touch := TouchArea {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    mouse-cursor: pointer;
-                                    clicked => {
-                                        root.widget-action-menu-index = -1;
-                                        root.delete-widget(index);
-                                    }
-                                }
-                            }
-                        }
-
                         list_row_touch := TouchArea {
                             x: 90px;
                             y: 0px;
@@ -1044,6 +990,51 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
+                action_menu := Rectangle {
+                    property <length> row-y: widget_list.y + root.widget-action-menu-index * 66px + widget_list.viewport-y;
+                    property <length> below-y: self.row-y + 50px;
+                    property <length> above-y: self.row-y - 33px;
+                    x: 269px;
+                    y: self.below-y + self.height <= parent.height ? self.below-y : max(widget_list.y + 1px, self.above-y);
+                    width: 97px;
+                    height: 30px;
+                    border-radius: 4px;
+                    background: root.settings-surface-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+                    visible: root.widget-action-menu-index >= 0 && root.widget-action-menu-index < root.widget-list-options.length && self.row-y + 66px > widget_list.y && self.row-y < widget_list.y + widget_list.height;
+
+                    Rectangle {
+                        x: 4px;
+                        y: 4px;
+                        width: parent.width - 9px;
+                        height: 21px;
+                        border-radius: 4px;
+                        background: remove_widget_menu_touch.has-hover ? #ef444422 : transparent;
+
+                        Text {
+                            x: 9px;
+                            y: 5px;
+                            width: parent.width - 17px;
+                            text: root.delete-widget-text;
+                            color: #ef4444;
+                            font-size: 9px;
+                            font-weight: 800;
+                            overflow: elide;
+                        }
+
+                        remove_widget_menu_touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.delete-widget(root.widget-action-menu-index);
+                                root.widget-action-menu-index = -1;
+                            }
+                        }
+                    }
+                }
+
                 Text {
                     x: 17px;
                     y: 222px;
@@ -1060,16 +1051,30 @@ export component SettingsWindow inherits Window {
                 }
             }
 
-            Rectangle {
+            selected_widget_panel := Rectangle {
                 x: 429px;
                 y: 0px;
                 width: 503px;
-                height: 600px;
+                height: parent.height;
                 border-radius: 4px;
                 background: root.settings-surface-background;
                 border-width: 1px;
                 border-color: root.settings-border-color;
                 visible: root.has-widgets;
+
+                ScrollView {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-width: selected_widget_panel.width - root.widget-settings-scrollbar-gutter;
+                    viewport-height: 680px;
+
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: selected_widget_panel.width - root.widget-settings-scrollbar-gutter;
+                        height: 680px;
 
                 Text {
                     x: 17px;
@@ -1335,7 +1340,69 @@ export component SettingsWindow inherits Window {
 
                 SettingLabel {
                     x: 17px;
-                    y: 449px;
+                    y: 425px;
+                    width: parent.width - 89px;
+                    label: root.widget-show-coin-logos-text;
+                    help: root.widget-show-coin-logos-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SettingSwitch {
+                    x: parent.width - 54px;
+                    y: 431px;
+                    checked <=> root.widget-show-coin-logos;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => { root.apply-current-widget-settings(); }
+                }
+
+                TouchArea {
+                    x: 17px;
+                    y: 413px;
+                    width: parent.width - 89px;
+                    height: 47px;
+                    clicked => {
+                        root.widget-show-coin-logos = !root.widget-show-coin-logos;
+                        root.apply-current-widget-settings();
+                    }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 475px;
+                    width: parent.width - 89px;
+                    label: root.widget-hide-quote-asset-text;
+                    help: root.widget-hide-quote-asset-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SettingSwitch {
+                    x: parent.width - 54px;
+                    y: 481px;
+                    checked <=> root.widget-hide-quote-asset;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => { root.apply-current-widget-settings(); }
+                }
+
+                TouchArea {
+                    x: 17px;
+                    y: 463px;
+                    width: parent.width - 89px;
+                    height: 47px;
+                    clicked => {
+                        root.widget-hide-quote-asset = !root.widget-hide-quote-asset;
+                        root.apply-current-widget-settings();
+                    }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: 528px;
                     width: 129px;
                     label: root.widget-scale-text;
                     help: root.widget-scale-help-text;
@@ -1344,8 +1411,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 PercentStepper {
-                    x: 183px;
-                    y: 430px;
+                    x: parent.width - 264px;
+                    y: 528px;
                     width: 150px;
                     height: 34px;
                     enabled: root.has-widgets;
@@ -1366,8 +1433,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 Text {
-                    x: 343px;
-                    y: 441px;
+                    x: parent.width - 106px;
+                    y: 539px;
                     width: 17px;
                     text: "%";
                     color: root.settings-muted-color;
@@ -1376,8 +1443,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingsSmallButton {
-                    x: parent.width - 93px;
-                    y: 430px;
+                    x: parent.width - 81px;
+                    y: 528px;
                     width: 64px;
                     height: 34px;
                     text: root.reset-text;
@@ -1397,7 +1464,7 @@ export component SettingsWindow inherits Window {
 
                 SettingLabel {
                     x: 17px;
-                    y: 502px;
+                    y: 580px;
                     width: 115px;
                     label: root.opacity-text;
                     help: root.opacity-help-text;
@@ -1407,7 +1474,7 @@ export component SettingsWindow inherits Window {
 
                 OpacitySlider {
                     x: 193px;
-                    y: 497px;
+                    y: 580px;
                     width: 179px;
                     height: 20px;
                     value <=> root.opacity-percent;
@@ -1427,7 +1494,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: parent.width - 103px;
-                    y: 485px;
+                    y: 580px;
                     width: 50px;
                     height: 34px;
                     border-radius: 4px;
@@ -1450,7 +1517,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 42px;
-                    y: 496px;
+                    y: 591px;
                     width: 9px;
                     height: 13px;
                     text: "%";
@@ -1462,7 +1529,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: 542px;
+                    y: 626px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -1470,7 +1537,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: 17px;
-                    y: 564px;
+                    y: 644px;
                     width: parent.width - 52px;
                     height: 13px;
                     text: root.advanced-options-text;
@@ -1482,7 +1549,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 34px;
-                    y: 560px;
+                    y: 640px;
                     width: 17px;
                     height: 17px;
                     text: ">";
@@ -1490,6 +1557,9 @@ export component SettingsWindow inherits Window {
                     font-size: 14px;
                     font-weight: 500;
                     horizontal-alignment: center;
+                }
+
+                    }
                 }
 
             }

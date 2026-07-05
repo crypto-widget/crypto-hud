@@ -5,6 +5,7 @@ use settings::LegacyLayoutStore;
 use settings::WidgetKind as WidgetType;
 use settings::{
     AppSettings, LayoutStore, WidgetDefinition, WidgetInstance, WidgetLayout, WidgetSize,
+    WidgetSizePolicy,
 };
 
 use crate::{feature_flags, plugin, window_manager::desktop_size};
@@ -37,8 +38,37 @@ fn widget_definition_from_plugin(plugin: &plugin::PluginDefinition) -> WidgetDef
             width: plugin.default_size.width,
             height: plugin.default_size.height,
         },
+        size_policy: widget_size_policy_from_plugin(plugin.size_policy),
         min_symbol_limit: plugin.min_symbol_limit,
         symbol_limit: plugin.symbol_limit,
+    }
+}
+
+fn widget_size_policy_from_plugin(policy: plugin::PluginSizePolicy) -> WidgetSizePolicy {
+    match policy {
+        plugin::PluginSizePolicy::Fixed => WidgetSizePolicy::Fixed,
+        plugin::PluginSizePolicy::SymbolBlocks {
+            block_size,
+            padding,
+        } => WidgetSizePolicy::SymbolBlocks {
+            block_width: block_size.width,
+            block_height: block_size.height,
+            padding_width: padding.width,
+            padding_height: padding.height,
+        },
+        plugin::PluginSizePolicy::SymbolGrid {
+            cell_size,
+            content_padding,
+            columns,
+            rows,
+        } => WidgetSizePolicy::SymbolGrid {
+            cell_width: cell_size.width,
+            cell_height: cell_size.height,
+            content_padding_width: content_padding.width,
+            content_padding_height: content_padding.height,
+            columns,
+            rows,
+        },
     }
 }
 

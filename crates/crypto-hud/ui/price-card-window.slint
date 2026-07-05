@@ -12,13 +12,29 @@ export component PriceCardWindow inherits Window {
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 286;
-    in property <int> widget-height: 232;
+    in property <int> widget-height: 194;
+    in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <bool> compact-mode;
+    in property <bool> show-coin-logos: true;
+    in property <bool> hide-quote-asset;
     in-out property <bool> card-left-drag-active: false;
-    property <float> content-scale: root.compact-mode
-        ? (((root.widget-width * 1px) / 236px) < ((root.widget-height * 1px) / 112px) ? ((root.widget-width * 1px) / 236px) : ((root.widget-height * 1px) / 112px))
-        : (((root.widget-width * 1px) / 286px) < ((root.widget-height * 1px) / 232px) ? ((root.widget-width * 1px) / 286px) : ((root.widget-height * 1px) / 232px));
+
+    property <length> quote-board-base-width: root.hide-quote-asset
+        ? (root.show-coin-logos ? 246px : 224px)
+        : (root.show-coin-logos ? 286px : 274px);
+    property <int> quote-board-row-count: root.quote-rows.length < 1 ? 1 : (root.quote-rows.length > 5 ? 5 : root.quote-rows.length);
+    property <length> quote-board-base-height: root.quote-board-row-count <= 1 ? 80px : 70px + (root.quote-board-row-count - 1) * 31px;
+    property <length> content-width: root.compact-mode ? 236px : root.quote-board-base-width;
+    property <length> content-height: root.compact-mode ? 112px : root.quote-board-base-height;
+    property <float> content-scale: root.widget-scale;
+    property <bool> quote-icon-space-visible: root.show-coin-logos;
+    property <length> quote-board-symbol-x: root.s(root.quote-icon-space-visible ? 27px : 5px);
+    property <length> quote-board-symbol-width: root.s(root.hide-quote-asset ? 42px : (root.quote-icon-space-visible ? 78px : 88px));
+    property <length> quote-board-price-x: root.quote-board-symbol-x + root.quote-board-symbol-width + root.s(root.hide-quote-asset ? 7px : 3px);
+    property <length> quote-board-price-width: root.s(58px);
+    property <length> quote-board-change-x: root.quote-board-price-x + root.quote-board-price-width + root.s(4px);
+    property <length> quote-board-change-width: root.s(58px);
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
     property <bool> light-theme: root.theme-name == "light";
@@ -33,6 +49,9 @@ export component PriceCardWindow inherits Window {
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
+    function s(value: length) -> length {
+        return value * root.content-scale;
+    }
     title: root.widget-id;
     width: root.widget-width * 1px;
     height: root.widget-height * 1px;
@@ -41,158 +60,160 @@ export component PriceCardWindow inherits Window {
     always-on-top: root.pin-to-top;
     background: transparent;
 
-    card := Rectangle {
-        x: 0px;
-        y: 0px;
+    drag_area := TouchArea {
         width: root.widget-width * 1px;
         height: root.widget-height * 1px;
-        border-radius: 8px * root.content-scale;
+        mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+        pointer-event(event) => {
+            if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.card-left-drag-active = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                root.card-left-drag-active = false;
+            }
+        }
+        moved => {
+            if !root.layout-locked && root.card-left-drag-active {
+                root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+
+    card := Rectangle {
+        x: (root.widget-width * 1px - root.s(root.content-width)) / 2;
+        y: (root.widget-height * 1px - root.s(root.content-height)) / 2;
+        width: root.s(root.content-width);
+        height: root.s(root.content-height);
+        border-radius: root.s(8px);
         background: root.card-background;
-        border-width: 1px;
+        border-width: root.s(1px);
         border-color: root.card-border-color;
         opacity: root.content-opacity / 100;
 
         Rectangle {
-            x: 1px * root.content-scale;
-            y: 1px * root.content-scale;
-            width: parent.width - 2px * root.content-scale;
-            height: 28px * root.content-scale;
-            border-radius: 7px * root.content-scale;
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: root.s(26px);
+            border-radius: root.s(7px);
             background: root.card-header-background;
             visible: !root.compact-mode;
         }
 
         for quote[index] in root.quote-rows : Rectangle {
-            x: 10px * root.content-scale;
-            y: root.compact-mode ? 16px * root.content-scale : (38px + index * 34px) * root.content-scale;
-            width: parent.width - 20px * root.content-scale;
-            height: 30px * root.content-scale;
-            border-radius: 6px * root.content-scale;
+            x: root.s(root.compact-mode ? 10px : 8px);
+            y: root.s(root.compact-mode ? 16px : 32px + index * 31px);
+            width: parent.width - root.s(root.compact-mode ? 20px : 16px);
+            height: root.s(root.compact-mode ? 30px : 27px);
+            border-radius: root.s(5px);
             background: transparent;
-            visible: !root.compact-mode || index == 0;
+            visible: root.compact-mode ? index == 0 : index < root.quote-board-row-count;
 
             Image {
-                x: 6px * root.content-scale;
-                y: 6px * root.content-scale;
-                width: 18px * root.content-scale;
-                height: 18px * root.content-scale;
+                x: root.s(root.compact-mode ? 6px : 5px);
+                y: root.s(root.compact-mode ? 6px : 5px);
+                width: root.s(root.compact-mode ? 18px : 16px);
+                height: root.s(root.compact-mode ? 18px : 16px);
                 source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
                 image-fit: contain;
-                visible: root.quote-icons.length > index;
+                visible: root.show-coin-logos && root.quote-icons.length > index;
             }
 
             Text {
-                x: 30px * root.content-scale;
-                y: 6px * root.content-scale;
-                width: (root.compact-mode ? 44px : 50px) * root.content-scale;
+                x: root.compact-mode ? root.s(30px) : root.quote-board-symbol-x;
+                y: root.s(root.compact-mode ? 6px : 5px);
+                width: root.compact-mode ? root.s(44px) : root.quote-board-symbol-width;
                 text: quote.symbol;
                 color: root.card-primary-text-color;
-                font-size: 13px * root.content-scale;
+                font-size: root.s(root.compact-mode ? 13px : 12px);
                 font-weight: 700;
                 overflow: elide;
             }
 
             Text {
-                x: (root.compact-mode ? 78px : 90px) * root.content-scale;
-                y: 5px * root.content-scale;
-                width: (root.compact-mode ? 74px : 82px) * root.content-scale;
+                x: root.compact-mode ? root.s(78px) : root.quote-board-price-x;
+                y: root.s(root.compact-mode ? 5px : 4px);
+                width: root.compact-mode ? root.s(74px) : root.quote-board-price-width;
                 text: quote.price;
                 color: root.card-primary-text-color;
-                font-size: 14px * root.content-scale;
+                font-size: root.s(root.compact-mode ? 14px : 13px);
                 font-weight: 800;
                 horizontal-alignment: right;
                 overflow: elide;
             }
 
             Text {
-                x: (root.compact-mode ? 164px : 184px) * root.content-scale;
-                y: 6px * root.content-scale;
-                width: (root.compact-mode ? 48px : 70px) * root.content-scale;
+                x: root.compact-mode ? root.s(164px) : root.quote-board-change-x;
+                y: root.s(root.compact-mode ? 6px : 5px);
+                width: root.compact-mode ? root.s(48px) : root.quote-board-change-width;
                 text: quote.change;
                 color: quote.positive
                     ? (root.red-up-enabled ? root.loss-color : root.gain-color)
                     : (root.red-up-enabled ? root.gain-color : root.loss-color);
-                font-size: 13px * root.content-scale;
+                font-size: root.s(root.compact-mode ? 13px : 12px);
                 font-weight: 700;
-                horizontal-alignment: right;
+                horizontal-alignment: root.compact-mode ? right : left;
                 overflow: elide;
             }
         }
 
         Text {
-            x: 14px * root.content-scale;
-            y: 92px * root.content-scale;
-            width: parent.width - 28px * root.content-scale;
+            x: root.s(14px);
+            y: root.s(root.compact-mode ? 48px : 44px);
+            width: parent.width - root.s(28px);
             text: root.empty-text;
             color: root.card-updated-text-color;
-            font-size: 12px * root.content-scale;
+            font-size: root.s(12px);
             horizontal-alignment: center;
             visible: root.quote-rows.length == 0;
             overflow: elide;
         }
 
         Text {
-            x: 14px * root.content-scale;
-            y: parent.height - (root.compact-mode ? 36px : 24px) * root.content-scale;
-            width: parent.width / 2 - 18px * root.content-scale;
+            x: root.s(14px);
+            y: parent.height - root.s(root.compact-mode ? 36px : 24px);
+            width: parent.width / 2 - root.s(18px);
             text: root.source-text;
             color: root.card-source-text-color;
-            font-size: 11px * root.content-scale;
+            font-size: root.s(11px);
             horizontal-alignment: left;
+            visible: root.compact-mode;
             overflow: elide;
         }
 
         Text {
             x: parent.width / 2;
-            y: parent.height - (root.compact-mode ? 36px : 24px) * root.content-scale;
-            width: parent.width / 2 - 14px * root.content-scale;
+            y: parent.height - root.s(root.compact-mode ? 36px : 24px);
+            width: parent.width / 2 - root.s(14px);
             text: root.updated-text;
             color: root.card-updated-text-color;
-            font-size: 11px * root.content-scale;
+            font-size: root.s(11px);
             horizontal-alignment: right;
+            visible: root.compact-mode;
             overflow: elide;
         }
 
-        drag_area := TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
-            pointer-event(event) => {
-                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                    root.card-left-drag-active = true;
-                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
-                    root.card-left-drag-active = false;
-                }
-            }
-            moved => {
-                if !root.layout-locked && root.card-left-drag-active {
-                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
-        }
-
         lock_button := Rectangle {
-            x: parent.width - 40px * root.content-scale;
-            y: 6px * root.content-scale;
-            width: 32px * root.content-scale;
-            height: 32px * root.content-scale;
-            border-radius: 8px * root.content-scale;
+            x: parent.width - root.s(40px);
+            y: root.s(6px);
+            width: root.s(32px);
+            height: root.s(32px);
+            border-radius: root.s(8px);
             background: root.layout-locked || lock_touch.has-hover ? root.card-header-background : root.card-background;
-            border-width: 1px;
+            border-width: root.s(1px);
             border-color: root.card-border-color;
             visible: drag_area.has-hover || lock_touch.has-hover;
 
             Path {
-                x: 7px * root.content-scale;
-                y: 6px * root.content-scale;
-                width: 18px * root.content-scale;
-                height: 20px * root.content-scale;
+                x: root.s(7px);
+                y: root.s(6px);
+                width: root.s(18px);
+                height: root.s(20px);
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
                 fill: root.layout-locked ? root.card-primary-text-color : transparent;
                 stroke: root.card-primary-text-color;
-                stroke-width: 2px * root.content-scale;
+                stroke-width: root.s(2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }
@@ -204,9 +225,5 @@ export component PriceCardWindow inherits Window {
                 clicked => { root.toggle-layout-lock(); }
             }
         }
-
-
-
-
     }
 }

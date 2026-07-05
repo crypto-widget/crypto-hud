@@ -46,7 +46,7 @@ mod settings_models;
 mod settings_theme;
 use settings_actions::{
     add_plugin_widget_to_store, apply_widget_scale_to_store, apply_widget_settings_to_store,
-    delete_widget_from_store_at_index,
+    delete_widget_from_store_at_index, WidgetSettingsUpdate,
 };
 pub(crate) use settings_models::widget_type_usage_text;
 use settings_models::{
@@ -68,10 +68,7 @@ const PREVIEW_KIND_STATUS_STRIP: i32 = 6;
 const SYMBOL_PICKER_MODE_WIDGET: i32 = 0;
 const SYMBOL_PICKER_MODE_DEFAULT: i32 = 1;
 const STATUS_STRIP_PLUGIN_ID: &str = "com.cryptohud.status-strip";
-const STATUS_STRIP_BLOCK_WIDTH: i32 = 136;
 const STATUS_STRIP_VISIBLE_HEIGHT: i32 = 84;
-const STATUS_STRIP_WINDOW_PADDING: i32 = 4;
-const STATUS_STRIP_HEIGHT: i32 = STATUS_STRIP_VISIBLE_HEIGHT + STATUS_STRIP_WINDOW_PADDING * 2;
 const STATUS_STRIP_PREVIOUS_TIGHT_HEIGHT: i32 = 84;
 const POPULAR_SYMBOL_ORDER: &[&str] = &[
     "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX", "TON", "LINK", "AVAX", "DOT", "LTC",
@@ -751,13 +748,11 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 commit.set_saved_status(settings);
                 commit.refresh_settings_window(&weak);
             } else {
-                let widget_scale_percent = ui.get_widget_scale_percent();
                 let Some(settings) = add_widget_symbol_to_store(
                     &commit.layouts,
                     &commit.state_path,
                     ui.get_selected_widget_index(),
                     &symbol,
-                    widget_scale_percent,
                     &commit.plugin_catalog,
                 ) else {
                     ui.set_symbol_picker_status_text(
@@ -781,16 +776,14 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         let commit = commit_context.clone();
         let weak = ui.as_weak();
         move |selected_index, symbol_index| {
-            let Some(ui) = weak.upgrade() else {
+            if weak.upgrade().is_none() {
                 return;
             };
-            let widget_scale_percent = ui.get_widget_scale_percent();
             let Some(settings) = remove_widget_symbol_from_store(
                 &commit.layouts,
                 &commit.state_path,
                 selected_index,
                 symbol_index,
-                widget_scale_percent,
                 &commit.plugin_catalog,
             ) else {
                 return;
@@ -1113,21 +1106,27 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
               always_on_top,
               layout_locked,
               opacity_percent,
-              widget_scale_percent| {
+              widget_scale_percent,
+              show_coin_logos,
+              hide_quote_asset| {
             let settings = commit.current_settings();
             let locale = i18n::resolve_locale(settings.language);
             {
                 let mut store = commit.layouts.borrow_mut();
                 apply_widget_settings_to_store(
                     &mut store,
-                    selected_index,
-                    widget_name_text.as_str(),
-                    always_on_top,
-                    layout_locked,
-                    opacity_percent,
-                    widget_scale_percent,
-                    locale,
-                    &commit.plugin_catalog,
+                    WidgetSettingsUpdate {
+                        selected_index,
+                        widget_name: widget_name_text.as_str(),
+                        always_on_top,
+                        layout_locked,
+                        opacity_percent,
+                        widget_scale_percent,
+                        show_coin_logos,
+                        hide_quote_asset,
+                        locale,
+                        plugin_catalog: &commit.plugin_catalog,
+                    },
                 );
                 if let Err(error) = save_layout_store(&commit.state_path, &store) {
                     eprintln!("failed to save widget settings: {error:#}");
@@ -1342,10 +1341,8 @@ fn schedule_widget_layout_lock_sync(
     });
 }
 
-fn status_saved(settings: AppSettings) -> String {
-    i18n::text(i18n::resolve_locale(settings.language))
-        .status_saved
-        .to_string()
+fn status_saved(_: AppSettings) -> String {
+    String::new()
 }
 
 fn status_icon_cache_cleared(deleted: usize, locale: i18n::Locale) -> String {
@@ -1486,7 +1483,6 @@ fn add_widget_symbol_to_store(
     state_path: &std::path::Path,
     selected_index: i32,
     symbol: &str,
-    widget_scale_percent: i32,
     plugin_catalog: &plugin::PluginCatalog,
 ) -> Option<AppSettings> {
     let symbol = settings::normalize_market_pair_key(symbol)?;
@@ -1494,7 +1490,6 @@ fn add_widget_symbol_to_store(
         layouts,
         state_path,
         selected_index,
-        widget_scale_percent,
         plugin_catalog,
         |symbols, min, limit, fallback| {
             add_symbol_with_bounds(symbols, symbol, min, limit, fallback)
@@ -1507,7 +1502,6 @@ fn remove_widget_symbol_from_store(
     state_path: &std::path::Path,
     selected_index: i32,
     symbol_index: i32,
-    widget_scale_percent: i32,
     plugin_catalog: &plugin::PluginCatalog,
 ) -> Option<AppSettings> {
     if symbol_index < 0 {
@@ -1517,7 +1511,6 @@ fn remove_widget_symbol_from_store(
         layouts,
         state_path,
         selected_index,
-        widget_scale_percent,
         plugin_catalog,
         |symbols, min, limit, fallback| {
             remove_symbol_with_bounds(symbols, symbol_index as usize, min, limit, fallback)
@@ -1529,7 +1522,6 @@ fn update_widget_symbols_in_store<F>(
     layouts: &Rc<RefCell<LayoutStore>>,
     state_path: &std::path::Path,
     selected_index: i32,
-    widget_scale_percent: i32,
     plugin_catalog: &plugin::PluginCatalog,
     update: F,
 ) -> Option<AppSettings>
@@ -1548,8 +1540,9 @@ where
     let limit = settings::symbol_limit_for_instance(instance, &definitions);
     let fallback =
         settings::default_symbols_for_instance_from_settings(instance, &definitions, &settings);
+    let scale_percent = widget_scale_percent_for_definitions(instance, &definitions);
     instance.symbols = update(instance.symbols.clone(), min, limit, fallback);
-    apply_widget_scale_to_instance(instance, &definitions, widget_scale_percent);
+    apply_widget_scale_to_instance(instance, &definitions, scale_percent);
     normalize_store_with_catalog(&mut store, 0, Some(plugin_catalog));
     if let Err(error) = save_layout_store(state_path, &store) {
         eprintln!("failed to save widget symbols: {error:#}");
@@ -2207,6 +2200,10 @@ pub(crate) fn refresh_settings_window(
     ui.set_lock_position_help_text(text.lock_position_help.into());
     ui.set_widget_scale_help_text(text.widget_scale_help.into());
     ui.set_opacity_help_text(text.opacity_help.into());
+    ui.set_widget_show_coin_logos_text(text.widget_show_coin_logos.into());
+    ui.set_widget_show_coin_logos_help_text(text.widget_show_coin_logos_help.into());
+    ui.set_widget_hide_quote_asset_text(text.widget_hide_quote_asset.into());
+    ui.set_widget_hide_quote_asset_help_text(text.widget_hide_quote_asset_help.into());
     ui.set_widget_topmost_text(text.widget_topmost.into());
     ui.set_widget_topmost_help_text(text.widget_topmost_help.into());
     ui.set_advanced_options_text(text.advanced_options.into());
@@ -2302,6 +2299,16 @@ pub(crate) fn refresh_settings_window(
         selected_widget
             .map(|widget| widget_scale_percent(widget, plugin_catalog))
             .unwrap_or(settings.widget_scale_percent),
+    );
+    ui.set_widget_show_coin_logos(
+        selected_widget
+            .map(settings::widget_show_coin_logos)
+            .unwrap_or(true),
+    );
+    ui.set_widget_hide_quote_asset(
+        selected_widget
+            .map(settings::widget_hide_quote_asset)
+            .unwrap_or(false),
     );
     ui.set_default_widgets_always_on_top(settings.widgets_always_on_top);
     ui.set_default_opacity_percent(settings.opacity_percent);
@@ -2411,7 +2418,7 @@ pub(crate) fn refresh_settings_window(
         .unwrap_or(if symbol_catalog_state.fallback_only {
             text.status_symbol_catalog_fallback
         } else {
-            text.status_ready
+            ""
         });
     ui.set_status_text(status.into());
     apply_theme_to_settings_window(ui, settings);
@@ -2513,9 +2520,11 @@ fn widget_scale_percent_for_definitions(
     instance: &WidgetInstance,
     definitions: &[WidgetDefinition],
 ) -> i32 {
-    let default_size = widget_scale_base_size(instance, definitions);
-    let size = settings::widget_size_for_instance(instance, definitions);
-    settings::widget_scale_percent_for_size(size, default_size)
+    settings::widget_scale_percent_for_instance(
+        instance,
+        definitions,
+        settings::DEFAULT_WIDGET_SCALE_PERCENT,
+    )
 }
 
 fn widget_scale_percent_bounds(
@@ -2523,16 +2532,8 @@ fn widget_scale_percent_bounds(
     plugin_catalog: &plugin::PluginCatalog,
 ) -> (i32, i32) {
     let definitions = widget_definitions_from_catalog(plugin_catalog);
-    let default_size = widget_scale_base_size(instance, &definitions);
+    let default_size = settings::default_widget_size_for_instance(instance, &definitions);
     settings::widget_scale_percent_bounds(default_size)
-}
-
-fn widget_scale_base_size(
-    instance: &WidgetInstance,
-    definitions: &[WidgetDefinition],
-) -> WidgetSize {
-    status_strip_base_size(instance)
-        .unwrap_or_else(|| settings::default_widget_size_for_instance(instance, definitions))
 }
 
 fn apply_widget_scale_to_instance(
@@ -2540,35 +2541,57 @@ fn apply_widget_scale_to_instance(
     definitions: &[WidgetDefinition],
     scale_percent: i32,
 ) {
-    let default_size = widget_scale_base_size(instance, definitions);
-    let size = settings::widget_size_from_scale_percent(default_size, scale_percent);
-    instance.layout.width = size.width;
-    instance.layout.height = size.height;
-    apply_status_strip_auto_size(instance, scale_percent);
+    settings::resize_widget_to_content(instance, definitions, scale_percent);
 }
 
-pub(crate) fn apply_status_strip_auto_sizes_to_store(store: &mut LayoutStore) -> bool {
+pub(crate) fn apply_dynamic_widget_auto_sizes_to_store(
+    store: &mut LayoutStore,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> bool {
+    let definitions = widget_definitions_from_catalog(plugin_catalog);
+    apply_dynamic_widget_auto_sizes_for_definitions(store, &definitions)
+}
+
+fn apply_dynamic_widget_auto_sizes_for_definitions(
+    store: &mut LayoutStore,
+    definitions: &[WidgetDefinition],
+) -> bool {
     let mut changed = false;
     for instance in &mut store.widgets {
-        let Some(scale_percent) = status_strip_existing_scale_percent(instance) else {
+        let Some(scale_percent) = dynamic_widget_existing_scale_percent(instance, definitions)
+        else {
             continue;
         };
-        let previous_size = (instance.layout.width, instance.layout.height);
-        apply_status_strip_auto_size(instance, scale_percent);
-        changed |= previous_size != (instance.layout.width, instance.layout.height);
+        let previous_layout = (
+            instance.layout.width,
+            instance.layout.height,
+            instance.layout.scale_percent,
+        );
+        apply_dynamic_widget_auto_size(instance, definitions, scale_percent);
+        changed |= previous_layout
+            != (
+                instance.layout.width,
+                instance.layout.height,
+                instance.layout.scale_percent,
+            );
     }
     changed
 }
 
-fn status_strip_base_size(instance: &WidgetInstance) -> Option<WidgetSize> {
-    if instance.plugin_id != STATUS_STRIP_PLUGIN_ID {
+fn dynamic_widget_base_size(
+    instance: &WidgetInstance,
+    definitions: &[WidgetDefinition],
+) -> Option<WidgetSize> {
+    let definition = definitions
+        .iter()
+        .find(|definition| definition.id == instance.plugin_id)?;
+    if definition.size_policy == settings::WidgetSizePolicy::Fixed {
         return None;
     }
-    let block_count = instance.symbols.len().clamp(1, 5) as i32;
-    Some(WidgetSize {
-        width: STATUS_STRIP_BLOCK_WIDTH * block_count + STATUS_STRIP_WINDOW_PADDING * 2,
-        height: STATUS_STRIP_HEIGHT,
-    })
+    Some(settings::default_widget_size_for_instance(
+        instance,
+        definitions,
+    ))
 }
 
 fn status_strip_legacy_base_size(instance: &WidgetInstance) -> Option<WidgetSize> {
@@ -2611,8 +2634,35 @@ fn status_strip_legacy_block_base_size(instance: &WidgetInstance) -> Option<Widg
     })
 }
 
-fn status_strip_existing_scale_percent(instance: &WidgetInstance) -> Option<i32> {
-    let current_base = status_strip_base_size(instance)?;
+fn dynamic_widget_existing_scale_percent(
+    instance: &WidgetInstance,
+    definitions: &[WidgetDefinition],
+) -> Option<i32> {
+    let current_base = dynamic_widget_base_size(instance, definitions)?;
+    if instance.layout.scale_percent > 0 {
+        return Some(settings::widget_scale_percent_for_instance(
+            instance,
+            definitions,
+            settings::DEFAULT_WIDGET_SCALE_PERCENT,
+        ));
+    }
+    if instance.plugin_id != STATUS_STRIP_PLUGIN_ID {
+        let current_size = settings::clamp_widget_size(WidgetSize {
+            width: instance.layout.width,
+            height: instance.layout.height,
+        });
+        return Some(settings::widget_content_scale_percent_for_size(
+            current_size,
+            current_base,
+        ));
+    }
+    status_strip_existing_scale_percent(instance, current_base)
+}
+
+fn status_strip_existing_scale_percent(
+    instance: &WidgetInstance,
+    current_base: WidgetSize,
+) -> Option<i32> {
     let previous_base = status_strip_previous_base_size(instance)?;
     let previous_tight_base = status_strip_previous_tight_base_size(instance)?;
     let legacy_block_base = status_strip_legacy_block_base_size(instance)?;
@@ -2667,13 +2717,15 @@ fn scale_reconstruction_error(
         + (target_size.height - reconstructed.height).abs()
 }
 
-fn apply_status_strip_auto_size(instance: &mut WidgetInstance, scale_percent: i32) {
-    let Some(base_size) = status_strip_base_size(instance) else {
+fn apply_dynamic_widget_auto_size(
+    instance: &mut WidgetInstance,
+    definitions: &[WidgetDefinition],
+    scale_percent: i32,
+) {
+    if dynamic_widget_base_size(instance, definitions).is_none() {
         return;
-    };
-    let size = settings::widget_size_from_scale_percent(base_size, scale_percent);
-    instance.layout.width = size.width;
-    instance.layout.height = size.height;
+    }
+    settings::resize_widget_to_content(instance, definitions, scale_percent);
 }
 
 pub(crate) fn symbol_limit_for_instance(
@@ -2696,22 +2748,7 @@ fn widget_definitions_from_optional_catalog(
     catalog: Option<&plugin::PluginCatalog>,
 ) -> Vec<WidgetDefinition> {
     catalog
-        .map(|catalog| {
-            catalog
-                .plugins()
-                .iter()
-                .map(|plugin| WidgetDefinition {
-                    id: plugin.id.clone(),
-                    name: plugin.name.clone(),
-                    default_size: settings::WidgetSize {
-                        width: plugin.default_size.width,
-                        height: plugin.default_size.height,
-                    },
-                    min_symbol_limit: plugin.min_symbol_limit,
-                    symbol_limit: plugin.symbol_limit,
-                })
-                .collect()
-        })
+        .map(widget_definitions_from_catalog)
         .unwrap_or_default()
 }
 
@@ -2917,6 +2954,17 @@ mod tests {
         }
     }
 
+    fn temp_state_path(label: &str) -> std::path::PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "crypto-hud-settings-window-{label}-{}-{suffix}.json",
+            std::process::id()
+        ))
+    }
+
     fn catalog_entry(
         source: settings::MarketDataSource,
         market_type: settings::MarketType,
@@ -2935,6 +2983,139 @@ mod tests {
 
     fn enabled_sources(sources: &[settings::MarketDataSource]) -> Vec<settings::MarketDataSource> {
         sources.to_vec()
+    }
+
+    fn settings_window_ui_source() -> String {
+        std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("ui")
+                .join("settings-window.slint"),
+        )
+        .unwrap()
+    }
+
+    fn block_before_anchor<'a>(source: &'a str, block_start: &str, anchor: &str) -> &'a str {
+        let anchor_index = source.find(anchor).unwrap();
+        let block_index = source[..anchor_index].rfind(block_start).unwrap();
+        &source[block_index..]
+    }
+
+    fn block_after_anchor<'a>(source: &'a str, anchor: &str, block_start: &str) -> &'a str {
+        let anchor_index = source.find(anchor).unwrap();
+        let rest = &source[anchor_index..];
+        let block_index = rest.find(block_start).unwrap();
+        &rest[block_index..]
+    }
+
+    fn slint_px_assignment(block: &str, property: &str) -> i32 {
+        let assignment = format!("{property}:");
+        let start = block.find(&assignment).unwrap() + assignment.len();
+        let value = block[start..].trim_start();
+        let end = value.find("px").unwrap();
+        value[..end].trim().parse().unwrap()
+    }
+
+    fn slint_x_assignment(block: &str, parent_width: i32) -> i32 {
+        let start = block.find("x:").unwrap() + "x:".len();
+        let value = block[start..].trim_start();
+        if let Some(rest) = value.strip_prefix("parent.width -") {
+            let end = rest.find("px").unwrap();
+            parent_width - rest[..end].trim().parse::<i32>().unwrap()
+        } else {
+            let end = value.find("px").unwrap();
+            value[..end].trim().parse().unwrap()
+        }
+    }
+
+    #[test]
+    fn settings_widget_scale_controls_have_clear_hit_areas() {
+        let source = settings_window_ui_source();
+        let selected_panel =
+            block_after_anchor(&source, "selected_widget_panel := Rectangle {", "");
+        let scrollbar_gutter = slint_px_assignment(
+            &source,
+            "property <length> widget-settings-scrollbar-gutter",
+        );
+        let panel_width = slint_px_assignment(selected_panel, "width") - scrollbar_gutter;
+
+        let show_logos_touch = block_before_anchor(
+            &source,
+            "TouchArea {",
+            "root.widget-show-coin-logos = !root.widget-show-coin-logos;",
+        );
+        let hide_quote_touch = block_before_anchor(
+            &source,
+            "TouchArea {",
+            "root.widget-hide-quote-asset = !root.widget-hide-quote-asset;",
+        );
+        let scale_stepper = block_after_anchor(
+            &source,
+            "label: root.widget-scale-text;",
+            "PercentStepper {",
+        );
+        let percent_label = block_after_anchor(scale_stepper, "edited(value) =>", "Text {");
+        let reset_button = block_after_anchor(
+            scale_stepper,
+            "SettingsSmallButton {",
+            "SettingsSmallButton {",
+        );
+
+        let show_logos_bottom = slint_px_assignment(show_logos_touch, "y")
+            + slint_px_assignment(show_logos_touch, "height");
+        let hide_quote_bottom = slint_px_assignment(hide_quote_touch, "y")
+            + slint_px_assignment(hide_quote_touch, "height");
+        let scale_top = slint_px_assignment(scale_stepper, "y");
+        assert!(
+            show_logos_bottom <= scale_top,
+            "show logos touch area overlaps widget scale stepper"
+        );
+        assert!(
+            hide_quote_bottom <= scale_top,
+            "hide quote touch area overlaps widget scale stepper"
+        );
+
+        let stepper_left = slint_x_assignment(scale_stepper, panel_width);
+        let stepper_right = stepper_left + slint_px_assignment(scale_stepper, "width");
+        let percent_left = slint_x_assignment(percent_label, panel_width);
+        let percent_right = percent_left + slint_px_assignment(percent_label, "width");
+        let reset_left = slint_x_assignment(reset_button, panel_width);
+        let reset_right = reset_left + slint_px_assignment(reset_button, "width");
+        let switch_right = panel_width - 17;
+
+        assert!(stepper_right <= percent_left);
+        assert!(
+            percent_left - stepper_right <= 12,
+            "scale stepper and percent label should stay visually grouped"
+        );
+        assert!(percent_right <= reset_left);
+        assert!(
+            reset_left - percent_right <= 20,
+            "scale percent label and reset button should stay visually grouped"
+        );
+        assert_eq!(
+            reset_right, switch_right,
+            "scale reset button should right-align with setting switches"
+        );
+    }
+
+    #[test]
+    fn selected_widget_settings_scroll_view_reserves_scrollbar_gutter() {
+        let source = settings_window_ui_source();
+        let selected_panel =
+            block_after_anchor(&source, "selected_widget_panel := Rectangle {", "");
+
+        assert!(
+            selected_panel.contains(
+                "viewport-width: selected_widget_panel.width - root.widget-settings-scrollbar-gutter;"
+            ),
+            "selected widget settings scroll view should not let the scrollbar overlay content"
+        );
+        assert!(
+            selected_panel.contains(
+                "width: selected_widget_panel.width - root.widget-settings-scrollbar-gutter;"
+            ),
+            "selected widget settings content should reserve the same scrollbar gutter"
+        );
     }
 
     #[test]
@@ -3043,11 +3224,9 @@ mod tests {
 
         let id = add_plugin_widget_to_store(&mut store, plugin, &settings).unwrap();
         let widget = store.widgets.first().unwrap();
+        let definitions = widget_definitions_from_catalog(&catalog);
         let expected_size = settings::widget_size_from_scale_percent(
-            WidgetSize {
-                width: plugin.default_size.width,
-                height: plugin.default_size.height,
-            },
+            settings::default_widget_size_for_instance(widget, &definitions),
             125,
         );
 
@@ -3064,7 +3243,6 @@ mod tests {
     #[test]
     fn apply_widget_settings_action_normalizes_name_opacity_and_size() {
         let catalog = plugin::PluginCatalog::builtins();
-        let plugin = catalog.find(WidgetType::QuoteBoard.plugin_id()).unwrap();
         let mut store = LayoutStore {
             selected_widget_id: Some("quote-board-1".to_string()),
             widgets: vec![test_widget(
@@ -3074,25 +3252,28 @@ mod tests {
             )],
             ..LayoutStore::default()
         };
+        let definitions = widget_definitions_from_catalog(&catalog);
+        settings::resize_widget_to_content(&mut store.widgets[0], &definitions, 150);
 
         assert!(apply_widget_settings_to_store(
             &mut store,
-            0,
-            "  Main Board  ",
-            true,
-            true,
-            42,
-            150,
-            i18n::Locale::En,
-            &catalog,
+            WidgetSettingsUpdate {
+                selected_index: 0,
+                widget_name: "  Main Board  ",
+                always_on_top: true,
+                layout_locked: true,
+                opacity_percent: 42,
+                widget_scale_percent: 150,
+                show_coin_logos: false,
+                hide_quote_asset: true,
+                locale: i18n::Locale::En,
+                plugin_catalog: &catalog,
+            },
         ));
 
         let widget = &store.widgets[0];
         let expected_size = settings::widget_size_from_scale_percent(
-            WidgetSize {
-                width: plugin.default_size.width,
-                height: plugin.default_size.height,
-            },
+            settings::default_widget_size_for_instance(widget, &definitions),
             150,
         );
         assert_eq!(widget.name, "Main Board");
@@ -3101,6 +3282,101 @@ mod tests {
         assert_eq!(widget.layout.opacity_percent, 42);
         assert_eq!(widget.layout.width, expected_size.width);
         assert_eq!(widget.layout.height, expected_size.height);
+        assert!(!settings::widget_show_coin_logos(widget));
+        assert!(settings::widget_hide_quote_asset(widget));
+    }
+
+    #[test]
+    fn quote_board_scale_uses_effective_content_scale_for_extra_height() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let definitions = widget_definitions_from_catalog(&catalog);
+        let mut widget = test_widget(
+            "quote-board-1",
+            WidgetType::QuoteBoard.plugin_id(),
+            vec!["BTC"],
+        );
+        widget.layout.width = settings::QUOTE_BOARD_WIDTH;
+        widget.layout.height = settings::QUOTE_BOARD_HEIGHT;
+
+        assert_eq!(
+            widget_scale_percent_for_definitions(&widget, &definitions),
+            100
+        );
+    }
+
+    #[test]
+    fn apply_widget_settings_preserves_content_scale_when_toggling_coin_logos() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let mut store = LayoutStore {
+            selected_widget_id: Some("quote-board-1".to_string()),
+            widgets: vec![test_widget(
+                "quote-board-1",
+                WidgetType::QuoteBoard.plugin_id(),
+                vec!["BTC"],
+            )],
+            ..LayoutStore::default()
+        };
+        store.widgets[0].layout.width = settings::QUOTE_BOARD_WIDTH;
+        store.widgets[0].layout.height = settings::QUOTE_BOARD_HEIGHT;
+
+        assert!(apply_widget_settings_to_store(
+            &mut store,
+            WidgetSettingsUpdate {
+                selected_index: 0,
+                widget_name: "Quote Board 1",
+                always_on_top: false,
+                layout_locked: false,
+                opacity_percent: 96,
+                widget_scale_percent: 172,
+                show_coin_logos: false,
+                hide_quote_asset: false,
+                locale: i18n::Locale::En,
+                plugin_catalog: &catalog,
+            },
+        ));
+
+        let widget = &store.widgets[0];
+        assert_eq!(widget.layout.width, 274);
+        assert_eq!(widget.layout.height, 80);
+        assert!(!settings::widget_show_coin_logos(widget));
+    }
+
+    #[test]
+    fn add_widget_symbol_preserves_quote_board_scale_while_resizing_to_content() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let definitions = widget_definitions_from_catalog(&catalog);
+        let mut widget = test_widget(
+            "quote-board-1",
+            WidgetType::QuoteBoard.plugin_id(),
+            vec!["BTC"],
+        );
+        settings::resize_widget_to_content(&mut widget, &definitions, 150);
+        let state_path = temp_state_path("quote-board-symbol-add");
+        let layouts = Rc::new(RefCell::new(LayoutStore {
+            selected_widget_id: Some("quote-board-1".to_string()),
+            widgets: vec![widget],
+            ..LayoutStore::default()
+        }));
+
+        add_widget_symbol_to_store(&layouts, &state_path, 0, "ETH", &catalog).unwrap();
+
+        let store = layouts.borrow();
+        let widget = &store.widgets[0];
+        let expected_size = settings::widget_size_from_scale_percent(
+            settings::default_widget_size_for_instance(widget, &definitions),
+            150,
+        );
+        assert_eq!(
+            widget.symbols,
+            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+        );
+        assert_eq!(widget.layout.width, expected_size.width);
+        assert_eq!(widget.layout.height, expected_size.height);
+        assert_eq!(
+            widget_scale_percent_for_definitions(widget, &definitions),
+            150
+        );
+        let _ = std::fs::remove_file(state_path);
     }
 
     #[test]
@@ -3419,8 +3695,16 @@ mod tests {
     #[test]
     fn widget_scale_options_follow_each_instance_size() {
         let catalog = plugin::PluginCatalog::builtins();
-        let quote_scale_125 =
-            settings::widget_size_from_scale_percent(WidgetType::QuoteBoard.default_size(), 125);
+        let definitions = widget_definitions_from_catalog(&catalog);
+        let quote_base = settings::default_widget_size_for_instance(
+            &test_widget(
+                "quote-board-base",
+                WidgetType::QuoteBoard.plugin_id(),
+                vec!["BTC"],
+            ),
+            &definitions,
+        );
+        let quote_scale_125 = settings::widget_size_from_scale_percent(quote_base, 125);
         let mini_scale_150 =
             settings::widget_size_from_scale_percent(WidgetType::MiniTicker.default_size(), 150);
         let store = LayoutStore {
@@ -3431,7 +3715,11 @@ mod tests {
                     legacy_widget_type: None,
                     name: "Quote Board 1".to_string(),
                     visible: true,
-                    layout: settings::WidgetLayout::default(),
+                    layout: settings::WidgetLayout {
+                        width: quote_base.width,
+                        height: quote_base.height,
+                        ..settings::WidgetLayout::default()
+                    },
                     symbols: vec!["BTC".to_string()],
                     config: settings::default_widget_config(),
                 },
@@ -3444,6 +3732,7 @@ mod tests {
                     layout: settings::WidgetLayout {
                         width: quote_scale_125.width,
                         height: quote_scale_125.height,
+                        scale_percent: 125,
                         ..settings::WidgetLayout::default()
                     },
                     symbols: vec!["ETH".to_string()],
@@ -3458,6 +3747,7 @@ mod tests {
                     layout: settings::WidgetLayout {
                         width: mini_scale_150.width,
                         height: mini_scale_150.height,
+                        scale_percent: 150,
                         ..settings::WidgetLayout::default()
                     },
                     symbols: vec!["SOL".to_string()],
@@ -3468,13 +3758,29 @@ mod tests {
         };
 
         assert_eq!(widget_scale_options(&store, &catalog), vec![100, 125, 150]);
+        assert_eq!(
+            widget_scale_min_options(&store, &catalog),
+            vec![
+                settings::MIN_WIDGET_SCALE_PERCENT,
+                settings::MIN_WIDGET_SCALE_PERCENT,
+                settings::MIN_WIDGET_SCALE_PERCENT,
+            ]
+        );
     }
 
     #[test]
     fn default_widget_scale_change_updates_existing_instances() {
         let catalog = plugin::PluginCatalog::builtins();
-        let quote_scale_150 =
-            settings::widget_size_from_scale_percent(WidgetType::QuoteBoard.default_size(), 150);
+        let definitions = widget_definitions_from_catalog(&catalog);
+        let quote_scale_base = settings::default_widget_size_for_instance(
+            &test_widget(
+                "quote-board-1",
+                WidgetType::QuoteBoard.plugin_id(),
+                vec!["BTC"],
+            ),
+            &definitions,
+        );
+        let quote_scale_150 = settings::widget_size_from_scale_percent(quote_scale_base, 150);
         let mini_scale_200 =
             settings::widget_size_from_scale_percent(WidgetType::MiniTicker.default_size(), 200);
         let mini_scale_150 =
@@ -3607,6 +3913,97 @@ mod tests {
         );
     }
 
+    fn status_strip_definitions() -> Vec<WidgetDefinition> {
+        vec![WidgetDefinition {
+            id: STATUS_STRIP_PLUGIN_ID.to_string(),
+            name: "Status Strip".to_string(),
+            default_size: settings::WidgetSize {
+                width: 688,
+                height: 92,
+            },
+            size_policy: settings::WidgetSizePolicy::SymbolGrid {
+                cell_width: 136,
+                cell_height: 84,
+                content_padding_width: 8,
+                content_padding_height: 8,
+                columns: Some(5),
+                rows: None,
+            },
+            min_symbol_limit: 1,
+            symbol_limit: 5,
+        }]
+    }
+
+    fn status_strip_catalog() -> plugin::PluginCatalog {
+        plugin::PluginCatalog::from_plugins_for_tests(vec![plugin::PluginDefinition {
+            id: STATUS_STRIP_PLUGIN_ID.to_string(),
+            name: "Status Strip".to_string(),
+            version: semver::Version::new(0, 1, 0),
+            source: plugin::PluginSource::LocalUnsigned,
+            renderer: plugin::PluginRendererDefinition::Builtin(
+                plugin::BuiltinRenderer::QuoteBoard,
+            ),
+            default_size: plugin::PluginSize {
+                width: 688,
+                height: 92,
+            },
+            size_policy: plugin::PluginSizePolicy::SymbolGrid {
+                cell_size: plugin::PluginSize {
+                    width: 136,
+                    height: 84,
+                },
+                content_padding: plugin::PluginSize {
+                    width: 8,
+                    height: 8,
+                },
+                columns: Some(5),
+                rows: None,
+            },
+            min_symbol_limit: 1,
+            symbol_limit: 5,
+            data_requirements: Vec::new(),
+            status: plugin::PluginStatus::Available,
+        }])
+    }
+
+    #[test]
+    fn remove_widget_symbol_preserves_symbol_block_scale_while_resizing_to_content() {
+        let catalog = status_strip_catalog();
+        let definitions = widget_definitions_from_catalog(&catalog);
+        let mut widget = test_widget(
+            "plugin-strip-1",
+            STATUS_STRIP_PLUGIN_ID,
+            vec!["BTC", "ETH", "SOL"],
+        );
+        settings::resize_widget_to_content(&mut widget, &definitions, 200);
+        let state_path = temp_state_path("status-strip-symbol-remove");
+        let layouts = Rc::new(RefCell::new(LayoutStore {
+            selected_widget_id: Some("plugin-strip-1".to_string()),
+            widgets: vec![widget],
+            ..LayoutStore::default()
+        }));
+
+        remove_widget_symbol_from_store(&layouts, &state_path, 0, 2, &catalog).unwrap();
+
+        let store = layouts.borrow();
+        let widget = &store.widgets[0];
+        let expected_size = settings::widget_size_from_scale_percent(
+            settings::default_widget_size_for_instance(widget, &definitions),
+            200,
+        );
+        assert_eq!(
+            widget.symbols,
+            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+        );
+        assert_eq!(widget.layout.width, expected_size.width);
+        assert_eq!(widget.layout.height, expected_size.height);
+        assert_eq!(
+            widget_scale_percent_for_definitions(widget, &definitions),
+            200
+        );
+        let _ = std::fs::remove_file(state_path);
+    }
+
     #[test]
     fn status_strip_auto_size_tracks_symbol_blocks() {
         let mut instance = WidgetInstance {
@@ -3619,14 +4016,15 @@ mod tests {
             symbols: vec!["BTC".to_string()],
             config: settings::default_widget_config(),
         };
+        let definitions = status_strip_definitions();
 
-        apply_status_strip_auto_size(&mut instance, 100);
+        apply_dynamic_widget_auto_size(&mut instance, &definitions, 100);
 
-        assert_eq!(instance.layout.width, 161);
-        assert_eq!(instance.layout.height, 103);
+        assert_eq!(instance.layout.width, 144);
+        assert_eq!(instance.layout.height, 92);
 
         instance.symbols = vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()];
-        apply_status_strip_auto_size(&mut instance, 100);
+        apply_dynamic_widget_auto_size(&mut instance, &definitions, 100);
 
         assert_eq!(instance.layout.width, 416);
         assert_eq!(instance.layout.height, 92);
@@ -3644,6 +4042,7 @@ mod tests {
                 layout: settings::WidgetLayout {
                     width: 824,
                     height: 260,
+                    scale_percent: 0,
                     ..settings::WidgetLayout::default()
                 },
                 symbols: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
@@ -3652,7 +4051,10 @@ mod tests {
             ..LayoutStore::default()
         };
 
-        assert!(apply_status_strip_auto_sizes_to_store(&mut store));
+        assert!(apply_dynamic_widget_auto_sizes_for_definitions(
+            &mut store,
+            &status_strip_definitions()
+        ));
         assert_eq!(store.widgets[0].layout.width, 416);
         assert_eq!(store.widgets[0].layout.height, 92);
     }
@@ -3669,6 +4071,7 @@ mod tests {
                 layout: settings::WidgetLayout {
                     width: 1008,
                     height: 168,
+                    scale_percent: 0,
                     ..settings::WidgetLayout::default()
                 },
                 symbols: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
@@ -3677,7 +4080,10 @@ mod tests {
             ..LayoutStore::default()
         };
 
-        assert!(apply_status_strip_auto_sizes_to_store(&mut store));
+        assert!(apply_dynamic_widget_auto_sizes_for_definitions(
+            &mut store,
+            &status_strip_definitions()
+        ));
         assert_eq!(store.widgets[0].layout.width, 832);
         assert_eq!(store.widgets[0].layout.height, 184);
     }
@@ -3694,6 +4100,7 @@ mod tests {
                 layout: settings::WidgetLayout {
                     width: 450,
                     height: 84,
+                    scale_percent: 0,
                     ..settings::WidgetLayout::default()
                 },
                 symbols: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
@@ -3702,7 +4109,10 @@ mod tests {
             ..LayoutStore::default()
         };
 
-        assert!(apply_status_strip_auto_sizes_to_store(&mut store));
+        assert!(apply_dynamic_widget_auto_sizes_for_definitions(
+            &mut store,
+            &status_strip_definitions()
+        ));
         assert_eq!(store.widgets[0].layout.width, 416);
         assert_eq!(store.widgets[0].layout.height, 92);
     }
@@ -3719,6 +4129,7 @@ mod tests {
                 layout: settings::WidgetLayout {
                     width: 408,
                     height: 84,
+                    scale_percent: 0,
                     ..settings::WidgetLayout::default()
                 },
                 symbols: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
@@ -3727,7 +4138,10 @@ mod tests {
             ..LayoutStore::default()
         };
 
-        assert!(apply_status_strip_auto_sizes_to_store(&mut store));
+        assert!(apply_dynamic_widget_auto_sizes_for_definitions(
+            &mut store,
+            &status_strip_definitions()
+        ));
         assert_eq!(store.widgets[0].layout.width, 416);
         assert_eq!(store.widgets[0].layout.height, 92);
     }
@@ -3744,6 +4158,7 @@ mod tests {
                 layout: settings::WidgetLayout {
                     width: 832,
                     height: 184,
+                    scale_percent: 200,
                     ..settings::WidgetLayout::default()
                 },
                 symbols: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
@@ -3752,7 +4167,10 @@ mod tests {
             ..LayoutStore::default()
         };
 
-        assert!(!apply_status_strip_auto_sizes_to_store(&mut store));
+        assert!(!apply_dynamic_widget_auto_sizes_for_definitions(
+            &mut store,
+            &status_strip_definitions()
+        ));
         assert_eq!(store.widgets[0].layout.width, 832);
         assert_eq!(store.widgets[0].layout.height, 184);
     }

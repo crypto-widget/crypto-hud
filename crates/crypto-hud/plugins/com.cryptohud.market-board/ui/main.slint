@@ -18,6 +18,7 @@ export component MarketBoard inherits Window {
     in property <bool> layout-locked;
     in property <int> widget-width: 300;
     in property <int> widget-height: 250;
+    in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
@@ -31,9 +32,7 @@ export component MarketBoard inherits Window {
     property <color> gain-color: root.light-theme ? #16a34a : #22c55e;
     property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
     in-out property <bool> card-left-drag-active: false;
-    property <float> content-scale: ((root.widget-width * 1px) / 300px) < ((root.widget-height * 1px) / 250px)
-        ? ((root.widget-width * 1px) / 300px)
-        : ((root.widget-height * 1px) / 250px);
+    property <float> content-scale: root.widget-scale;
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
@@ -43,6 +42,24 @@ export component MarketBoard inherits Window {
     no-frame: true;
     always-on-top: root.pin-to-top;
     background: transparent;
+
+    drag_area := TouchArea {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+        pointer-event(event) => {
+            if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.card-left-drag-active = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                root.card-left-drag-active = false;
+            }
+        }
+        moved => {
+            if !root.layout-locked && root.card-left-drag-active {
+                root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
 
     card := Rectangle {
         x: (root.widget-width * 1px - self.width * root.content-scale) / 2;
@@ -177,24 +194,6 @@ export component MarketBoard inherits Window {
             font-size: 10px;
             horizontal-alignment: right;
             overflow: elide;
-        }
-
-        drag_area := TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
-            pointer-event(event) => {
-                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                    root.card-left-drag-active = true;
-                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
-                    root.card-left-drag-active = false;
-                }
-            }
-            moved => {
-                if !root.layout-locked && root.card-left-drag-active {
-                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
         }
 
         lock_button := Rectangle {

@@ -1,6 +1,22 @@
-# Crypto HUD
+<h1 align="center">Crypto HUD</h1>
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+<p align="center">
+  A lightweight, local-first market HUD for your Windows desktop.
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-f59e0b">
+  <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078d4">
+  <img alt="Runtime: native" src="https://img.shields.io/badge/runtime-native-22c55e">
+  <img alt="No account required" src="https://img.shields.io/badge/account-not%20required-14b8a6">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111827">
+</p>
+
+> Keep prices visible enough to glance at, quiet enough to forget about.
 
 Crypto HUD keeps crypto prices quietly visible on your Windows desktop.
 
@@ -14,29 +30,25 @@ it is still early software and may change quickly.
 
 ## Highlights
 
-- **Lightweight always-on widgets**: native Rust + Slint desktop windows without
-  Electron, Tauri, WebView, or a bundled browser runtime.
-- **Low overhead, low interruption**: built for quick startup, modest memory
-  use, and low background CPU while staying quietly visible.
-- **Local-first experience**: the UI, widget layout, and preferences run and
-  stay on your machine, with no cloud account or hosted control plane.
-- **No login or authorization**: use it without accounts, OAuth, exchange API
-  keys, wallet access, private keys, or seed phrases.
-- **One-glance market checks**: keep prices at the edge of your desktop and
-  check them without repeatedly opening an exchange.
-- **Clear security boundary**: reads public market data only; no trading, wallet
+- **Glanceable prices**: keep market prices at the edge of your desktop without
+  repeatedly opening an exchange.
+- **Light and low-overhead**: native Rust + Slint, with no Electron, Tauri,
+  WebView, or bundled browser runtime.
+- **Local and permissionless**: layout and preferences stay on your machine; no
+  accounts, OAuth, API keys, wallet access, private keys, or seed phrases.
+- **One-key hide/show**: press `Alt+C` to hide every widget when you need a
+  clean desktop, then bring them back just as quickly.
+- **View-only by design**: reads public market data only; no trading, wallet
   connection, or custody.
 
 ## What It Does
 
-- Shows crypto prices in small floating desktop widgets.
-- Lets you pin widgets above other windows or keep them out of the way.
-- Supports multiple widget styles, from compact tickers to larger market cards.
-- Lets you choose the symbols each widget tracks.
-- Fetches live market data from Binance, OKX, and Hyperliquid.
-- Supports light/dark themes, English and Simplified Chinese, and green-up or
-  red-up market colors.
-- Keeps widget positions and settings between launches.
+- Shows draggable, optionally always-on-top desktop price widgets.
+- Tracks chosen symbols and fetches live data from Binance, OKX, and
+  Hyperliquid.
+- Supports widget styles, light/dark themes, English and Simplified Chinese,
+  and market color preferences.
+- Saves widget positions and settings between launches.
 
 Crypto HUD is only for viewing public market information. It does not place
 trades, connect to wallets, custody funds, or ask for exchange API keys. Its
@@ -61,7 +73,7 @@ Crypto HUD is an alpha native Windows desktop app built with Rust and Slint.
 
 - Runs as one native desktop process.
 - Uses real desktop windows instead of WebView or browser-hosted UI.
-- Includes a settings window, tray controls, global hide/show shortcut, local
+- Includes a main window, tray controls, global hide/show shortcut, local
   persistence, plugin loading, and Windows packaging scripts.
 - Default shortcut: `Alt+C` to hide or show all widgets.
 
@@ -97,7 +109,7 @@ cargo run -p crypto-hud -- --widgets 3
 ## Basic Use
 
 - Drag a price card to move it.
-- Click the tray icon to open settings.
+- Click the tray icon to open the main window.
 - Right-click the tray icon for settings and quit actions.
 - Use settings to add widgets, choose symbols, change opacity, switch themes,
   configure startup behavior, and change app-level market preferences.
@@ -122,6 +134,7 @@ mise run test
 mise run format
 mise run run-app
 powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
 ```
 
 The code is split into small Rust crates:

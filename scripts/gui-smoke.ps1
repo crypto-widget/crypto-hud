@@ -95,6 +95,9 @@ try {
         if ([int]$widget.layoutWidth -lt 160 -or [int]$widget.layoutHeight -lt 80) {
             throw "Widget $($widget.id) reported an invalid persisted size"
         }
+        if ([int]$widget.scalePercent -le 0) {
+            throw "Widget $($widget.id) did not report a persisted scale_percent"
+        }
         if ([Math]::Abs([int]$widget.runtimeWidth - [int]$widget.layoutWidth) -gt 1) {
             throw "Widget $($widget.id) runtime width $($widget.runtimeWidth) did not match layout width $($widget.layoutWidth)"
         }

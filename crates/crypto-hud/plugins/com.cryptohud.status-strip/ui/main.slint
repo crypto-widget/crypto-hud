@@ -35,6 +35,7 @@ export component StatusStrip inherits Window {
     in property <bool> layout-locked;
     in property <int> widget-width: 688;
     in property <int> widget-height: 92;
+    in property <float> widget-scale: 1.0;
     in property <[int]> quote-cell-widths;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
@@ -76,15 +77,16 @@ export component StatusStrip inherits Window {
         : (root.block-count == 4 ? root.block-4-x : root.block-5-x)));
     property <length> canvas-height: root.visible-height;
     property <length> card-width: root.canvas-width;
-    property <length> available-width: root.widget-width * 1px - root.window-padding * 2;
-    property <length> available-height: root.widget-height * 1px - root.window-padding * 2;
-    property <float> content-scale: (root.available-width / root.canvas-width) < (root.available-height / root.canvas-height)
-        ? (root.available-width / root.canvas-width)
-        : (root.available-height / root.canvas-height);
+    property <length> content-width: root.canvas-width + root.window-padding * 2;
+    property <length> content-height: root.canvas-height + root.window-padding * 2;
+    property <float> content-scale: root.widget-scale;
     in-out property <bool> card-left-drag-active: false;
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
+    function s(value: length) -> length {
+        return value * root.content-scale;
+    }
     title: root.widget-id;
     width: root.widget-width * 1px;
     height: root.widget-height * 1px;
@@ -92,14 +94,29 @@ export component StatusStrip inherits Window {
     always-on-top: root.pin-to-top;
     background: transparent;
 
+    drag_area := TouchArea {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+        pointer-event(event) => {
+            if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.card-left-drag-active = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                root.card-left-drag-active = false;
+            }
+        }
+        moved => {
+            if !root.layout-locked && root.card-left-drag-active {
+                root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+
     canvas := Rectangle {
-        x: root.window-padding + (root.available-width - root.canvas-width * root.content-scale) / 2;
-        y: root.window-padding + (root.available-height - root.canvas-height * root.content-scale) / 2;
-        width: root.canvas-width;
-        height: root.canvas-height;
-        transform-origin: { x: 0px, y: 0px };
-        transform-scale-x: root.content-scale;
-        transform-scale-y: root.content-scale;
+        x: (root.widget-width * 1px - root.s(root.content-width)) / 2 + root.s(root.window-padding);
+        y: (root.widget-height * 1px - root.s(root.content-height)) / 2 + root.s(root.window-padding);
+        width: root.s(root.canvas-width);
+        height: root.s(root.canvas-height);
         opacity: root.content-opacity / 100;
         clip: true;
         background: transparent;
@@ -107,9 +124,9 @@ export component StatusStrip inherits Window {
         card := Rectangle {
             x: 0px;
             y: 0px;
-            width: root.card-width;
-            height: root.visible-height;
-            border-radius: root.card-radius;
+            width: root.s(root.card-width);
+            height: root.s(root.visible-height);
+            border-radius: root.s(root.card-radius);
             background: transparent;
             border-width: 0px;
             border-color: transparent;
@@ -124,9 +141,9 @@ export component StatusStrip inherits Window {
                     : (index == 1 ? root.block-1-width
                     : (index == 2 ? root.block-2-width
                     : (index == 3 ? root.block-3-width : root.block-4-width)));
-                x: self.cell-x;
+                x: root.s(self.cell-x);
                 y: 0px;
-                width: self.cell-width;
+                width: root.s(self.cell-width);
                 height: parent.height;
                 visible: index < root.max-block-count;
                 background: transparent;
@@ -142,32 +159,32 @@ export component StatusStrip inherits Window {
             whole_card_highlight := Rectangle {
                 width: parent.width;
                 height: parent.height;
-                border-radius: root.card-radius;
+                border-radius: root.s(root.card-radius);
                 background: @linear-gradient(180deg, #ffffff12 0%, #ffffff0a 18%, #ffffff03 50%, #ffffff00 74%, #00000000 100%);
             }
 
             upper_gloss := Rectangle {
-                x: 1px;
-                y: 1px;
-                width: parent.width - 2px;
-                height: 48px;
-                border-radius: root.upper-highlight-radius;
+                x: root.s(1px);
+                y: root.s(1px);
+                width: parent.width - root.s(2px);
+                height: root.s(48px);
+                border-radius: root.s(root.upper-highlight-radius);
                 background: @linear-gradient(180deg, #ffffff22 0%, #ffffff13 22%, #ffffff06 56%, #ffffff02 82%, #ffffff00 100%);
             }
 
             top_glint := Rectangle {
-                x: 2px;
-                y: 2px;
-                width: parent.width - 4px;
-                height: 12px;
-                border-radius: root.top-highlight-radius;
+                x: root.s(2px);
+                y: root.s(2px);
+                width: parent.width - root.s(4px);
+                height: root.s(12px);
+                border-radius: root.s(root.top-highlight-radius);
                 background: @linear-gradient(180deg, #ffffff18 0%, #ffffff04 100%);
             }
 
             bottom_shade := Rectangle {
                 width: parent.width;
                 height: parent.height;
-                border-radius: root.card-radius;
+                border-radius: root.s(root.card-radius);
                 background: @linear-gradient(180deg, #00000000 0%, #00000000 42%, #0000000b 78%, #00000016 100%);
             }
 
@@ -181,66 +198,66 @@ export component StatusStrip inherits Window {
                     : (index == 2 ? root.block-2-width
                     : (index == 3 ? root.block-3-width : root.block-4-width)));
                 property <bool> contrast-cell: index == 3;
-                x: self.cell-x;
+                x: root.s(self.cell-x);
                 y: 0px;
-                width: self.cell-width;
+                width: root.s(self.cell-width);
                 height: parent.height;
                 visible: index < root.max-block-count;
                 background: transparent;
 
                 Rectangle {
-                    x: parent.width - 1px;
-                    y: root.separator-top;
-                    width: 1px;
-                    height: parent.height - root.separator-bottom-gap;
+                    x: parent.width - root.s(1px);
+                    y: root.s(root.separator-top);
+                    width: root.s(1px);
+                    height: parent.height - root.s(root.separator-bottom-gap);
                     background: #ffffff28;
                     visible: index + 1 < root.block-count;
                 }
 
                 Text {
-                    x: root.text-left;
-                    y: 10px;
-                    width: parent.width - root.text-horizontal-padding;
-                    height: 16px;
+                    x: root.s(root.text-left);
+                    y: root.s(10px);
+                    width: parent.width - root.s(root.text-horizontal-padding);
+                    height: root.s(16px);
                     text: quote.symbol;
                     color: parent.contrast-cell ? root.contrast-text-color : root.default-text-color;
-                    font-size: 11px;
+                    font-size: root.s(11px);
                     font-weight: 700;
                     overflow: elide;
                 }
 
                 Text {
-                    x: root.text-left;
-                    y: 32px;
-                    width: parent.width - root.text-horizontal-padding;
-                    height: 27px;
+                    x: root.s(root.text-left);
+                    y: root.s(32px);
+                    width: parent.width - root.s(root.text-horizontal-padding);
+                    height: root.s(27px);
                     text: quote.price;
                     color: parent.contrast-cell ? root.contrast-text-color : root.default-text-color;
-                    font-size: 23px;
+                    font-size: root.s(23px);
                     font-weight: 900;
                     overflow: elide;
                 }
 
                 Text {
-                    x: root.text-left;
-                    y: 61px;
-                    width: parent.width - root.text-horizontal-padding;
-                    height: 16px;
+                    x: root.s(root.text-left);
+                    y: root.s(61px);
+                    width: parent.width - root.s(root.text-horizontal-padding);
+                    height: root.s(16px);
                     text: quote.change;
                     color: parent.contrast-cell ? root.contrast-text-color : root.muted-text-color;
-                    font-size: 13px;
+                    font-size: root.s(13px);
                     font-weight: 700;
                     overflow: elide;
                 }
             }
 
             Text {
-                x: root.text-left;
-                y: 32px;
-                width: parent.width - root.text-horizontal-padding;
+                x: root.s(root.text-left);
+                y: root.s(32px);
+                width: parent.width - root.s(root.text-horizontal-padding);
                 text: root.empty-text;
                 color: root.default-text-color;
-                font-size: 18px;
+                font-size: root.s(18px);
                 font-weight: 800;
                 visible: root.quote-rows.length == 0;
                 overflow: elide;
@@ -248,46 +265,28 @@ export component StatusStrip inherits Window {
 
         }
 
-        drag_area := TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
-            pointer-event(event) => {
-                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                    root.card-left-drag-active = true;
-                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
-                    root.card-left-drag-active = false;
-                }
-            }
-            moved => {
-                if !root.layout-locked && root.card-left-drag-active {
-                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
-        }
-
         lock_button := Rectangle {
-            x: parent.width - root.lock-button-size - root.lock-button-right-gap;
-            y: root.lock-button-top;
-            width: root.lock-button-size;
-            height: root.lock-button-size;
-            border-radius: root.lock-button-radius;
+            x: parent.width - root.s(root.lock-button-size) - root.s(root.lock-button-right-gap);
+            y: root.s(root.lock-button-top);
+            width: root.s(root.lock-button-size);
+            height: root.s(root.lock-button-size);
+            border-radius: root.s(root.lock-button-radius);
             background: root.layout-locked || lock_touch.has-hover ? #07111dcc : transparent;
-            border-width: 1px;
+            border-width: root.s(1px);
             border-color: root.layout-locked || lock_touch.has-hover ? #ffffff66 : transparent;
             visible: drag_area.has-hover || lock_touch.has-hover;
 
             Path {
-                x: 5px;
-                y: 4px;
-                width: 16px;
-                height: 18px;
+                x: root.s(5px);
+                y: root.s(4px);
+                width: root.s(16px);
+                height: root.s(18px);
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
                 fill: root.layout-locked ? #e2e8f0dc : transparent;
                 stroke: #e2e8f0dc;
-                stroke-width: 2px;
+                stroke-width: root.s(2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }

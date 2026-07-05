@@ -10,10 +10,13 @@ use std::{
 use anyhow::{Context, Result};
 use crypto_hud_market as market;
 use crypto_hud_runtime as widget_runtime;
-use crypto_hud_runtime::{ProviderLabels, QuoteCache, QuoteState, RuntimeTextLabels};
+use crypto_hud_runtime::{
+    ProviderLabels, QuoteCache, QuoteState, RuntimeTextLabels, WidgetDisplayOptions,
+};
 use crypto_hud_shell_state as settings;
 use settings::{
     save_layout_store, AppSettings, LayoutStore, WidgetInstance, WidgetKind as WidgetType,
+    WidgetSize,
 };
 use slint::{ComponentHandle, LogicalSize, PhysicalPosition, Timer, TimerMode, WindowPosition};
 use slint_interpreter::{ComponentInstance, Value};
@@ -22,7 +25,10 @@ use crate::{
     coin_icons::CoinIconRegistry,
     feature_flags, i18n, notifications, plugin,
     settings_window::widget_type_title,
-    state_bridge::{layout_for_instance, normalized_symbols_for_instance, symbols_from_store},
+    state_bridge::{
+        layout_for_instance, normalized_symbols_for_instance, symbols_from_store,
+        widget_definitions_from_catalog,
+    },
     theme, updater,
     widget_host::{apply_runtime_view_to_widget, WidgetRuntime, WidgetUi},
     window_manager::schedule_widget_shell_window_configuration,
@@ -38,6 +44,18 @@ struct WidgetMoveRequest<'a> {
     id: &'a str,
     always_on_top: bool,
     opacity_percent: i32,
+    plugin_catalog: &'a plugin::PluginCatalog,
+}
+
+struct ApplyInstanceRequest<'a> {
+    ui: &'a WidgetUi,
+    instance: &'a WidgetInstance,
+    index: usize,
+    settings: AppSettings,
+    quote_cache: &'a QuoteCache,
+    coin_icons: &'a CoinIconRegistry,
+    set_position: bool,
+    plugin_catalog: &'a plugin::PluginCatalog,
 }
 
 pub(crate) struct RuntimeEventTimerDeps {
@@ -152,10 +170,14 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
                         &settings,
                         now,
                         has_market_error,
+                        widget.display_options,
                     ),
                     &widget.symbols,
                     &coin_icons,
                     proxy_url.as_deref(),
+                    widget.show_coin_logos,
+                    widget.display_options,
+                    widget.widget_scale,
                 );
             }
         });
@@ -201,18 +223,23 @@ pub(crate) fn sync_widget_runtimes(
             .iter_mut()
             .find(|runtime| runtime.id == instance.id)
         {
-            apply_instance_to_widget(
-                &runtime.ui,
+            let layout =
+                layout_for_instance(instance, index, settings.clone(), Some(&plugin_catalog));
+            apply_instance_to_widget(ApplyInstanceRequest {
+                ui: &runtime.ui,
                 instance,
                 index,
-                settings.clone(),
-                &quote_cache_ref,
-                &coin_icons,
-                set_positions,
-                &plugin_catalog,
-            );
+                settings: settings.clone(),
+                quote_cache: &quote_cache_ref,
+                coin_icons: &coin_icons,
+                set_position: set_positions,
+                plugin_catalog: &plugin_catalog,
+            });
             apply_widget_visibility(&runtime.ui, instance.visible)?;
             runtime.symbols = normalized_symbols_for_instance(instance, Some(&plugin_catalog));
+            runtime.show_coin_logos = settings::widget_show_coin_logos(instance);
+            runtime.display_options = widget_display_options(instance);
+            runtime.widget_scale = widget_scale_for_instance(instance, &layout, &plugin_catalog);
             continue;
         }
 
@@ -223,9 +250,9 @@ pub(crate) fn sync_widget_runtimes(
             );
             continue;
         };
-        if let plugin::PluginStatus::Unavailable(reason) = &plugin.status {
+        if !plugin.is_available() {
             eprintln!(
-                "widget {} plugin {} is unavailable: {reason}",
+                "widget {} plugin {} is not available",
                 instance.id, instance.plugin_id
             );
             continue;
@@ -233,21 +260,22 @@ pub(crate) fn sync_widget_runtimes(
 
         let ui = WidgetUi::from_plugin(plugin)
             .with_context(|| format!("failed to create widget plugin {}", instance.plugin_id))?;
-        apply_instance_to_widget(
-            &ui,
+        apply_instance_to_widget(ApplyInstanceRequest {
+            ui: &ui,
             instance,
             index,
-            settings.clone(),
-            &quote_cache_ref,
-            &coin_icons,
-            true,
-            &plugin_catalog,
-        );
+            settings: settings.clone(),
+            quote_cache: &quote_cache_ref,
+            coin_icons: &coin_icons,
+            set_position: true,
+            plugin_catalog: &plugin_catalog,
+        });
         install_drag_handler(
             &ui,
             layouts.clone(),
             state_path.to_path_buf(),
             instance.id.clone(),
+            plugin_catalog.clone(),
         );
         install_layout_lock_handler(
             &ui,
@@ -257,11 +285,15 @@ pub(crate) fn sync_widget_runtimes(
         );
         apply_widget_visibility(&ui, instance.visible)?;
         let symbols = normalized_symbols_for_instance(instance, Some(&plugin_catalog));
+        let layout = layout_for_instance(instance, index, settings.clone(), Some(&plugin_catalog));
         runtimes.push(WidgetRuntime {
             id: instance.id.clone(),
             plugin_id: instance.plugin_id.clone(),
             ui,
             symbols,
+            show_coin_logos: settings::widget_show_coin_logos(instance),
+            display_options: widget_display_options(instance),
+            widget_scale: widget_scale_for_instance(instance, &layout, &plugin_catalog),
         });
 
         if index == instances.len().saturating_sub(1) {
@@ -283,11 +315,13 @@ fn install_drag_handler(
     layouts: Rc<RefCell<LayoutStore>>,
     state_path: PathBuf,
     id: String,
+    plugin_catalog: Rc<plugin::PluginCatalog>,
 ) {
     match ui {
         WidgetUi::BuiltinPriceCard(ui) => {
             let weak = ui.as_weak();
             let save_timer = Timer::default();
+            let plugin_catalog = plugin_catalog.clone();
             ui.on_drag_move(move |dx, dy| {
                 let Some(ui) = weak.upgrade() else {
                     return;
@@ -301,6 +335,7 @@ fn install_drag_handler(
                         id: &id,
                         always_on_top: ui.get_pin_to_top(),
                         opacity_percent: ui.get_content_opacity(),
+                        plugin_catalog: &plugin_catalog,
                     },
                     &layouts,
                     &state_path,
@@ -311,6 +346,7 @@ fn install_drag_handler(
         WidgetUi::DynamicSlint(ui) => {
             let weak = ui.instance.as_weak();
             let save_timer = Timer::default();
+            let plugin_catalog = plugin_catalog.clone();
             ui.instance
                 .set_callback("drag-move", move |args| {
                     let Some(ui) = weak.upgrade() else {
@@ -330,6 +366,7 @@ fn install_drag_handler(
                             id: &id,
                             always_on_top: pin_to_top,
                             opacity_percent,
+                            plugin_catalog: &plugin_catalog,
                         },
                         &layouts,
                         &state_path,
@@ -397,6 +434,7 @@ fn move_widget_window_and_schedule_save(
         id,
         always_on_top,
         opacity_percent,
+        plugin_catalog,
     } = request;
     if widget_layout_is_locked(layouts, id) {
         return;
@@ -417,6 +455,13 @@ fn move_widget_window_and_schedule_save(
             let size = window.size();
             instance.layout.width = size.width as i32;
             instance.layout.height = size.height as i32;
+            instance.layout.scale_percent = 0;
+            let definitions = widget_definitions_from_catalog(plugin_catalog);
+            instance.layout.scale_percent = settings::widget_scale_percent_for_instance(
+                instance,
+                &definitions,
+                settings::DEFAULT_WIDGET_SCALE_PERCENT,
+            );
             true
         } else {
             false
@@ -503,16 +548,28 @@ fn refresh_runtime_symbols_from_store(
     let settings = store.settings.clone().normalized();
     let proxy_url = settings::effective_network_proxy_url(&settings);
     for runtime in widgets.borrow_mut().iter_mut() {
-        let Some(instance) = store
+        let Some((index, instance)) = store
             .widgets
             .iter()
-            .find(|instance| instance.id == runtime.id)
+            .enumerate()
+            .find(|(_, instance)| instance.id == runtime.id)
         else {
             continue;
         };
         let symbols = normalized_symbols_for_instance(instance, Some(plugin_catalog));
-        if runtime.symbols != symbols {
+        let show_coin_logos = settings::widget_show_coin_logos(instance);
+        let display_options = widget_display_options(instance);
+        let layout = layout_for_instance(instance, index, settings.clone(), Some(plugin_catalog));
+        let widget_scale = widget_scale_for_instance(instance, &layout, plugin_catalog);
+        if runtime.symbols != symbols
+            || runtime.show_coin_logos != show_coin_logos
+            || runtime.display_options != display_options
+            || (runtime.widget_scale - widget_scale).abs() > f32::EPSILON
+        {
             runtime.symbols = symbols;
+            runtime.show_coin_logos = show_coin_logos;
+            runtime.display_options = display_options;
+            runtime.widget_scale = widget_scale;
             apply_runtime_view_with_icons(
                 &runtime.ui,
                 &widget_runtime_view(
@@ -522,25 +579,30 @@ fn refresh_runtime_symbols_from_store(
                     &settings,
                     Instant::now(),
                     false,
+                    runtime.display_options,
                 ),
                 &runtime.symbols,
                 coin_icons,
                 proxy_url.as_deref(),
+                runtime.show_coin_logos,
+                runtime.display_options,
+                runtime.widget_scale,
             );
         }
     }
 }
 
-fn apply_instance_to_widget(
-    ui: &WidgetUi,
-    instance: &WidgetInstance,
-    index: usize,
-    settings: AppSettings,
-    quote_cache: &QuoteCache,
-    coin_icons: &CoinIconRegistry,
-    set_position: bool,
-    plugin_catalog: &plugin::PluginCatalog,
-) {
+fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
+    let ApplyInstanceRequest {
+        ui,
+        instance,
+        index,
+        settings,
+        quote_cache,
+        coin_icons,
+        set_position,
+        plugin_catalog,
+    } = request;
     let locale = i18n::resolve_locale(settings.language);
     let text = i18n::text(locale);
     let symbols = normalized_symbols_for_instance(instance, Some(plugin_catalog));
@@ -550,6 +612,8 @@ fn apply_instance_to_widget(
     ui.window()
         .set_size(LogicalSize::new(layout.width as f32, layout.height as f32));
     ui.set_widget_size(layout.width, layout.height);
+    let widget_scale = widget_scale_for_instance(instance, &layout, plugin_catalog);
+    ui.set_widget_scale(widget_scale);
     let proxy_url = settings::effective_network_proxy_url(&settings);
     apply_runtime_view_with_icons(
         ui,
@@ -560,10 +624,14 @@ fn apply_instance_to_widget(
             &settings,
             Instant::now(),
             false,
+            widget_display_options(instance),
         ),
         &symbols,
         coin_icons,
         proxy_url.as_deref(),
+        settings::widget_show_coin_logos(instance),
+        widget_display_options(instance),
+        widget_scale,
     );
     ui.set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());
     ui.set_empty_text(text.empty_pairs.into());
@@ -581,6 +649,28 @@ fn apply_instance_to_widget(
                 layout.x, layout.y,
             )));
     }
+}
+
+fn widget_scale_for_instance(
+    instance: &WidgetInstance,
+    layout: &settings::WidgetLayout,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> f32 {
+    let definitions = widget_definitions_from_catalog(plugin_catalog);
+    if layout.scale_percent > 0 {
+        return settings::widget_scale_percent_for_instance(
+            instance,
+            &definitions,
+            settings::DEFAULT_WIDGET_SCALE_PERCENT,
+        ) as f32
+            / 100.0;
+    }
+    let base_size = settings::default_widget_size_for_instance(instance, &definitions);
+    let size = WidgetSize {
+        width: layout.width,
+        height: layout.height,
+    };
+    settings::widget_content_scale_percent_for_size(size, base_size) as f32 / 100.0
 }
 
 fn apply_widget_visibility(ui: &WidgetUi, visible: bool) -> Result<()> {
@@ -634,17 +724,19 @@ pub(crate) fn apply_settings_to_widgets(
             .enumerate()
             .find(|(_, instance)| instance.id == runtime.id)
         {
-            apply_instance_to_widget(
-                &runtime.ui,
+            apply_instance_to_widget(ApplyInstanceRequest {
+                ui: &runtime.ui,
                 instance,
                 index,
-                settings.clone(),
+                settings: settings.clone(),
                 quote_cache,
                 coin_icons,
-                false,
+                set_position: false,
                 plugin_catalog,
-            );
+            });
             runtime.symbols = normalized_symbols_for_instance(instance, Some(plugin_catalog));
+            runtime.show_coin_logos = settings::widget_show_coin_logos(instance);
+            runtime.display_options = widget_display_options(instance);
         }
     }
 }
@@ -655,9 +747,32 @@ fn apply_runtime_view_with_icons(
     symbols: &[String],
     coin_icons: &CoinIconRegistry,
     proxy_url: Option<&str>,
+    show_coin_logos: bool,
+    display_options: WidgetDisplayOptions,
+    widget_scale: f32,
 ) {
-    let quote_icons = coin_icons.icons_for_symbols(symbols, proxy_url);
-    apply_runtime_view_to_widget(ui, view, &quote_icons);
+    let quote_icons = quote_icons_for_display(coin_icons, symbols, proxy_url, show_coin_logos);
+    apply_runtime_view_to_widget(
+        ui,
+        view,
+        &quote_icons,
+        show_coin_logos,
+        display_options,
+        widget_scale,
+    );
+}
+
+fn quote_icons_for_display(
+    coin_icons: &CoinIconRegistry,
+    symbols: &[String],
+    proxy_url: Option<&str>,
+    show_coin_logos: bool,
+) -> Vec<slint::Image> {
+    if show_coin_logos {
+        coin_icons.icons_for_symbols(symbols, proxy_url)
+    } else {
+        Vec::new()
+    }
 }
 
 fn widget_runtime_view(
@@ -667,19 +782,27 @@ fn widget_runtime_view(
     settings: &AppSettings,
     now: Instant,
     has_market_error: bool,
+    display_options: WidgetDisplayOptions,
 ) -> widget_runtime::WidgetRuntimeView {
     let locale = i18n::resolve_locale(settings.language);
     let text = i18n::text(locale);
-    widget_runtime::build_widget_runtime_view(
+    widget_runtime::build_widget_runtime_view(widget_runtime::WidgetRuntimeViewParams {
         widget_id,
         symbols,
         quote_cache,
-        text.source_prefix,
-        provider_labels(locale),
-        runtime_text_labels(text),
+        source_prefix: text.source_prefix,
+        provider_labels: provider_labels(locale),
+        labels: runtime_text_labels(text),
         has_market_error,
         now,
-    )
+        display_options,
+    })
+}
+
+fn widget_display_options(instance: &WidgetInstance) -> WidgetDisplayOptions {
+    WidgetDisplayOptions {
+        hide_quote_asset: settings::widget_hide_quote_asset(instance),
+    }
 }
 
 fn runtime_text_labels(text: &'static i18n::UiText) -> RuntimeTextLabels<'static> {
@@ -781,10 +904,108 @@ fn update_notification_body(update: &updater::UpdateInfo, locale: i18n::Locale) 
 mod tests {
     use super::*;
 
+    fn runtime_test_widget(symbols: Vec<&str>) -> WidgetInstance {
+        WidgetInstance {
+            id: "quote-board-1".to_string(),
+            plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+            legacy_widget_type: None,
+            name: "Quote Board 1".to_string(),
+            visible: true,
+            layout: settings::WidgetLayout::default(),
+            symbols: symbols.into_iter().map(str::to_string).collect(),
+            config: settings::default_widget_config(),
+        }
+    }
+
     #[test]
     fn widget_theme_name_uses_resolved_theme_names() {
         assert_eq!(widget_theme_name(settings::ThemePreference::Light), "light");
         assert_eq!(widget_theme_name(settings::ThemePreference::Dark), "dark");
+    }
+
+    #[test]
+    fn widget_scale_for_instance_follows_natural_quote_board_size() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let mut instance =
+            runtime_test_widget(vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]);
+        instance.layout.width = 429;
+        instance.layout.height = 152;
+        instance.layout.scale_percent = 0;
+
+        assert_eq!(
+            widget_scale_for_instance(&instance, &instance.layout, &catalog),
+            1.5
+        );
+
+        settings::set_widget_display_config(&mut instance, false, true);
+        instance.layout.width = 336;
+        instance.layout.height = 152;
+        instance.layout.scale_percent = 0;
+
+        assert_eq!(
+            widget_scale_for_instance(&instance, &instance.layout, &catalog),
+            1.5
+        );
+    }
+
+    #[test]
+    fn widget_scale_for_instance_uses_status_strip_symbol_count_base() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = plugin::PluginCatalog::discover(vec![root]);
+        let mut instance = WidgetInstance {
+            id: "plugin-strip-1".to_string(),
+            plugin_id: "com.cryptohud.status-strip".to_string(),
+            legacy_widget_type: None,
+            name: "Status Strip 1".to_string(),
+            visible: true,
+            layout: settings::WidgetLayout {
+                width: 832,
+                height: 184,
+                scale_percent: 0,
+                ..settings::WidgetLayout::default()
+            },
+            symbols: vec![
+                "binance:spot:BTC/USDT".to_string(),
+                "binance:spot:ETH/USDT".to_string(),
+                "binance:spot:SOL/USDT".to_string(),
+            ],
+            config: settings::default_widget_config(),
+        };
+
+        assert_eq!(
+            widget_scale_for_instance(&instance, &instance.layout, &catalog),
+            2.0
+        );
+
+        instance.symbols.truncate(1);
+        instance.layout.width = 288;
+        instance.layout.height = 184;
+        instance.layout.scale_percent = 0;
+
+        assert_eq!(
+            widget_scale_for_instance(&instance, &instance.layout, &catalog),
+            2.0
+        );
+    }
+
+    #[test]
+    fn quote_icons_are_empty_when_coin_logos_are_hidden() {
+        let cache_dir = std::env::temp_dir().join(format!(
+            "crypto-hud-hidden-icons-test-{}",
+            std::process::id()
+        ));
+        let registry = CoinIconRegistry::new(cache_dir.clone());
+
+        let icons = quote_icons_for_display(
+            &registry,
+            &["binance:spot:BTC/USDT".to_string()],
+            None,
+            false,
+        );
+
+        assert!(icons.is_empty());
+        drop(registry);
+        let _ = std::fs::remove_dir_all(cache_dir);
     }
 
     #[test]

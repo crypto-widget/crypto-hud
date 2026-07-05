@@ -39,21 +39,24 @@ use desktop_shell::{
 use runtime_bridge::{install_runtime_event_timer, sync_widget_runtimes, RuntimeEventTimerDeps};
 #[cfg(test)]
 use settings::{
-    default_widget_config, AppSettings, LayoutStore, LegacyLayoutStore, WidgetInstance,
+    default_widget_config, AppSettings, LegacyLayoutStore, WidgetInstance,
     WidgetKind as WidgetType, WidgetLayout,
 };
-use settings::{save_layout_store, state_dir_for_path, state_path};
+use settings::{save_layout_store, state_dir_for_path, state_path, LayoutStore};
 use settings_window::{
-    apply_status_strip_auto_sizes_to_store, install_settings_window, SettingsWindowDeps,
+    apply_dynamic_widget_auto_sizes_to_store, install_settings_window, SettingsWindowDeps,
 };
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Timer, TimerMode};
+use state_bridge::{
+    add_plugin_instance, load_layout_store, normalize_store_with_catalog, symbols_from_store,
+    widget_definitions_from_catalog,
+};
 #[cfg(test)]
 use state_bridge::{
-    add_plugin_instance, add_widget_instance, default_layout_for_index, default_layout_for_size,
+    add_widget_instance, default_layout_for_index, default_layout_for_size,
     default_layout_for_widget, default_symbols, layout_has_visible_area, migrate_legacy_store,
-    normalize_store, normalize_store_with_catalog, parse_symbols, parse_symbols_for_type,
+    normalize_store, parse_symbols, parse_symbols_for_type,
 };
-use state_bridge::{load_layout_store, symbols_from_store, widget_definitions_from_catalog};
 use widget_host::WidgetRuntime;
 use window_manager::{
     apply_tray_hover_display, enter_settings_mode, install_hotkey_poll_timer,
@@ -107,6 +110,53 @@ impl WidgetRect {
     }
 }
 
+fn install_gui_smoke_settings_interaction_timer(
+    settings_window: slint::Weak<SettingsWindow>,
+    widgets: Rc<RefCell<Vec<WidgetRuntime>>>,
+    layouts: Rc<RefCell<LayoutStore>>,
+    settings_window_requested: bool,
+) -> Option<Timer> {
+    if env::var_os("CRYPTO_HUD_GUI_SMOKE_SETTINGS_INTERACTION").is_none() {
+        return None;
+    }
+
+    let timer = Timer::default();
+    timer.start(
+        TimerMode::SingleShot,
+        Duration::from_millis(120),
+        move || {
+            if let Some(ui) = settings_window.upgrade() {
+                ui.set_selected_widget_index(0);
+                let widget_name = ui.get_widget_name_input_text();
+                let always_on_top = ui.get_widgets_always_on_top();
+                let layout_locked = ui.get_widget_layout_locked();
+                let opacity_percent = ui.get_opacity_percent();
+                let scale_percent = ui.get_widget_scale_percent();
+
+                ui.invoke_apply_widget_settings(
+                    0,
+                    widget_name,
+                    always_on_top,
+                    layout_locked,
+                    opacity_percent,
+                    scale_percent,
+                    false,
+                    true,
+                );
+                ui.invoke_remove_widget_symbol(0, 1);
+                ui.invoke_open_widget_symbol_picker();
+                ui.invoke_confirm_symbol_picker(0, 0);
+            }
+            let widgets = widgets.clone();
+            let layouts = layouts.clone();
+            Timer::single_shot(Duration::from_millis(140), move || {
+                write_gui_smoke_ready_file(&widgets, &layouts, settings_window_requested);
+            });
+        },
+    );
+    Some(timer)
+}
+
 fn main() -> Result<()> {
     if env::var_os("SLINT_BACKEND").is_none() {
         env::set_var("SLINT_BACKEND", "software");
@@ -118,7 +168,11 @@ fn main() -> Result<()> {
     }
 
     let launch_options = parse_launch_options();
-    let requested_widget_count = launch_options.widget_count;
+    let requested_widget_count = if launch_options.each_widget {
+        0
+    } else {
+        launch_options.widget_count
+    };
     let state_path = state_path()?;
     let state_dir = state_dir_for_path(&state_path);
     let plugin_catalog = Rc::new(plugin::PluginCatalog::load(&state_dir));
@@ -128,9 +182,14 @@ fn main() -> Result<()> {
     let plugin_definitions = widget_definitions_from_catalog(&plugin_catalog);
     let mut layout_store =
         load_layout_store(&state_path, requested_widget_count, &plugin_definitions);
-    if apply_status_strip_auto_sizes_to_store(&mut layout_store) {
+    seed_each_widget_on_empty_start(
+        &mut layout_store,
+        launch_options.each_widget,
+        &plugin_catalog,
+    );
+    if apply_dynamic_widget_auto_sizes_to_store(&mut layout_store, &plugin_catalog) {
         if let Err(error) = save_layout_store(&state_path, &layout_store) {
-            eprintln!("failed to save migrated status strip layout: {error:#}");
+            eprintln!("failed to save migrated dynamic widget layout: {error:#}");
         }
     }
     let layouts = Rc::new(RefCell::new(layout_store));
@@ -212,7 +271,15 @@ fn main() -> Result<()> {
             .context("failed to show settings window on startup")?;
         schedule_settings_window_raise();
     }
-    write_gui_smoke_ready_file(&widgets, &layouts, show_main_window_on_startup);
+    let gui_smoke_settings_interaction_timer = install_gui_smoke_settings_interaction_timer(
+        settings_window.as_weak(),
+        widgets.clone(),
+        layouts.clone(),
+        show_main_window_on_startup,
+    );
+    if gui_smoke_settings_interaction_timer.is_none() {
+        write_gui_smoke_ready_file(&widgets, &layouts, show_main_window_on_startup);
+    }
     let keepalive_window = install_keepalive_window()?;
     let gui_smoke_timer = install_gui_smoke_timer(launch_options.gui_smoke_exit_after);
     let hotkey_timer = install_hotkey_poll_timer(
@@ -256,6 +323,7 @@ fn main() -> Result<()> {
     let event_loop_result = slint::run_event_loop_until_quit().context("Slint event loop failed");
     drop(runtime_event_timer);
     drop(widget_shell_window_maintenance_timer);
+    drop(gui_smoke_settings_interaction_timer);
     drop(tray_hover_timer);
     drop(hotkey_timer);
     drop(gui_smoke_timer);
@@ -264,6 +332,56 @@ fn main() -> Result<()> {
     drop(settings_window);
     drop(single_instance);
     event_loop_result
+}
+
+fn seed_each_widget_on_empty_start(
+    store: &mut settings::LayoutStore,
+    each_widget: bool,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> bool {
+    if !each_widget || !store.widgets.is_empty() {
+        return false;
+    }
+
+    let app_settings = store.settings.clone().normalized();
+    let mut slot = 0;
+    for plugin in plugin_catalog
+        .market_plugins()
+        .filter(|plugin| plugin.is_available())
+    {
+        let id = add_plugin_instance(store, plugin, &app_settings);
+        let symbols = initial_symbols_for_slot(&app_settings, slot);
+        if let Some(instance) = store.widgets.iter_mut().find(|instance| instance.id == id) {
+            instance.symbols = symbols;
+        }
+        slot += 1;
+    }
+
+    if slot == 0 {
+        return false;
+    }
+
+    store.selected_widget_id = store.widgets.first().map(|widget| widget.id.clone());
+    normalize_store_with_catalog(store, 0, Some(plugin_catalog));
+    true
+}
+
+fn initial_symbols_for_slot(app_settings: &settings::AppSettings, slot: usize) -> Vec<String> {
+    let defaults = if app_settings.market_default_symbols.is_empty() {
+        settings::default_market_symbols()
+    } else {
+        app_settings.market_default_symbols.clone()
+    };
+    defaults
+        .get(slot % defaults.len().max(1))
+        .cloned()
+        .map(|symbol| vec![symbol])
+        .unwrap_or_else(|| {
+            settings::default_market_symbols()
+                .into_iter()
+                .take(1)
+                .collect()
+        })
 }
 
 #[cfg(test)]
@@ -286,6 +404,7 @@ mod tests {
                 width: 260,
                 height: 170,
             },
+            size_policy: plugin::PluginSizePolicy::Fixed,
             min_symbol_limit: 1,
             symbol_limit: 2,
             data_requirements: vec![plugin::PluginDataRequirement {
@@ -317,7 +436,7 @@ mod tests {
         assert!(!layout.always_on_top);
         assert_eq!(layout.opacity_percent, 64);
         assert_eq!(layout.width, 358);
-        assert_eq!(layout.height, 290);
+        assert_eq!(layout.height, 243);
     }
 
     #[test]
@@ -701,13 +820,34 @@ mod tests {
     fn normalizing_empty_store_creates_requested_default_instances() {
         let mut store = LayoutStore::default();
 
-        normalize_store(&mut store, 2);
+        normalize_store(&mut store, 4);
 
-        assert_eq!(store.widgets.len(), 2);
+        assert_eq!(store.widgets.len(), 4);
         assert_eq!(store.widgets[0].id, "quote-board-1");
         assert_eq!(store.widgets[1].id, "quote-board-2");
+        assert_eq!(store.widgets[2].id, "quote-board-3");
+        assert_eq!(store.widgets[3].id, "quote-board-4");
         assert_eq!(store.selected_widget_id.as_deref(), Some("quote-board-1"));
-        assert_eq!(store.widgets[0].symbols, default_symbols());
+        assert_eq!(store.widgets[0].symbols, vec!["binance:spot:BTC/USDT"]);
+        assert_eq!(store.widgets[1].symbols, vec!["binance:spot:ETH/USDT"]);
+        assert_eq!(store.widgets[2].symbols, vec!["binance:spot:SOL/USDT"]);
+        assert_eq!(store.widgets[3].symbols, vec!["binance:spot:BTC/USDT"]);
+    }
+
+    #[test]
+    fn each_widget_launch_seeds_one_instance_per_available_plugin() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let mut store = LayoutStore::default();
+
+        assert!(seed_each_widget_on_empty_start(&mut store, true, &catalog));
+
+        assert_eq!(store.widgets.len(), 1);
+        assert_eq!(
+            store.widgets[0].plugin_id,
+            plugin::BUILTIN_QUOTE_BOARD_PLUGIN_ID
+        );
+        assert_eq!(store.selected_widget_id.as_deref(), Some("quote-board-1"));
+        assert_eq!(store.widgets[0].symbols, vec!["binance:spot:BTC/USDT"]);
     }
 
     #[test]

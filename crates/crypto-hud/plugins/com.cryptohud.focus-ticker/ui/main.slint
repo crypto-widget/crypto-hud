@@ -16,6 +16,7 @@ export component FocusTicker inherits Window {
     in property <bool> layout-locked;
     in property <int> widget-width: 820;
     in property <int> widget-height: 156;
+    in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
@@ -38,12 +39,13 @@ export component FocusTicker inherits Window {
         : (root.red-up-enabled ? root.gain-color : root.loss-color);
     property <color> chart-glow-color: root.light-theme ? #16a34a4c : #22c55e55;
     property <color> chart-fill-color: root.light-theme ? #16a34a2e : #22c55e2e;
-    property <float> content-scale: ((root.widget-width * 1px) / 820px) < ((root.widget-height * 1px) / 156px)
-        ? ((root.widget-width * 1px) / 820px)
-        : ((root.widget-height * 1px) / 156px);
+    property <float> content-scale: root.widget-scale;
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
+    function s(value: length) -> length {
+        return value * root.content-scale;
+    }
     title: root.widget-id;
     width: root.widget-width * 1px;
     height: root.widget-height * 1px;
@@ -51,21 +53,36 @@ export component FocusTicker inherits Window {
     always-on-top: root.pin-to-top;
     background: transparent;
 
+    drag_area := TouchArea {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+        pointer-event(event) => {
+            if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.card-left-drag-active = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                root.card-left-drag-active = false;
+            }
+        }
+        moved => {
+            if !root.layout-locked && root.card-left-drag-active {
+                root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+
     card := Rectangle {
-        x: (root.widget-width * 1px - 820px * root.content-scale) / 2 + 20px * root.content-scale;
-        y: (root.widget-height * 1px - 156px * root.content-scale) / 2 + 18px * root.content-scale;
-        width: 780px;
-        height: 120px;
-        transform-origin: { x: 0px, y: 0px };
-        transform-scale-x: root.content-scale;
-        transform-scale-y: root.content-scale;
-        border-radius: 16px;
+        x: (root.widget-width * 1px - root.s(820px)) / 2 + root.s(20px);
+        y: (root.widget-height * 1px - root.s(156px)) / 2 + root.s(18px);
+        width: root.s(780px);
+        height: root.s(120px);
+        border-radius: root.s(16px);
         background: root.card-background;
-        border-width: 1px;
+        border-width: root.s(1px);
         border-color: root.card-border-color;
         opacity: root.content-opacity / 100;
-        drop-shadow-offset-y: 20px;
-        drop-shadow-blur: 30px;
+        drop-shadow-offset-y: root.s(20px);
+        drop-shadow-blur: root.s(30px);
         drop-shadow-color: #00000085;
         clip: true;
 
@@ -74,7 +91,7 @@ export component FocusTicker inherits Window {
             y: 0px;
             width: parent.width;
             height: parent.height;
-            border-radius: 16px;
+            border-radius: root.s(16px);
             background: @linear-gradient(90deg, #ffffff11 0%, #ffffff07 30%, #ffffff02 56%, #ffffff00 100%);
         }
 
@@ -82,25 +99,25 @@ export component FocusTicker inherits Window {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: 72px;
-            border-radius: 16px;
+            height: root.s(72px);
+            border-radius: root.s(16px);
             background: @linear-gradient(180deg, #ffffff12 0%, #ffffff06 24%, #00000000 58%, #0000001e 100%);
         }
 
         Rectangle {
             x: parent.width * 0.52;
-            y: 10px;
-            width: parent.width * 0.48 - 18px;
-            height: parent.height - 20px;
+            y: root.s(10px);
+            width: parent.width * 0.48 - root.s(18px);
+            height: parent.height - root.s(20px);
             background: @linear-gradient(90deg, #00000000 0%, #00000000 54%, #00000016 84%, #0000002d 100%);
         }
 
         Rectangle {
             x: 0px;
-            y: parent.height - 40px;
+            y: parent.height - root.s(40px);
             width: parent.width;
-            height: 38px;
-            border-radius: 16px;
+            height: root.s(38px);
+            border-radius: root.s(16px);
             background: @linear-gradient(180deg, #00000000 0%, #00000000 66%, #0000003c 100%);
         }
 
@@ -110,82 +127,82 @@ export component FocusTicker inherits Window {
             visible: index == 0;
 
             Text {
-                x: 22px;
-                y: 32px;
-                width: 175px;
+                x: root.s(22px);
+                y: root.s(32px);
+                width: root.s(175px);
                 text: quote.symbol;
                 color: root.card-primary-text-color;
-                font-size: 24px;
+                font-size: root.s(24px);
                 font-weight: 800;
                 overflow: elide;
             }
 
             Rectangle {
-                x: 176px;
-                y: 43px;
-                width: 11px;
-                height: 11px;
-                border-radius: 5.5px;
+                x: root.s(176px);
+                y: root.s(43px);
+                width: root.s(11px);
+                height: root.s(11px);
+                border-radius: root.s(5.5px);
                 background: root.gain-color;
                 drop-shadow-offset-y: 0px;
-                drop-shadow-blur: 10px;
+                drop-shadow-blur: root.s(10px);
                 drop-shadow-color: #45d980aa;
             }
 
             Text {
-                x: 22px;
-                y: 83px;
-                width: 178px;
+                x: root.s(22px);
+                y: root.s(83px);
+                width: root.s(178px);
                 text: root.source-text;
                 color: root.card-source-text-color;
-                font-size: 17px;
+                font-size: root.s(17px);
                 font-weight: 500;
                 overflow: elide;
             }
 
             Rectangle {
-                x: 212px;
-                y: 82px;
-                width: 1px;
-                height: 20px;
+                x: root.s(212px);
+                y: root.s(82px);
+                width: root.s(1px);
+                height: root.s(20px);
                 background: root.light-theme ? #64748b66 : #8f9aa866;
             }
 
             Text {
-                x: 230px;
-                y: 83px;
-                width: 132px;
+                x: root.s(230px);
+                y: root.s(83px);
+                width: root.s(132px);
                 text: root.updated-text;
                 color: root.card-updated-text-color;
-                font-size: 17px;
+                font-size: root.s(17px);
                 font-weight: 500;
                 overflow: elide;
             }
 
             Text {
-                x: 226px;
-                y: 24px;
-                width: 312px;
+                x: root.s(226px);
+                y: root.s(24px);
+                width: root.s(312px);
                 text: quote.price;
                 color: root.card-primary-text-color;
-                font-size: 48px;
+                font-size: root.s(48px);
                 font-weight: 900;
                 horizontal-alignment: center;
                 overflow: elide;
             }
 
             chart := Rectangle {
-                x: 588px;
-                y: 28px;
-                width: 158px;
-                height: 74px;
+                x: root.s(588px);
+                y: root.s(28px);
+                width: root.s(158px);
+                height: root.s(74px);
                 background: transparent;
 
                 Path {
-                    x: 1px;
-                    y: 8px;
-                    width: 156px;
-                    height: 62px;
+                    x: root.s(1px);
+                    y: root.s(8px);
+                    width: root.s(156px);
+                    height: root.s(62px);
                     viewbox-width: 100;
                     viewbox-height: 40;
                     fit: fill;
@@ -197,40 +214,40 @@ export component FocusTicker inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: 9px;
-                    width: 42px;
-                    height: 61px;
+                    y: root.s(9px);
+                    width: root.s(42px);
+                    height: root.s(61px);
                     background: @linear-gradient(90deg, #0710199a 0%, #07101956 38%, #07101900 100%);
                 }
 
                 Rectangle {
-                    x: 1px;
-                    y: 40px;
-                    width: 156px;
-                    height: 30px;
+                    x: root.s(1px);
+                    y: root.s(40px);
+                    width: root.s(156px);
+                    height: root.s(30px);
                     background: @linear-gradient(180deg, #07101900 0%, #0710192e 54%, #0710198c 100%);
                 }
 
                 Rectangle {
-                    x: 42px;
-                    y: 4px;
-                    width: 116px;
-                    height: 70px;
+                    x: root.s(42px);
+                    y: root.s(4px);
+                    width: root.s(116px);
+                    height: root.s(70px);
                     background: @radial-gradient(circle 86px at 82px 49px, #22c55e25 0%, #22c55e0e 46%, #22c55e00 100%);
                 }
 
                 Path {
-                    x: 1px;
-                    y: 8px;
-                    width: 156px;
-                    height: 62px;
+                    x: root.s(1px);
+                    y: root.s(8px);
+                    width: root.s(156px);
+                    height: root.s(62px);
                     viewbox-width: 100;
                     viewbox-height: 40;
                     fit: fill;
                     commands: root.chart-line-path;
                     fill: transparent;
                     stroke: root.chart-color;
-                    stroke-width: 3px;
+                    stroke-width: root.s(3px);
                     stroke-line-cap: round;
                     stroke-line-join: round;
                     opacity: root.chart-ready ? 1 : 0.42;
@@ -238,12 +255,12 @@ export component FocusTicker inherits Window {
             }
 
             Text {
-                x: 538px;
-                y: 38px;
-                width: 100px;
+                x: root.s(538px);
+                y: root.s(38px);
+                width: root.s(100px);
                 text: quote.change;
                 color: root.chart-color;
-                font-size: 25px;
+                font-size: root.s(25px);
                 font-weight: 900;
                 horizontal-alignment: center;
                 overflow: elide;
@@ -252,57 +269,39 @@ export component FocusTicker inherits Window {
         }
 
         Text {
-            x: 24px;
-            y: 48px;
-            width: parent.width - 48px;
+            x: root.s(24px);
+            y: root.s(48px);
+            width: parent.width - root.s(48px);
             text: root.empty-text;
             color: root.card-updated-text-color;
-            font-size: 18px;
+            font-size: root.s(18px);
             horizontal-alignment: center;
             visible: root.quote-rows.length == 0;
             overflow: elide;
         }
 
-        drag_area := TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
-            pointer-event(event) => {
-                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                    root.card-left-drag-active = true;
-                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
-                    root.card-left-drag-active = false;
-                }
-            }
-            moved => {
-                if !root.layout-locked && root.card-left-drag-active {
-                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
-        }
-
         lock_button := Rectangle {
-            x: parent.width - 42px;
-            y: 8px;
-            width: 28px;
-            height: 28px;
-            border-radius: 7px;
+            x: parent.width - root.s(42px);
+            y: root.s(8px);
+            width: root.s(28px);
+            height: root.s(28px);
+            border-radius: root.s(7px);
             background: root.layout-locked || lock_touch.has-hover ? #07111dcc : transparent;
-            border-width: 1px;
+            border-width: root.s(1px);
             border-color: root.layout-locked || lock_touch.has-hover ? #ffffff66 : transparent;
             visible: drag_area.has-hover || lock_touch.has-hover;
 
             Path {
-                x: 5px;
-                y: 4px;
-                width: 18px;
-                height: 20px;
+                x: root.s(5px);
+                y: root.s(4px);
+                width: root.s(18px);
+                height: root.s(20px);
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
                 fill: root.layout-locked ? #cbd5e1cc : transparent;
                 stroke: #cbd5e1cc;
-                stroke-width: 2px;
+                stroke-width: root.s(2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }

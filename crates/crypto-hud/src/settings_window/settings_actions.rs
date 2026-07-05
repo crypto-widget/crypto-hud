@@ -10,8 +10,8 @@ use crate::{
 };
 
 use super::{
-    apply_status_strip_auto_size, apply_widget_scale_to_instance, normalize_widget_name,
-    widget_default_number,
+    apply_widget_scale_to_instance, normalize_widget_name, widget_default_number,
+    widget_scale_percent_for_definitions,
 };
 
 pub(super) fn add_plugin_widget_to_store(
@@ -24,23 +24,38 @@ pub(super) fn add_plugin_widget_to_store(
     }
 
     let id = add_plugin_instance(store, plugin, settings);
-    if let Some(instance) = store.widgets.iter_mut().find(|instance| instance.id == id) {
-        apply_status_strip_auto_size(instance, settings.widget_scale_percent);
-    }
     Some(id)
+}
+
+pub(super) struct WidgetSettingsUpdate<'a> {
+    pub(super) selected_index: i32,
+    pub(super) widget_name: &'a str,
+    pub(super) always_on_top: bool,
+    pub(super) layout_locked: bool,
+    pub(super) opacity_percent: i32,
+    pub(super) widget_scale_percent: i32,
+    pub(super) show_coin_logos: bool,
+    pub(super) hide_quote_asset: bool,
+    pub(super) locale: i18n::Locale,
+    pub(super) plugin_catalog: &'a plugin::PluginCatalog,
 }
 
 pub(super) fn apply_widget_settings_to_store(
     store: &mut LayoutStore,
-    selected_index: i32,
-    widget_name: &str,
-    always_on_top: bool,
-    layout_locked: bool,
-    opacity_percent: i32,
-    widget_scale_percent: i32,
-    locale: i18n::Locale,
-    plugin_catalog: &plugin::PluginCatalog,
+    update: WidgetSettingsUpdate<'_>,
 ) -> bool {
+    let WidgetSettingsUpdate {
+        selected_index,
+        widget_name,
+        always_on_top,
+        layout_locked,
+        opacity_percent,
+        widget_scale_percent,
+        show_coin_logos,
+        hide_quote_asset,
+        locale,
+        plugin_catalog,
+    } = update;
     let definitions = widget_definitions_from_catalog(plugin_catalog);
     select_widget_by_index(store, selected_index);
     let selected_id = store.selected_widget_id.clone();
@@ -54,7 +69,15 @@ pub(super) fn apply_widget_settings_to_store(
         instance.layout.always_on_top = always_on_top;
         instance.layout.locked = layout_locked;
         instance.layout.opacity_percent = clamp_opacity(opacity_percent);
-        apply_widget_scale_to_instance(instance, &definitions, widget_scale_percent);
+        let display_config_changed = settings::widget_show_coin_logos(instance) != show_coin_logos
+            || settings::widget_hide_quote_asset(instance) != hide_quote_asset;
+        let scale_percent = if display_config_changed {
+            widget_scale_percent_for_definitions(instance, &definitions)
+        } else {
+            widget_scale_percent
+        };
+        settings::set_widget_display_config(instance, show_coin_logos, hide_quote_asset);
+        apply_widget_scale_to_instance(instance, &definitions, scale_percent);
         true
     } else {
         false

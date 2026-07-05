@@ -6,8 +6,8 @@ description = "Check the Slint native widget app"
 run = "cargo check --workspace"
 
 [tasks.run-app]
-description = "Run the Slint native 10-widget app"
-run = "cargo run -p crypto-hud -- --widgets 10"
+description = "Run the Slint native app with one instance of each widget"
+run = "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\run-app.ps1"
 
 [tasks.format]
 description = "Format Rust sources"

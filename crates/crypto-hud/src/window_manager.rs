@@ -512,7 +512,10 @@ fn is_widget_shell_window_title(title: &str) -> bool {
 
 #[cfg(windows)]
 fn is_settings_window_title(title: &str) -> bool {
-    matches!(title, "Crypto HUD Settings" | "Crypto HUD 设置")
+    matches!(
+        title,
+        "Crypto HUD" | "Crypto HUD Settings" | "Crypto HUD 设置"
+    )
 }
 
 #[cfg(windows)]
@@ -672,8 +675,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn settings_window_is_not_treated_as_widget_shell_window() {
+        assert!(is_settings_window_title("Crypto HUD"));
         assert!(is_settings_window_title("Crypto HUD Settings"));
         assert!(is_settings_window_title("Crypto HUD 设置"));
+        assert!(!is_widget_shell_window_title("Crypto HUD"));
         assert!(!is_widget_shell_window_title("Crypto HUD Settings"));
         assert!(!is_widget_shell_window_title("Crypto HUD 设置"));
         assert!(is_widget_shell_window_title("price-card-1"));

@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
 pub use crypto_hud_core::{evaluate_alerts, AlertCondition, AlertEvaluation, AlertRule};
 use crypto_hud_core::{
-    format_market_pair_symbol, format_pair_change, format_price, market_pair_source, AlertQuote,
-    MarketDataSource,
+    format_market_pair_symbol, format_pair_change, format_price, market_pair_source,
+    parse_market_pair, AlertQuote, MarketDataSource,
 };
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,8 @@ pub struct PluginManifest {
     pub renderer: PluginRendererManifest,
     pub permissions: PluginPermissionsManifest,
     pub default_size: PluginSize,
+    #[serde(default)]
+    pub size_policy: PluginSizePolicy,
     #[serde(default = "default_min_symbol_limit")]
     pub min_symbol_limit: usize,
     pub symbol_limit: usize,
@@ -63,6 +65,33 @@ pub struct PluginPermissionsManifest {
 pub struct PluginSize {
     pub width: i32,
     pub height: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PluginSizePolicy {
+    Fixed,
+    SymbolBlocks {
+        #[serde(rename = "blockSize")]
+        block_size: PluginSize,
+        padding: PluginSize,
+    },
+    SymbolGrid {
+        #[serde(rename = "cellSize")]
+        cell_size: PluginSize,
+        #[serde(rename = "contentPadding")]
+        content_padding: PluginSize,
+        #[serde(default)]
+        columns: Option<usize>,
+        #[serde(default)]
+        rows: Option<usize>,
+    },
+}
+
+impl Default for PluginSizePolicy {
+    fn default() -> Self {
+        Self::Fixed
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -111,6 +140,11 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
     if manifest.min_symbol_limit > manifest.symbol_limit {
         bail!("minSymbolLimit must be less than or equal to symbolLimit");
     }
+    validate_size_policy(
+        manifest.size_policy,
+        manifest.default_size,
+        manifest.symbol_limit,
+    )?;
     for requirement in &manifest.data_requirements {
         if !SUPPORTED_CAPABILITIES.contains(&requirement.capability.as_str()) {
             bail!(
@@ -179,6 +213,123 @@ fn validate_size(size: PluginSize) -> Result<()> {
     Ok(())
 }
 
+fn validate_size_policy(
+    policy: PluginSizePolicy,
+    default_size: PluginSize,
+    symbol_limit: usize,
+) -> Result<()> {
+    match policy {
+        PluginSizePolicy::Fixed => Ok(()),
+        PluginSizePolicy::SymbolBlocks {
+            block_size,
+            padding,
+        } => {
+            if block_size.width <= 0 || block_size.height <= 0 {
+                bail!("sizePolicy.blockSize must be positive");
+            }
+            if padding.width < 0 || padding.height < 0 {
+                bail!("sizePolicy.padding must not be negative");
+            }
+            let width = block_size
+                .width
+                .checked_mul(symbol_limit as i32)
+                .and_then(|width| width.checked_add(padding.width))
+                .context("sizePolicy symbol block width overflowed")?;
+            let height = block_size
+                .height
+                .checked_add(padding.height)
+                .context("sizePolicy symbol block height overflowed")?;
+            if width != default_size.width || height != default_size.height {
+                bail!("defaultSize must match sizePolicy at symbolLimit");
+            }
+            validate_size(PluginSize { width, height })?;
+            Ok(())
+        }
+        PluginSizePolicy::SymbolGrid {
+            cell_size,
+            content_padding,
+            columns,
+            rows,
+        } => {
+            if cell_size.width <= 0 || cell_size.height <= 0 {
+                bail!("sizePolicy.cellSize must be positive");
+            }
+            if content_padding.width < 0 || content_padding.height < 0 {
+                bail!("sizePolicy.contentPadding must not be negative");
+            }
+            if columns.is_none() && rows.is_none() {
+                bail!("sizePolicy.columns or sizePolicy.rows must be set");
+            }
+            if let Some(columns) = columns {
+                if !(1..=MAX_SYMBOL_LIMIT).contains(&columns) {
+                    bail!("sizePolicy.columns must be between 1 and {MAX_SYMBOL_LIMIT}");
+                }
+            }
+            if let Some(rows) = rows {
+                if !(1..=MAX_SYMBOL_LIMIT).contains(&rows) {
+                    bail!("sizePolicy.rows must be between 1 and {MAX_SYMBOL_LIMIT}");
+                }
+            }
+            if let (Some(columns), Some(rows)) = (columns, rows) {
+                if columns.saturating_mul(rows) < symbol_limit {
+                    bail!("sizePolicy.columns * sizePolicy.rows must cover symbolLimit");
+                }
+            }
+
+            let (track_columns, track_rows) = symbol_grid_tracks(symbol_limit, columns, rows)
+                .context("sizePolicy symbol grid tracks overflowed")?;
+            let width = cell_size
+                .width
+                .checked_mul(track_columns as i32)
+                .and_then(|width| width.checked_add(content_padding.width))
+                .context("sizePolicy symbol grid width overflowed")?;
+            let height = cell_size
+                .height
+                .checked_mul(track_rows as i32)
+                .and_then(|height| height.checked_add(content_padding.height))
+                .context("sizePolicy symbol grid height overflowed")?;
+            if width != default_size.width || height != default_size.height {
+                bail!("defaultSize must match sizePolicy at symbolLimit");
+            }
+            validate_size(PluginSize { width, height })?;
+            Ok(())
+        }
+    }
+}
+
+fn symbol_grid_tracks(
+    symbol_count: usize,
+    columns: Option<usize>,
+    rows: Option<usize>,
+) -> Option<(usize, usize)> {
+    let count = symbol_count.max(1);
+    match (columns, rows) {
+        (Some(max_columns), Some(max_rows)) => {
+            let columns = count.min(max_columns).max(1);
+            let rows = div_ceil_usize(count, max_columns).min(max_rows).max(1);
+            Some((columns, rows))
+        }
+        (Some(max_columns), None) => {
+            let columns = count.min(max_columns).max(1);
+            let rows = div_ceil_usize(count, max_columns).max(1);
+            Some((columns, rows))
+        }
+        (None, Some(max_rows)) => {
+            let rows = count.min(max_rows).max(1);
+            let columns = div_ceil_usize(count, max_rows).max(1);
+            Some((columns, rows))
+        }
+        (None, None) => None,
+    }
+}
+
+fn div_ceil_usize(value: usize, divisor: usize) -> usize {
+    if divisor == 0 {
+        return 0;
+    }
+    value.div_ceil(divisor)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MarketQuoteSnapshot {
     pub symbol: String,
@@ -235,6 +386,11 @@ pub struct QuoteRowView {
     pub positive: bool,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct WidgetDisplayOptions {
+    pub hide_quote_asset: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidgetRuntimeView {
     pub widget_id: String,
@@ -246,6 +402,18 @@ pub struct WidgetRuntimeView {
     pub chart_end_y_ratio: i32,
     pub chart_ready: bool,
     pub chart_positive: bool,
+}
+
+pub struct WidgetRuntimeViewParams<'a> {
+    pub widget_id: &'a str,
+    pub symbols: &'a [String],
+    pub quote_cache: &'a QuoteCache,
+    pub source_prefix: &'a str,
+    pub provider_labels: ProviderLabels<'a>,
+    pub labels: RuntimeTextLabels<'a>,
+    pub has_market_error: bool,
+    pub now: Instant,
+    pub display_options: WidgetDisplayOptions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,8 +466,15 @@ impl Default for ProviderLabels<'static> {
 
 impl QuoteRowView {
     pub fn from_snapshot(snapshot: &MarketQuoteSnapshot) -> Self {
+        Self::from_snapshot_with_options(snapshot, WidgetDisplayOptions::default())
+    }
+
+    pub fn from_snapshot_with_options(
+        snapshot: &MarketQuoteSnapshot,
+        display_options: WidgetDisplayOptions,
+    ) -> Self {
         Self {
-            symbol: format_pair_symbol(&snapshot.symbol),
+            symbol: format_pair_symbol_with_options(&snapshot.symbol, display_options),
             price: format_price(snapshot.price),
             change: format_pair_change(snapshot.change_percent_24h),
             positive: snapshot.change_percent_24h >= 0.0,
@@ -307,8 +482,16 @@ impl QuoteRowView {
     }
 
     pub fn from_state(symbol: &str, state: &QuoteState) -> Self {
+        Self::from_state_with_options(symbol, state, WidgetDisplayOptions::default())
+    }
+
+    pub fn from_state_with_options(
+        symbol: &str,
+        state: &QuoteState,
+        display_options: WidgetDisplayOptions,
+    ) -> Self {
         Self {
-            symbol: format_pair_symbol(symbol),
+            symbol: format_pair_symbol_with_options(symbol, display_options),
             price: format_price(state.price),
             change: format_pair_change(state.change_percent_24h),
             positive: state.change_percent_24h >= 0.0,
@@ -316,8 +499,16 @@ impl QuoteRowView {
     }
 
     pub fn loading(symbol: &str, labels: RuntimeTextLabels<'_>) -> Self {
+        Self::loading_with_options(symbol, labels, WidgetDisplayOptions::default())
+    }
+
+    pub fn loading_with_options(
+        symbol: &str,
+        labels: RuntimeTextLabels<'_>,
+        display_options: WidgetDisplayOptions,
+    ) -> Self {
         Self {
-            symbol: format_pair_symbol(symbol),
+            symbol: format_pair_symbol_with_options(symbol, display_options),
             price: labels.connecting.to_string(),
             change: "--".to_string(),
             positive: true,
@@ -325,30 +516,32 @@ impl QuoteRowView {
     }
 }
 
-pub fn build_widget_runtime_view(
-    widget_id: impl Into<String>,
-    symbols: &[String],
-    quote_cache: &QuoteCache,
-    source_prefix: &str,
-    provider_labels: ProviderLabels<'_>,
-    labels: RuntimeTextLabels<'_>,
-    has_market_error: bool,
-    now: Instant,
-) -> WidgetRuntimeView {
-    let chart = chart_path_view_for_symbols(symbols, quote_cache);
+pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetRuntimeView {
+    let chart = chart_path_view_for_symbols(params.symbols, params.quote_cache);
     WidgetRuntimeView {
-        widget_id: widget_id.into(),
-        quote_rows: quote_rows_for_symbols(symbols, quote_cache, labels),
-        source_text: source_text_for_symbols(
-            source_prefix,
-            symbols,
-            quote_cache,
-            provider_labels,
-            labels,
-            data_health_for_symbols(symbols, quote_cache, now),
-            has_market_error,
+        widget_id: params.widget_id.to_string(),
+        quote_rows: quote_rows_for_symbols_with_options(
+            params.symbols,
+            params.quote_cache,
+            params.labels,
+            params.display_options,
         ),
-        updated_text: updated_text_for_symbols(symbols, quote_cache, labels, has_market_error, now),
+        source_text: source_text_for_symbols(
+            params.source_prefix,
+            params.symbols,
+            params.quote_cache,
+            params.provider_labels,
+            params.labels,
+            data_health_for_symbols(params.symbols, params.quote_cache, params.now),
+            params.has_market_error,
+        ),
+        updated_text: updated_text_for_symbols(
+            params.symbols,
+            params.quote_cache,
+            params.labels,
+            params.has_market_error,
+            params.now,
+        ),
         chart_line_path: chart.line_path,
         chart_fill_path: chart.fill_path,
         chart_end_y_ratio: chart.end_y_ratio,
@@ -476,13 +669,29 @@ pub fn quote_rows_for_symbols(
     quote_cache: &QuoteCache,
     labels: RuntimeTextLabels<'_>,
 ) -> Vec<QuoteRowView> {
+    quote_rows_for_symbols_with_options(
+        symbols,
+        quote_cache,
+        labels,
+        WidgetDisplayOptions::default(),
+    )
+}
+
+pub fn quote_rows_for_symbols_with_options(
+    symbols: &[String],
+    quote_cache: &QuoteCache,
+    labels: RuntimeTextLabels<'_>,
+    display_options: WidgetDisplayOptions,
+) -> Vec<QuoteRowView> {
     symbols
         .iter()
         .map(|symbol| {
             quote_cache
                 .get(symbol)
-                .map(|state| QuoteRowView::from_state(symbol, state))
-                .unwrap_or_else(|| QuoteRowView::loading(symbol, labels))
+                .map(|state| QuoteRowView::from_state_with_options(symbol, state, display_options))
+                .unwrap_or_else(|| {
+                    QuoteRowView::loading_with_options(symbol, labels, display_options)
+                })
         })
         .collect()
 }
@@ -607,6 +816,19 @@ pub fn format_pair_symbol(symbol: &str) -> String {
     format_market_pair_symbol(symbol)
 }
 
+pub fn format_pair_symbol_with_options(
+    symbol: &str,
+    display_options: WidgetDisplayOptions,
+) -> String {
+    if display_options.hide_quote_asset {
+        parse_market_pair(symbol)
+            .map(|pair| pair.base)
+            .unwrap_or_else(|| format_market_pair_symbol(symbol))
+    } else {
+        format_market_pair_symbol(symbol)
+    }
+}
+
 pub fn format_elapsed(elapsed: Duration) -> String {
     if elapsed.as_secs() < 60 {
         format!("{}s", elapsed.as_secs())
@@ -718,8 +940,124 @@ mod tests {
         assert_eq!(manifest.id, "com.example.price-card");
         assert_eq!(manifest.renderer.entry, "ui/main.slint");
         assert_eq!(manifest.default_size.width, 260);
+        assert_eq!(manifest.size_policy, PluginSizePolicy::Fixed);
         assert_eq!(manifest.min_symbol_limit, 1);
         assert_eq!(manifest.symbol_limit, 5);
+    }
+
+    #[test]
+    fn parses_symbol_block_size_policy() {
+        let json = valid_manifest_json().replace(
+            r#""defaultSize": {
+                "width": 260,
+                "height": 170
+            }"#,
+            r#""defaultSize": {
+                "width": 688,
+                "height": 92
+            },
+            "sizePolicy": {
+                "kind": "symbolBlocks",
+                "blockSize": {
+                    "width": 136,
+                    "height": 84
+                },
+                "padding": {
+                    "width": 8,
+                    "height": 8
+                }
+            }"#,
+        );
+
+        let manifest = parse_manifest(&json).unwrap();
+
+        assert_eq!(
+            manifest.size_policy,
+            PluginSizePolicy::SymbolBlocks {
+                block_size: PluginSize {
+                    width: 136,
+                    height: 84
+                },
+                padding: PluginSize {
+                    width: 8,
+                    height: 8
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn parses_symbol_grid_size_policy() {
+        let json = valid_manifest_json().replace(
+            r#""defaultSize": {
+                "width": 260,
+                "height": 170
+            }"#,
+            r#""defaultSize": {
+                "width": 688,
+                "height": 92
+            },
+            "sizePolicy": {
+                "kind": "symbolGrid",
+                "cellSize": {
+                    "width": 136,
+                    "height": 84
+                },
+                "contentPadding": {
+                    "width": 8,
+                    "height": 8
+                },
+                "columns": 5
+            }"#,
+        );
+
+        let manifest = parse_manifest(&json).unwrap();
+
+        assert_eq!(
+            manifest.size_policy,
+            PluginSizePolicy::SymbolGrid {
+                cell_size: PluginSize {
+                    width: 136,
+                    height: 84
+                },
+                content_padding: PluginSize {
+                    width: 8,
+                    height: 8
+                },
+                columns: Some(5),
+                rows: None
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_symbol_block_policy_that_disagrees_with_default_size() {
+        let json = valid_manifest_json().replace(
+            r#""defaultSize": {
+                "width": 260,
+                "height": 170
+            }"#,
+            r#""defaultSize": {
+                "width": 260,
+                "height": 170
+            },
+            "sizePolicy": {
+                "kind": "symbolBlocks",
+                "blockSize": {
+                    "width": 136,
+                    "height": 84
+                },
+                "padding": {
+                    "width": 8,
+                    "height": 8
+                }
+            }"#,
+        );
+
+        assert!(parse_manifest(&json)
+            .unwrap_err()
+            .to_string()
+            .contains("defaultSize"));
     }
 
     #[test]
@@ -794,6 +1132,31 @@ mod tests {
     }
 
     #[test]
+    fn quote_row_display_can_hide_quote_asset() {
+        let state = QuoteState::new(
+            1.0,
+            -0.2,
+            vec![1.0, 0.9],
+            MarketDataSource::Binance,
+            Instant::now(),
+        );
+        let display_options = WidgetDisplayOptions {
+            hide_quote_asset: true,
+        };
+
+        let row =
+            QuoteRowView::from_state_with_options("binance:spot:BTC/USDC", &state, display_options);
+        let loading = QuoteRowView::loading_with_options(
+            "binance:spot:ETH/USDT",
+            RuntimeTextLabels::default(),
+            display_options,
+        );
+
+        assert_eq!(row.symbol, "BTC");
+        assert_eq!(loading.symbol, "ETH");
+    }
+
+    #[test]
     fn builds_widget_runtime_view_from_quote_cache() {
         let now = Instant::now();
         let mut cache = QuoteCache::new();
@@ -808,19 +1171,20 @@ mod tests {
             ),
         );
 
-        let view = build_widget_runtime_view(
-            "quote-board-1",
-            &[
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "quote-board-1",
+            symbols: &[
                 "binance:spot:BTC/USDT".to_string(),
                 "binance:spot:ETH/USDT".to_string(),
             ],
-            &cache,
-            "live feed",
-            ProviderLabels::default(),
-            RuntimeTextLabels::default(),
-            false,
+            quote_cache: &cache,
+            source_prefix: "live feed",
+            provider_labels: ProviderLabels::default(),
+            labels: RuntimeTextLabels::default(),
+            has_market_error: false,
             now,
-        );
+            display_options: WidgetDisplayOptions::default(),
+        });
 
         assert_eq!(view.widget_id, "quote-board-1");
         assert_eq!(view.source_text, "live feed · Binance · 1/2 live");
@@ -837,19 +1201,38 @@ mod tests {
     }
 
     #[test]
+    fn runtime_view_applies_symbol_display_options() {
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "quote-board-1",
+            symbols: &["binance:spot:BTC/USDC".to_string()],
+            quote_cache: &QuoteCache::new(),
+            source_prefix: "live feed",
+            provider_labels: ProviderLabels::default(),
+            labels: RuntimeTextLabels::default(),
+            has_market_error: false,
+            now: Instant::now(),
+            display_options: WidgetDisplayOptions {
+                hide_quote_asset: true,
+            },
+        });
+
+        assert_eq!(view.quote_rows[0].symbol, "BTC");
+    }
+
+    #[test]
     fn runtime_view_uses_pair_source_until_quotes_arrive() {
-        let view = build_widget_runtime_view(
-            "mini-ticker-1",
-            &["okx:spot:ETH/USDT".to_string()],
-            &QuoteCache::new(),
-            "实时行情",
-            ProviderLabels {
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "mini-ticker-1",
+            symbols: &["okx:spot:ETH/USDT".to_string()],
+            quote_cache: &QuoteCache::new(),
+            source_prefix: "实时行情",
+            provider_labels: ProviderLabels {
                 binance: "Binance",
                 okx: "OKX",
                 hyperliquid: "Hyperliquid",
                 mixed: "多个源",
             },
-            RuntimeTextLabels {
+            labels: RuntimeTextLabels {
                 no_pairs: "未配置交易对",
                 connecting: "连接中",
                 connection_error: "连接失败",
@@ -860,9 +1243,10 @@ mod tests {
                 live_count_prefix: "已连 ",
                 live_count_suffix: "",
             },
-            false,
-            Instant::now(),
-        );
+            has_market_error: false,
+            now: Instant::now(),
+            display_options: WidgetDisplayOptions::default(),
+        });
 
         assert_eq!(view.source_text, "实时行情 · OKX · 已连 0/1");
         assert_eq!(view.updated_text, "连接中");
@@ -885,16 +1269,17 @@ mod tests {
             ),
         );
 
-        let view = build_widget_runtime_view(
-            "quote-board-1",
-            &["binance:spot:BTC/USDT".to_string()],
-            &cache,
-            "live feed",
-            ProviderLabels::default(),
-            RuntimeTextLabels::default(),
-            false,
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "quote-board-1",
+            symbols: &["binance:spot:BTC/USDT".to_string()],
+            quote_cache: &cache,
+            source_prefix: "live feed",
+            provider_labels: ProviderLabels::default(),
+            labels: RuntimeTextLabels::default(),
+            has_market_error: false,
             now,
-        );
+            display_options: WidgetDisplayOptions::default(),
+        });
 
         assert_eq!(view.updated_text, "Stale 4m");
     }
@@ -914,19 +1299,20 @@ mod tests {
             ),
         );
 
-        let view = build_widget_runtime_view(
-            "quote-board-1",
-            &[
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "quote-board-1",
+            symbols: &[
                 "okx:spot:BTC/USDT".to_string(),
                 "hyperliquid:perp:ETH/USDC".to_string(),
             ],
-            &cache,
-            "live feed",
-            ProviderLabels::default(),
-            RuntimeTextLabels::default(),
-            true,
+            quote_cache: &cache,
+            source_prefix: "live feed",
+            provider_labels: ProviderLabels::default(),
+            labels: RuntimeTextLabels::default(),
+            has_market_error: true,
             now,
-        );
+            display_options: WidgetDisplayOptions::default(),
+        });
 
         assert_eq!(
             view.source_text,

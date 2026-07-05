@@ -16,6 +16,7 @@ export component Stage3PriceCard inherits Window {
     in property <bool> layout-locked;
     in property <int> widget-width: 260;
     in property <int> widget-height: 170;
+    in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
@@ -30,9 +31,7 @@ export component Stage3PriceCard inherits Window {
     property <color> card-updated-text-color: root.light-theme ? #64748b : #99f6e4;
     property <color> gain-color: root.light-theme ? #16a34a : #22c55e;
     property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
-    property <float> content-scale: ((root.widget-width * 1px) / 260px) < ((root.widget-height * 1px) / 170px)
-        ? ((root.widget-width * 1px) / 260px)
-        : ((root.widget-height * 1px) / 170px);
+    property <float> content-scale: root.widget-scale;
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
@@ -42,6 +41,24 @@ export component Stage3PriceCard inherits Window {
     no-frame: true;
     always-on-top: root.pin-to-top;
     background: transparent;
+
+    drag_area := TouchArea {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+        pointer-event(event) => {
+            if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.card-left-drag-active = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                root.card-left-drag-active = false;
+            }
+        }
+        moved => {
+            if !root.layout-locked && root.card-left-drag-active {
+                root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
 
     card := Rectangle {
         x: (root.widget-width * 1px - self.width * root.content-scale) / 2;
@@ -64,24 +81,6 @@ export component Stage3PriceCard inherits Window {
             height: 34px;
             border-radius: 7px;
             background: root.card-header-background;
-        }
-
-        drag_area := TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
-            pointer-event(event) => {
-                if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                    root.card-left-drag-active = true;
-                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
-                    root.card-left-drag-active = false;
-                }
-            }
-            moved => {
-                if !root.layout-locked && root.card-left-drag-active {
-                    root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
-                }
-            }
         }
 
         Text {

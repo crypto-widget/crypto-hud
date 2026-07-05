@@ -7,7 +7,7 @@ use std::{
 use anyhow::{anyhow, bail, Context, Result};
 pub use crypto_hud_runtime::{
     parse_manifest, validate_manifest, PluginDataRequirement, PluginManifest, PluginSize,
-    MAX_SYMBOL_LIMIT, MIN_SYMBOL_LIMIT,
+    PluginSizePolicy, MAX_SYMBOL_LIMIT, MIN_SYMBOL_LIMIT,
 };
 use semver::Version;
 use slint_interpreter::{Compiler, ComponentDefinition, ValueType};
@@ -25,6 +25,28 @@ const HIDDEN_MARKET_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.market-compass",
     "com.cryptohud.orbit-pulse",
     "com.example.stage3-price-card",
+];
+const DISABLED_PROTOTYPE_PLUGIN_IDS: &[&str] = &[
+    "com.cryptohud.market-board",
+    "com.cryptohud.market-compass",
+    "com.cryptohud.orbit-pulse",
+    "com.example.stage3-price-card",
+];
+#[cfg(test)]
+const HOST_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
+    "com.cryptohud.focus-ticker",
+    "com.cryptohud.market-board",
+    "com.cryptohud.market-compass",
+    "com.cryptohud.orbit-pulse",
+    "com.cryptohud.status-strip",
+    "com.cryptohud.trust-card",
+    "com.example.stage3-price-card",
+];
+#[cfg(test)]
+const DIRECT_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
+    "com.cryptohud.focus-ticker",
+    "com.cryptohud.status-strip",
+    "com.cryptohud.trust-card",
 ];
 const ALLOWED_EXTENSIONS: &[&str] = &["json", "slint", "png", "jpg", "jpeg", "svg"];
 const REQUIRED_PROPERTIES: &[(&str, ValueType)] = &[
@@ -115,6 +137,10 @@ pub fn is_market_plugin_visible(plugin_id: &str) -> bool {
     !HIDDEN_MARKET_PLUGIN_IDS.contains(&plugin_id)
 }
 
+pub fn is_prototype_plugin(plugin_id: &str) -> bool {
+    DISABLED_PROTOTYPE_PLUGIN_IDS.contains(&plugin_id)
+}
+
 #[derive(Debug, Clone)]
 pub struct PluginDefinition {
     pub id: String,
@@ -123,6 +149,7 @@ pub struct PluginDefinition {
     pub source: PluginSource,
     pub renderer: PluginRendererDefinition,
     pub default_size: PluginSize,
+    pub size_policy: PluginSizePolicy,
     pub min_symbol_limit: usize,
     pub symbol_limit: usize,
     pub data_requirements: Vec<PluginDataRequirement>,
@@ -183,6 +210,7 @@ pub enum BuiltinRenderer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginStatus {
     Available,
+    Disabled(String),
     Unavailable(String),
 }
 
@@ -210,8 +238,9 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             renderer: PluginRendererDefinition::Builtin(BuiltinRenderer::QuoteBoard),
             default_size: PluginSize {
                 width: 286,
-                height: 232,
+                height: 194,
             },
+            size_policy: PluginSizePolicy::Fixed,
             min_symbol_limit: MIN_SYMBOL_LIMIT,
             symbol_limit: MAX_SYMBOL_LIMIT,
             data_requirements: vec![PluginDataRequirement {
@@ -229,6 +258,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
                 width: 236,
                 height: 112,
             },
+            size_policy: PluginSizePolicy::Fixed,
             min_symbol_limit: MIN_SYMBOL_LIMIT,
             symbol_limit: MIN_SYMBOL_LIMIT,
             data_requirements: vec![PluginDataRequirement {
@@ -306,6 +336,7 @@ fn load_local_plugin(root: &Path) -> Result<PluginDefinition> {
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
     let mut plugin = manifest_to_definition(manifest, root)?;
+    let prototype_plugin = is_prototype_plugin(&plugin.id);
 
     if let PluginRendererDefinition::Slint {
         root_dir,
@@ -317,7 +348,11 @@ fn load_local_plugin(root: &Path) -> Result<PluginDefinition> {
         match compile_slint_renderer(root_dir, entry, component) {
             Ok(compiled) => {
                 *definition = Some(compiled);
-                plugin.status = PluginStatus::Available;
+                plugin.status = if prototype_plugin {
+                    PluginStatus::Disabled("prototype widget is disabled".to_string())
+                } else {
+                    PluginStatus::Available
+                };
             }
             Err(error) => {
                 plugin.status = PluginStatus::Unavailable(error.to_string());
@@ -358,6 +393,7 @@ pub fn manifest_to_definition(
             definition: None,
         },
         default_size: manifest.default_size,
+        size_policy: manifest.size_policy,
         min_symbol_limit: manifest.min_symbol_limit,
         symbol_limit: manifest.symbol_limit,
         data_requirements: manifest.data_requirements,
@@ -631,6 +667,7 @@ export component ExamplePriceCard inherits Window {
         assert_eq!(manifest.schema_version, 3);
         assert_eq!(manifest.id, "com.example.price-card");
         assert_eq!(manifest.renderer.entry, "ui/main.slint");
+        assert_eq!(manifest.size_policy, PluginSizePolicy::Fixed);
         assert_eq!(manifest.min_symbol_limit, 1);
         assert_eq!(manifest.symbol_limit, 5);
     }
@@ -803,12 +840,8 @@ export component ExamplePriceCard inherits Window {
         let catalog = PluginCatalog::discover(vec![root]);
 
         for plugin_id in [
-            "com.example.stage3-price-card",
             "com.cryptohud.focus-ticker",
-            "com.cryptohud.market-board",
             "com.cryptohud.trust-card",
-            "com.cryptohud.orbit-pulse",
-            "com.cryptohud.market-compass",
             "com.cryptohud.status-strip",
         ] {
             let plugin = catalog
@@ -816,11 +849,90 @@ export component ExamplePriceCard inherits Window {
                 .expect("plugin should be discovered");
             assert!(plugin.is_available(), "{plugin_id} should be available");
         }
+        for plugin_id in [
+            "com.cryptohud.market-board",
+            "com.cryptohud.market-compass",
+            "com.cryptohud.orbit-pulse",
+            "com.example.stage3-price-card",
+        ] {
+            let plugin = catalog
+                .find(plugin_id)
+                .expect("prototype plugin should still be discoverable");
+            assert!(
+                matches!(plugin.status, PluginStatus::Disabled(_)),
+                "{plugin_id} should be disabled"
+            );
+        }
         assert!(catalog.errors().is_empty(), "{:?}", catalog.errors());
     }
 
     #[test]
-    fn circular_repo_plugins_scale_from_runtime_window_size() {
+    fn status_strip_manifest_declares_symbol_grid_size_policy() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let plugin = catalog.find("com.cryptohud.status-strip").unwrap();
+
+        assert_eq!(
+            plugin.size_policy,
+            PluginSizePolicy::SymbolGrid {
+                cell_size: PluginSize {
+                    width: 136,
+                    height: 84
+                },
+                content_padding: PluginSize {
+                    width: 8,
+                    height: 8
+                },
+                columns: Some(5),
+                rows: None
+            }
+        );
+    }
+
+    #[test]
+    fn repo_plugins_accept_host_supplied_scale_and_root_drag_layer() {
+        for plugin_id in HOST_SCALE_REPO_PLUGIN_IDS {
+            let source = repo_plugin_ui_source(plugin_id);
+
+            assert!(
+                source.contains("in property <float> widget-scale: 1.0;"),
+                "{plugin_id} should accept the host supplied widget scale"
+            );
+            assert!(
+                source.contains("property <float> content-scale: root.widget-scale;"),
+                "{plugin_id} should not infer content scale from window dimensions"
+            );
+            assert!(
+                source.find("drag_area := TouchArea").unwrap()
+                    < source
+                        .find("card := Rectangle")
+                        .or_else(|| source.find("canvas := Rectangle"))
+                        .unwrap(),
+                "{plugin_id} should keep dragging in root window coordinates"
+            );
+        }
+    }
+
+    #[test]
+    fn available_repo_plugins_use_direct_scaled_layout() {
+        for plugin_id in DIRECT_SCALE_REPO_PLUGIN_IDS {
+            let source = repo_plugin_ui_source(plugin_id);
+
+            assert!(
+                source.contains("function s(value: length) -> length")
+                    && source.contains("return value * root.content-scale;"),
+                "{plugin_id} should use a shared helper for direct scaled layout"
+            );
+            assert!(
+                !source.contains("transform-scale-x: root.content-scale;")
+                    && !source.contains("transform-scale-y: root.content-scale;"),
+                "{plugin_id} should avoid transform scaling because tiny live windows clip it"
+            );
+        }
+    }
+
+    #[test]
+    fn circular_repo_plugins_keep_natural_size_inside_transform_layer() {
         for plugin_id in CIRCULAR_REPO_PLUGIN_IDS {
             let source = repo_plugin_ui_source(plugin_id);
 
@@ -833,12 +945,8 @@ export component ExamplePriceCard inherits Window {
                 "{plugin_id} should bind root height to layout height"
             );
             assert!(
-                source.contains("((root.widget-width * 1px) / 480px)"),
-                "{plugin_id} should scale from layout width"
-            );
-            assert!(
-                source.contains("((root.widget-height * 1px) / 480px)"),
-                "{plugin_id} should scale from layout height"
+                source.contains("property <float> content-scale: root.widget-scale;"),
+                "{plugin_id} should use the host supplied content scale"
             );
             assert!(
                 source.contains("root.widget-width * 1px - 480px * root.content-scale"),
@@ -849,16 +957,26 @@ export component ExamplePriceCard inherits Window {
                 "{plugin_id} should center vertically in the layout bounds"
             );
             assert!(
-                source.contains("width: 480px * root.content-scale;"),
-                "{plugin_id} should scale card width directly"
+                source.contains("width: 480px;"),
+                "{plugin_id} should keep the visual card at natural width"
             );
             assert!(
-                source.contains("height: 480px * root.content-scale;"),
-                "{plugin_id} should scale card height directly"
+                source.contains("height: 480px;"),
+                "{plugin_id} should keep the visual card at natural height"
             );
             assert!(
-                !source.contains("transform-scale"),
-                "{plugin_id} should not rely on transform scaling for window resizing"
+                source.contains("transform-scale-x: root.content-scale;")
+                    && source.contains("transform-scale-y: root.content-scale;"),
+                "{plugin_id} should scale the natural card through transform"
+            );
+            assert!(
+                !source.contains("font-size: 23px * root.content-scale"),
+                "{plugin_id} should not scale child text manually"
+            );
+            assert!(
+                !source.contains("width: 480px * root.content-scale;")
+                    && !source.contains("height: 480px * root.content-scale;"),
+                "{plugin_id} should not resize the natural card dimensions directly"
             );
         }
     }

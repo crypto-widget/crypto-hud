@@ -17,6 +17,18 @@
     "width": 688,
     "height": 92
   },
+  "sizePolicy": {
+    "kind": "symbolGrid",
+    "cellSize": {
+      "width": 136,
+      "height": 84
+    },
+    "contentPadding": {
+      "width": 8,
+      "height": 8
+    },
+    "columns": 5
+  },
   "minSymbolLimit": 1,
   "symbolLimit": 5,
   "dataRequirements": [
