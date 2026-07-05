@@ -3119,6 +3119,29 @@ mod tests {
     }
 
     #[test]
+    fn my_widgets_header_does_not_show_bulk_action_buttons() {
+        let source = settings_window_ui_source();
+        let my_widgets_panel = block_after_anchor(&source, "title: root.my-widgets-text;", "");
+        let selected_panel_index = my_widgets_panel
+            .find("selected_widget_panel := Rectangle {")
+            .unwrap();
+        let my_widgets_panel = &my_widgets_panel[..selected_panel_index];
+
+        assert!(
+            !my_widgets_panel.contains("root.reset-widget-positions-text"),
+            "my widgets header should not show reset positions button"
+        );
+        assert!(
+            !my_widgets_panel.contains("root.hide-all-widgets-text"),
+            "my widgets header should not show hide all button"
+        );
+        assert!(
+            my_widgets_panel.contains("widget_list := ListView {\n                    x: 0px;\n                    y: 56px;"),
+            "widget list should move up after removing header action buttons"
+        );
+    }
+
+    #[test]
     fn widget_symbol_chip_layout_keeps_max_symbols_in_one_row() {
         let labels = vec![
             "BTC/USDT · Binance · Bitcoin".to_string(),

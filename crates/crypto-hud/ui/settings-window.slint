@@ -835,39 +835,9 @@ export component SettingsWindow inherits Window {
                     overflow: elide;
                 }
 
-                SettingsSmallButton {
-                    x: parent.width - 178px;
-                    y: 17px;
-                    width: 77px;
-                    height: 30px;
-                    text: root.reset-widget-positions-text;
-                    text-color: root.settings-label-color;
-                    muted-color: root.settings-muted-color;
-                    surface-color: root.settings-content-background;
-                    hover-color: root.settings-selected-background;
-                    control-border-color: root.settings-border-color;
-                    enabled: root.has-widgets;
-                    clicked => { root.reset-widget-positions(); }
-                }
-
-                SettingsSmallButton {
-                    x: parent.width - 93px;
-                    y: 17px;
-                    width: 77px;
-                    height: 30px;
-                    text: root.hide-all-widgets-text;
-                    text-color: root.settings-label-color;
-                    muted-color: root.settings-muted-color;
-                    surface-color: root.settings-content-background;
-                    hover-color: root.settings-selected-background;
-                    control-border-color: root.settings-border-color;
-                    enabled: root.has-widgets;
-                    clicked => { root.hide-all-widgets(); }
-                }
-
                 Rectangle {
                     x: 0px;
-                    y: 64px;
+                    y: 56px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -875,9 +845,9 @@ export component SettingsWindow inherits Window {
 
                 widget_list := ListView {
                     x: 0px;
-                    y: 64px;
+                    y: 56px;
                     width: parent.width;
-                    height: parent.height - 46px;
+                    height: parent.height - 38px;
 
                     for widget_label[index] in root.widget-list-options : Rectangle {
                         width: 401px;
