@@ -29,23 +29,33 @@ export component PriceCardWindow inherits Window {
     property <length> content-height: root.compact-mode ? 112px : root.quote-board-base-height;
     property <float> content-scale: root.widget-scale;
     property <bool> quote-icon-space-visible: root.show-coin-logos;
-    property <length> quote-board-symbol-x: root.s(root.quote-icon-space-visible ? 27px : 5px);
-    property <length> quote-board-symbol-width: root.s(root.hide-quote-asset ? 42px : (root.quote-icon-space-visible ? 78px : 88px));
-    property <length> quote-board-price-x: root.quote-board-symbol-x + root.quote-board-symbol-width + root.s(root.hide-quote-asset ? 7px : 3px);
-    property <length> quote-board-price-width: root.s(58px);
-    property <length> quote-board-change-x: root.quote-board-price-x + root.quote-board-price-width + root.s(4px);
-    property <length> quote-board-change-width: root.s(58px);
+    property <length> quote-board-row-width: root.s(root.content-width - 24px);
+    property <length> quote-board-row-start-y: root.s(root.quote-board-row-count <= 1 ? 35px : 41px);
+    property <length> quote-board-symbol-x: root.s(root.quote-icon-space-visible ? 25px : 4px);
+    property <length> quote-board-symbol-width: root.s(root.hide-quote-asset ? 48px : (root.quote-icon-space-visible ? 84px : 96px));
+    property <length> quote-board-price-x: root.quote-board-symbol-x + root.quote-board-symbol-width + root.s(root.hide-quote-asset ? 6px : 8px);
+    property <length> quote-board-change-width: root.s(66px);
+    property <length> quote-board-change-x: root.quote-board-row-width - root.quote-board-change-width;
+    property <length> quote-board-price-width: root.quote-board-change-x - root.quote-board-price-x - root.s(20px);
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
     property <bool> light-theme: root.theme-name == "light";
-    property <color> card-background: root.light-theme ? #f8fafcfa : #111827f4;
-    property <color> card-header-background: root.light-theme ? #e0f2fee8 : #0f172aee;
-    property <color> card-border-color: root.light-theme ? #0284c766 : #38bdf855;
-    property <color> card-primary-text-color: root.light-theme ? #0f172a : #f8fafc;
-    property <color> card-source-text-color: root.light-theme ? #0369a1 : #93c5fd;
-    property <color> card-updated-text-color: root.light-theme ? #475569 : #94a3b8;
-    property <color> gain-color: root.light-theme ? #16a34a : #22c55e;
-    property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
+    property <color> card-background: root.light-theme ? #f8fbffff : #0f1726ff;
+    property <color> card-header-background: root.light-theme ? #eaf7ffff : #0d1a2dff;
+    property <color> card-border-color: root.light-theme ? #0ea5e980 : #0ea5e9a0;
+    property <color> row-background: root.light-theme ? #ffffffb8 : #1722358a;
+    property <color> row-divider-color: root.light-theme ? #cbd5e155 : #33415580;
+    property <color> gain-pill-background: root.light-theme ? #d1fae5ff : #064e3bcc;
+    property <color> loss-pill-background: root.light-theme ? #fee2e2ff : #4c1d2fcc;
+    property <color> card-primary-text-color: root.light-theme ? #071426 : #f8fafc;
+    property <color> card-source-text-color: root.light-theme ? #0369a1 : #67d8ff;
+    property <color> card-updated-text-color: root.light-theme ? #64748b : #9db2ce;
+    property <color> gain-color: root.light-theme ? #047857 : #22d76f;
+    property <color> loss-color: root.light-theme ? #dc2626 : #ff6b76;
+    property <color> lock-button-background: root.light-theme ? #ffffffcc : #12233add;
+    property <color> lock-button-hover-background: root.light-theme ? #e0f2feee : #162b46ee;
+    property <color> lock-button-border-color: root.light-theme ? #94a3b880 : #7dd3fc66;
+    property <color> lock-icon-color: root.light-theme ? #0f172a : #dbeafe;
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
@@ -93,26 +103,71 @@ export component PriceCardWindow inherits Window {
             x: root.s(1px);
             y: root.s(1px);
             width: parent.width - root.s(2px);
-            height: root.s(26px);
+            height: root.s(31px);
             border-radius: root.s(7px);
             background: root.card-header-background;
             visible: !root.compact-mode;
         }
 
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(31px);
+            width: parent.width - root.s(2px);
+            height: root.s(1px);
+            background: root.row-divider-color;
+            visible: !root.compact-mode;
+        }
+
+        Text {
+            x: root.s(14px);
+            y: root.s(9px);
+            width: root.s(94px);
+            height: root.s(17px);
+            text: root.pairs-heading-text == "" ? "Pairs" : root.pairs-heading-text;
+            color: root.card-primary-text-color;
+            font-size: root.s(13px);
+            font-weight: 800;
+            visible: !root.compact-mode;
+            overflow: elide;
+        }
+
+        Text {
+            x: root.s(110px);
+            y: root.s(10px);
+            width: parent.width - root.s(66px) - root.s(110px);
+            height: root.s(15px);
+            text: root.source-text == "" ? "Source" : root.source-text;
+            color: root.card-source-text-color;
+            font-size: root.s(11px);
+            font-weight: 700;
+            horizontal-alignment: right;
+            visible: !root.compact-mode;
+            overflow: elide;
+        }
+
         for quote[index] in root.quote-rows : Rectangle {
-            x: root.s(root.compact-mode ? 10px : 8px);
-            y: root.s(root.compact-mode ? 16px : 32px + index * 31px);
-            width: parent.width - root.s(root.compact-mode ? 20px : 16px);
-            height: root.s(root.compact-mode ? 30px : 27px);
+            x: root.s(root.compact-mode ? 10px : 12px);
+            y: root.compact-mode ? root.s(16px) : root.quote-board-row-start-y + root.s(index * 26px);
+            width: root.compact-mode ? parent.width - root.s(20px) : root.quote-board-row-width;
+            height: root.s(root.compact-mode ? 30px : 25px);
             border-radius: root.s(5px);
-            background: transparent;
+            background: !root.compact-mode && (index == 0 || index == 2 || index == 4) ? root.row-background : transparent;
             visible: root.compact-mode ? index == 0 : index < root.quote-board-row-count;
 
+            Rectangle {
+                x: 0px;
+                y: parent.height - root.s(1px);
+                width: parent.width;
+                height: root.s(1px);
+                background: root.row-divider-color;
+                visible: !root.compact-mode && index + 1 < root.quote-board-row-count;
+            }
+
             Image {
-                x: root.s(root.compact-mode ? 6px : 5px);
-                y: root.s(root.compact-mode ? 6px : 5px);
-                width: root.s(root.compact-mode ? 18px : 16px);
-                height: root.s(root.compact-mode ? 18px : 16px);
+                x: root.s(root.compact-mode ? 6px : 0px);
+                y: root.s(root.compact-mode ? 6px : 3px);
+                width: root.s(root.compact-mode ? 18px : 18px);
+                height: root.s(root.compact-mode ? 18px : 18px);
                 source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
                 image-fit: contain;
                 visible: root.show-coin-logos && root.quote-icons.length > index;
@@ -120,51 +175,83 @@ export component PriceCardWindow inherits Window {
 
             Text {
                 x: root.compact-mode ? root.s(30px) : root.quote-board-symbol-x;
-                y: root.s(root.compact-mode ? 6px : 5px);
+                y: 0px;
                 width: root.compact-mode ? root.s(44px) : root.quote-board-symbol-width;
+                height: parent.height;
                 text: quote.symbol;
                 color: root.card-primary-text-color;
                 font-size: root.s(root.compact-mode ? 13px : 12px);
-                font-weight: 700;
+                font-weight: 800;
+                vertical-alignment: center;
                 overflow: elide;
             }
 
             Text {
                 x: root.compact-mode ? root.s(78px) : root.quote-board-price-x;
-                y: root.s(root.compact-mode ? 5px : 4px);
+                y: 0px;
                 width: root.compact-mode ? root.s(74px) : root.quote-board-price-width;
+                height: parent.height;
                 text: quote.price;
                 color: root.card-primary-text-color;
                 font-size: root.s(root.compact-mode ? 14px : 13px);
                 font-weight: 800;
                 horizontal-alignment: right;
+                vertical-alignment: center;
                 overflow: elide;
             }
 
+            Rectangle {
+                x: root.compact-mode ? root.s(156px) : root.quote-board-change-x;
+                y: root.s(root.compact-mode ? 4px : 3px);
+                width: root.compact-mode ? root.s(56px) : root.quote-board-change-width;
+                height: root.s(root.compact-mode ? 22px : 19px);
+                border-radius: root.s(5px);
+                background: quote.positive
+                    ? (root.red-up-enabled ? root.loss-pill-background : root.gain-pill-background)
+                    : (root.red-up-enabled ? root.gain-pill-background : root.loss-pill-background);
+                visible: !root.compact-mode;
+            }
+
             Text {
-                x: root.compact-mode ? root.s(164px) : root.quote-board-change-x;
-                y: root.s(root.compact-mode ? 6px : 5px);
-                width: root.compact-mode ? root.s(48px) : root.quote-board-change-width;
+                x: root.compact-mode ? root.s(164px) : root.quote-board-change-x + root.s(4px);
+                y: 0px;
+                width: root.compact-mode ? root.s(48px) : root.quote-board-change-width - root.s(8px);
+                height: parent.height;
                 text: quote.change;
                 color: quote.positive
                     ? (root.red-up-enabled ? root.loss-color : root.gain-color)
                     : (root.red-up-enabled ? root.gain-color : root.loss-color);
                 font-size: root.s(root.compact-mode ? 13px : 12px);
-                font-weight: 700;
-                horizontal-alignment: root.compact-mode ? right : left;
+                font-weight: 800;
+                horizontal-alignment: right;
+                vertical-alignment: center;
                 overflow: elide;
             }
         }
 
         Text {
             x: root.s(14px);
-            y: root.s(root.compact-mode ? 48px : 44px);
+            y: root.s(root.compact-mode ? 48px : 42px);
             width: parent.width - root.s(28px);
             text: root.empty-text;
             color: root.card-updated-text-color;
             font-size: root.s(12px);
             horizontal-alignment: center;
             visible: root.quote-rows.length == 0;
+            overflow: elide;
+        }
+
+        Text {
+            x: parent.width / 2;
+            y: parent.height - root.s(18px);
+            width: parent.width / 2 - root.s(14px);
+            height: root.s(13px);
+            text: root.updated-text == "" ? "Updated" : root.updated-text;
+            color: root.card-updated-text-color;
+            font-size: root.s(10px);
+            font-weight: 600;
+            horizontal-alignment: right;
+            visible: !root.compact-mode;
             overflow: elide;
         }
 
@@ -193,26 +280,26 @@ export component PriceCardWindow inherits Window {
         }
 
         lock_button := Rectangle {
-            x: parent.width - root.s(40px);
-            y: root.s(6px);
-            width: root.s(32px);
-            height: root.s(32px);
-            border-radius: root.s(8px);
-            background: root.layout-locked || lock_touch.has-hover ? root.card-header-background : root.card-background;
+            x: parent.width - root.s(root.compact-mode ? 40px : 27px);
+            y: root.s(root.compact-mode ? 6px : 7px);
+            width: root.s(root.compact-mode ? 32px : 18px);
+            height: root.s(root.compact-mode ? 32px : 18px);
+            border-radius: root.s(root.compact-mode ? 8px : 6px);
+            background: root.layout-locked || lock_touch.has-hover ? root.lock-button-hover-background : root.lock-button-background;
             border-width: root.s(1px);
-            border-color: root.card-border-color;
-            visible: drag_area.has-hover || lock_touch.has-hover;
+            border-color: root.lock-button-border-color;
+            visible: root.layout-locked || drag_area.has-hover || lock_touch.has-hover;
 
             Path {
-                x: root.s(7px);
-                y: root.s(6px);
-                width: root.s(18px);
-                height: root.s(20px);
+                x: root.s(root.compact-mode ? 7px : 3px);
+                y: root.s(root.compact-mode ? 6px : 3px);
+                width: root.s(root.compact-mode ? 18px : 12px);
+                height: root.s(root.compact-mode ? 20px : 12px);
                 viewbox-width: 24;
                 viewbox-height: 24;
-                commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
-                fill: root.layout-locked ? root.card-primary-text-color : transparent;
-                stroke: root.card-primary-text-color;
+                commands: "M 5 11 H 19 C 20.1 11 21 11.9 21 13 V 20 C 21 21.1 20.1 22 19 22 H 5 C 3.9 22 3 21.1 3 20 V 13 C 3 11.9 3.9 11 5 11 Z M 7 11 V 7 C 7 4.2 9.2 2 12 2 C 14.8 2 17 4.2 17 7 V 11 M 12 16 V 18";
+                fill: transparent;
+                stroke: root.lock-icon-color;
                 stroke-width: root.s(2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;

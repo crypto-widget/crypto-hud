@@ -67,6 +67,7 @@ const PREVIEW_KIND_MARKET_COMPASS: i32 = 5;
 const PREVIEW_KIND_STATUS_STRIP: i32 = 6;
 const SYMBOL_PICKER_MODE_WIDGET: i32 = 0;
 const SYMBOL_PICKER_MODE_DEFAULT: i32 = 1;
+const SYMBOL_PICKER_MODE_WIDGET_REPLACE: i32 = 2;
 const STATUS_STRIP_PLUGIN_ID: &str = "com.cryptohud.status-strip";
 const STATUS_STRIP_VISIBLE_HEIGHT: i32 = 84;
 const STATUS_STRIP_PREVIOUS_TIGHT_HEIGHT: i32 = 84;
@@ -675,6 +676,15 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.on_open_widget_symbol_replace_picker({
+        let weak = ui.as_weak();
+        move |symbol_index| {
+            if let Some(ui) = weak.upgrade() {
+                open_symbol_replace_picker(&ui, symbol_index);
+            }
+        }
+    });
+
     ui.on_open_default_symbol_picker({
         let weak = ui.as_weak();
         move || {
@@ -747,6 +757,28 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 commit.update_market_feed_config_from_store();
                 commit.set_saved_status(settings);
                 commit.refresh_settings_window(&weak);
+            } else if mode == SYMBOL_PICKER_MODE_WIDGET_REPLACE {
+                let Some(settings) = replace_widget_symbol_in_store(
+                    &commit.layouts,
+                    &commit.state_path,
+                    ui.get_selected_widget_index(),
+                    ui.get_symbol_picker_replace_index(),
+                    &symbol,
+                    &commit.plugin_catalog,
+                ) else {
+                    ui.set_symbol_picker_status_text(
+                        symbol_picker_empty_status_text(mode, current_ui_locale(&ui)).into(),
+                    );
+                    return;
+                };
+                close_symbol_picker(&ui);
+                commit.finish_runtime_change(
+                    &weak,
+                    settings,
+                    false,
+                    true,
+                    "failed to replace widget symbol",
+                );
             } else {
                 let Some(settings) = add_widget_symbol_to_store(
                     &commit.layouts,
@@ -1518,6 +1550,29 @@ fn remove_widget_symbol_from_store(
     )
 }
 
+fn replace_widget_symbol_in_store(
+    layouts: &Rc<RefCell<LayoutStore>>,
+    state_path: &std::path::Path,
+    selected_index: i32,
+    symbol_index: i32,
+    symbol: &str,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> Option<AppSettings> {
+    if symbol_index < 0 {
+        return None;
+    }
+    let symbol = settings::normalize_market_pair_key(symbol)?;
+    update_widget_symbols_in_store(
+        layouts,
+        state_path,
+        selected_index,
+        plugin_catalog,
+        |symbols, min, limit, fallback| {
+            replace_symbol_with_bounds(symbols, symbol_index as usize, symbol, min, limit, fallback)
+        },
+    )
+}
+
 fn update_widget_symbols_in_store<F>(
     layouts: &Rc<RefCell<LayoutStore>>,
     state_path: &std::path::Path,
@@ -1572,6 +1627,20 @@ fn remove_symbol_with_bounds(
 ) -> Vec<String> {
     if symbol_index < symbols.len() {
         symbols.remove(symbol_index);
+    }
+    settings::normalized_symbols_with_bounds(symbols, min, limit, fallback)
+}
+
+fn replace_symbol_with_bounds(
+    mut symbols: Vec<String>,
+    symbol_index: usize,
+    symbol: String,
+    min: usize,
+    limit: usize,
+    fallback: Vec<String>,
+) -> Vec<String> {
+    if symbol_index < symbols.len() && !symbols.contains(&symbol) {
+        symbols[symbol_index] = symbol;
     }
     settings::normalized_symbols_with_bounds(symbols, min, limit, fallback)
 }
@@ -1644,6 +1713,7 @@ fn open_symbol_picker(ui: &SettingsWindow, mode: i32) {
     let locale = current_ui_locale(ui);
     ui.set_symbol_picker_open(true);
     ui.set_symbol_picker_mode(mode);
+    ui.set_symbol_picker_replace_index(-1);
     ui.set_symbol_picker_search_text("".into());
     ui.set_symbol_picker_candidate_index(0);
     ui.set_symbol_picker_title_text(symbol_picker_title_text(mode, locale).into());
@@ -1654,9 +1724,27 @@ fn open_symbol_picker(ui: &SettingsWindow, mode: i32) {
     refresh_symbol_picker_models_from_ui(ui, &state, locale);
 }
 
+fn open_symbol_replace_picker(ui: &SettingsWindow, symbol_index: i32) {
+    let locale = current_ui_locale(ui);
+    ui.set_symbol_picker_open(true);
+    ui.set_symbol_picker_mode(SYMBOL_PICKER_MODE_WIDGET_REPLACE);
+    ui.set_symbol_picker_replace_index(symbol_index);
+    ui.set_symbol_picker_search_text("".into());
+    ui.set_symbol_picker_candidate_index(0);
+    ui.set_symbol_picker_title_text(
+        symbol_picker_title_text(SYMBOL_PICKER_MODE_WIDGET_REPLACE, locale).into(),
+    );
+    ui.set_symbol_picker_confirm_text(symbol_picker_confirm_text(locale).into());
+    ui.set_symbol_picker_cancel_text(symbol_picker_cancel_text(locale).into());
+
+    let state = symbol_catalog_snapshot();
+    refresh_symbol_picker_models_from_ui(ui, &state, locale);
+}
+
 fn close_symbol_picker(ui: &SettingsWindow) {
     let locale = current_ui_locale(ui);
     ui.set_symbol_picker_open(false);
+    ui.set_symbol_picker_replace_index(-1);
     ui.set_symbol_picker_search_text("".into());
     ui.set_symbol_picker_candidate_options(owned_string_model(Vec::new()));
     ui.set_symbol_picker_candidate_values(owned_string_model(Vec::new()));
@@ -1688,7 +1776,9 @@ fn refresh_symbol_picker_models_from_ui(
     } else {
         ui.get_widget_symbol_max().max(0) as usize
     };
-    let options = if selected_symbols.len() >= max {
+    let options = if mode == SYMBOL_PICKER_MODE_WIDGET_REPLACE {
+        symbol_add_options_with_query(state, &enabled_sources, &selected_symbols, &query)
+    } else if selected_symbols.len() >= max {
         Vec::new()
     } else {
         symbol_add_options_with_query(state, &enabled_sources, &selected_symbols, &query)
@@ -2355,6 +2445,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_widget_symbol_status_y(status_y);
     ui.set_symbol_picker_open(false);
     ui.set_symbol_picker_mode(SYMBOL_PICKER_MODE_WIDGET);
+    ui.set_symbol_picker_replace_index(-1);
     ui.set_symbol_picker_search_text("".into());
     ui.set_symbol_picker_candidate_options(owned_string_model(Vec::new()));
     ui.set_symbol_picker_candidate_values(owned_string_model(Vec::new()));
@@ -2776,6 +2867,8 @@ fn symbol_picker_title_text(mode: i32, locale: i18n::Locale) -> &'static str {
     match (mode, locale) {
         (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::ZhHans) => "添加新建默认交易对",
         (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::En) => "Add new-widget default pair",
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) => "更换当前组件交易对",
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) => "Replace current widget pair",
         (_, i18n::Locale::ZhHans) => "添加当前组件交易对",
         (_, i18n::Locale::En) => "Add current widget pair",
     }
@@ -2801,6 +2894,10 @@ fn symbol_picker_empty_status_text(mode: i32, locale: i18n::Locale) -> &'static 
         (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::En) => {
             "No new-widget default pairs are available"
         }
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) => "没有可更换的当前组件交易对",
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) => {
+            "No current widget pairs are available to replace"
+        }
         (_, i18n::Locale::ZhHans) => "没有可添加的当前组件交易对",
         (_, i18n::Locale::En) => "No current widget pairs are available",
     }
@@ -2816,6 +2913,20 @@ fn symbol_picker_status_text(
     locale: i18n::Locale,
 ) -> String {
     match (mode, locale) {
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans)
+            if !query.trim().is_empty() && candidate_count == 0 =>
+        {
+            format!("没有匹配交易对")
+        }
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) if candidate_count == 0 => {
+            format!("没有可更换的交易对")
+        }
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) if fallback_only => {
+            format!("候选目录暂不可用，已使用本地候选，找到 {candidate_count} 个")
+        }
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) => {
+            format!("找到 {candidate_count} 个可更换交易对，会立即影响当前小组件")
+        }
         (_, i18n::Locale::ZhHans) if selected_count >= max => {
             format!("已选 {selected_count}/{max}，已达上限，先移除一个交易对")
         }
@@ -2833,6 +2944,20 @@ fn symbol_picker_status_text(
         }
         (_, i18n::Locale::ZhHans) => {
             format!("找到 {candidate_count} 个可添加交易对，会立即影响当前小组件")
+        }
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En)
+            if !query.trim().is_empty() && candidate_count == 0 =>
+        {
+            format!("No matching pairs")
+        }
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) if candidate_count == 0 => {
+            format!("No pairs available to replace")
+        }
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) if fallback_only => {
+            format!("Catalog is unavailable; using local candidates. Found {candidate_count}")
+        }
+        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) => {
+            format!("Found {candidate_count} replacement pairs. Applies to this widget immediately")
         }
         (_, i18n::Locale::En) if selected_count >= max => {
             format!("Selected {selected_count}/{max}. Limit reached; remove one pair first")
@@ -3142,6 +3267,25 @@ mod tests {
     }
 
     #[test]
+    fn widget_symbol_chip_click_replaces_and_x_removes() {
+        let source = settings_window_ui_source();
+        let chips = block_after_anchor(
+            &source,
+            "for symbol[index] in root.widget-symbol-chip-values : Rectangle {",
+            "",
+        );
+
+        assert!(
+            chips.contains("root.open-widget-symbol-replace-picker(index);"),
+            "clicking the body of a widget symbol chip should open replacement"
+        );
+        assert!(
+            chips.contains("root.remove-widget-symbol(root.selected-widget-index, index);"),
+            "the chip x hit area should keep removing symbols"
+        );
+    }
+
+    #[test]
     fn widget_symbol_chip_layout_keeps_max_symbols_in_one_row() {
         let labels = vec![
             "BTC/USDT · Binance · Bitcoin".to_string(),
@@ -3393,6 +3537,41 @@ mod tests {
             widget.symbols,
             vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
         );
+        assert_eq!(widget.layout.width, expected_size.width);
+        assert_eq!(widget.layout.height, expected_size.height);
+        assert_eq!(
+            widget_scale_percent_for_definitions(widget, &definitions),
+            150
+        );
+        let _ = std::fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn replace_widget_symbol_allows_single_symbol_widget_at_limit() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let definitions = widget_definitions_from_catalog(&catalog);
+        let mut widget = test_widget(
+            "mini-ticker-1",
+            WidgetType::MiniTicker.plugin_id(),
+            vec!["BTC"],
+        );
+        settings::resize_widget_to_content(&mut widget, &definitions, 150);
+        let state_path = temp_state_path("mini-ticker-symbol-replace");
+        let layouts = Rc::new(RefCell::new(LayoutStore {
+            selected_widget_id: Some("mini-ticker-1".to_string()),
+            widgets: vec![widget],
+            ..LayoutStore::default()
+        }));
+
+        replace_widget_symbol_in_store(&layouts, &state_path, 0, 0, "ETH", &catalog).unwrap();
+
+        let store = layouts.borrow();
+        let widget = &store.widgets[0];
+        let expected_size = settings::widget_size_from_scale_percent(
+            settings::default_widget_size_for_instance(widget, &definitions),
+            150,
+        );
+        assert_eq!(widget.symbols, vec!["binance:spot:ETH/USDT"]);
         assert_eq!(widget.layout.width, expected_size.width);
         assert_eq!(widget.layout.height, expected_size.height);
         assert_eq!(
@@ -3701,6 +3880,18 @@ mod tests {
                 i18n::Locale::En,
             ),
             "Selected 2/5. No matching pairs"
+        );
+        assert_eq!(
+            symbol_picker_status_text(
+                SYMBOL_PICKER_MODE_WIDGET_REPLACE,
+                1,
+                1,
+                4,
+                "",
+                false,
+                i18n::Locale::ZhHans,
+            ),
+            "找到 4 个可更换交易对，会立即影响当前小组件"
         );
     }
 

@@ -54,12 +54,12 @@ pub fn resolve_theme(preference: ThemePreference) -> ResolvedTheme {
 
 fn dark_palette() -> ThemePalette {
     ThemePalette {
-        widget_card_background: rgba(0xf4, 0x11, 0x18, 0x27),
-        widget_header_background: rgba(0xee, 0x0f, 0x17, 0x2a),
-        widget_border_color: rgba(0x55, 0x38, 0xbd, 0xf8),
+        widget_card_background: rgba(0xf6, 0x0f, 0x17, 0x26),
+        widget_header_background: rgba(0xee, 0x0d, 0x1a, 0x2d),
+        widget_border_color: rgba(0xa0, 0x0e, 0xa5, 0xe9),
         widget_primary_text_color: rgb(0xf8, 0xfa, 0xfc),
-        widget_source_text_color: rgb(0x93, 0xc5, 0xfd),
-        widget_updated_text_color: rgb(0x94, 0xa3, 0xb8),
+        widget_source_text_color: rgb(0x67, 0xd8, 0xff),
+        widget_updated_text_color: rgb(0x9d, 0xb2, 0xce),
         settings_background: rgb(0x12, 0x14, 0x13),
         settings_heading_color: rgb(0xf1, 0xf4, 0xf2),
         settings_label_color: rgb(0xe7, 0xec, 0xea),
@@ -86,12 +86,12 @@ fn dark_palette() -> ThemePalette {
 
 fn light_palette() -> ThemePalette {
     ThemePalette {
-        widget_card_background: rgba(0xfa, 0xf8, 0xfa, 0xfc),
-        widget_header_background: rgba(0xe8, 0xe0, 0xf2, 0xfe),
-        widget_border_color: rgba(0x66, 0x02, 0x84, 0xc7),
-        widget_primary_text_color: rgb(0x0f, 0x17, 0x2a),
+        widget_card_background: rgba(0xfa, 0xf8, 0xfb, 0xff),
+        widget_header_background: rgba(0xed, 0xea, 0xf7, 0xff),
+        widget_border_color: rgba(0x80, 0x0e, 0xa5, 0xe9),
+        widget_primary_text_color: rgb(0x07, 0x14, 0x26),
         widget_source_text_color: rgb(0x03, 0x69, 0xa1),
-        widget_updated_text_color: rgb(0x47, 0x55, 0x69),
+        widget_updated_text_color: rgb(0x64, 0x74, 0x8b),
         settings_background: rgb(0xfc, 0xfc, 0xfa),
         settings_heading_color: rgb(0x15, 0x18, 0x1b),
         settings_label_color: rgb(0x22, 0x27, 0x2c),

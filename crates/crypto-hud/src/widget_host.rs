@@ -491,7 +491,9 @@ mod tests {
             "compact mini ticker should not reserve the quote board header"
         );
         assert!(
-            source.contains("y: root.s(root.compact-mode ? 16px : 32px + index * 31px);"),
+            source.contains(
+                "y: root.compact-mode ? root.s(16px) : root.quote-board-row-start-y + root.s(index * 26px);"
+            ),
             "compact mini ticker should use its own row y offset"
         );
         assert!(
@@ -515,7 +517,7 @@ mod tests {
             "compact quote board width should be the unscaled quote board scale basis"
         );
         assert!(
-            source.contains("root.quote-icon-space-visible ? 27px : 5px"),
+            source.contains("root.quote-icon-space-visible ? 25px : 4px"),
             "hidden quote icons should not reserve their original symbol offset"
         );
         assert!(
@@ -528,7 +530,7 @@ mod tests {
         );
         assert!(
             source.contains(
-                "quote-board-change-x: root.quote-board-price-x + root.quote-board-price-width + root.s(4px)"
+                "quote-board-change-x: root.quote-board-row-width - root.quote-board-change-width"
             ),
             "change column should follow the compacted price column"
         );
