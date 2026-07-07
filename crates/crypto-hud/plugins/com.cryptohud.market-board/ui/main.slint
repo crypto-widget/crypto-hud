@@ -262,7 +262,7 @@ export component MarketBoard inherits Window {
             background: root.layout-locked || lock_button_hit_area.has-hover ? root.card-header-background : root.card-background;
             border-width: 1px;
             border-color: root.card-border-color;
-            visible: root.layout-locked || drag_area.has-hover || lock_button_hit_area.has-hover;
+            visible: drag_area.has-hover || lock_button_hit_area.has-hover;
 
             Path {
                 x: 4px;

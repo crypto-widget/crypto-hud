@@ -36,6 +36,10 @@ pub(super) fn int_model(values: Vec<i32>) -> ModelRc<i32> {
     ModelRc::new(VecModel::from(values))
 }
 
+pub(super) fn image_model(values: Vec<Image>) -> ModelRc<Image> {
+    ModelRc::new(VecModel::from(values))
+}
+
 pub(super) fn widget_instance_options(
     store: &LayoutStore,
     locale: i18n::Locale,
@@ -109,6 +113,55 @@ pub(super) fn widget_preview_kind_options(store: &LayoutStore) -> Vec<i32> {
         .iter()
         .map(|widget| plugin_preview_kind(&widget.plugin_id))
         .collect()
+}
+
+pub(super) struct WidgetPreviewImageOptions {
+    pub counts: Vec<i32>,
+    pub image_1: Vec<Image>,
+    pub image_2: Vec<Image>,
+    pub image_3: Vec<Image>,
+    pub image_4: Vec<Image>,
+    pub image_5: Vec<Image>,
+}
+
+pub(super) fn widget_preview_image_options(
+    store: &LayoutStore,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> WidgetPreviewImageOptions {
+    let previews = store
+        .widgets
+        .iter()
+        .map(|widget| {
+            plugin_catalog
+                .find(&widget.plugin_id)
+                .map(plugin_preview_images)
+                .unwrap_or_else(empty_preview_images)
+        })
+        .collect::<Vec<_>>();
+
+    WidgetPreviewImageOptions {
+        counts: previews.iter().map(|preview| preview.count).collect(),
+        image_1: previews
+            .iter()
+            .map(|preview| preview.images[0].clone())
+            .collect(),
+        image_2: previews
+            .iter()
+            .map(|preview| preview.images[1].clone())
+            .collect(),
+        image_3: previews
+            .iter()
+            .map(|preview| preview.images[2].clone())
+            .collect(),
+        image_4: previews
+            .iter()
+            .map(|preview| preview.images[3].clone())
+            .collect(),
+        image_5: previews
+            .iter()
+            .map(|preview| preview.images[4].clone())
+            .collect(),
+    }
 }
 
 pub(super) fn widget_scale_options(
@@ -203,6 +256,13 @@ pub(crate) fn plugin_market_item(
 struct PreviewImages {
     count: i32,
     images: [Image; plugin::MAX_PREVIEW_IMAGES],
+}
+
+fn empty_preview_images() -> PreviewImages {
+    PreviewImages {
+        count: 0,
+        images: std::array::from_fn(|_| Image::default()),
+    }
 }
 
 fn plugin_preview_images(definition: &plugin::PluginDefinition) -> PreviewImages {

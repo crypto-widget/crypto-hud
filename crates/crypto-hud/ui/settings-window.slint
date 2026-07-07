@@ -235,6 +235,91 @@ component SettingsSmallButton inherits Rectangle {
     }
 }
 
+component GithubProjectSignature inherits Rectangle {
+    in property <string> project-name;
+    in property <string> version-text;
+    in property <string> status-text;
+    in property <color> label-color;
+    in property <color> muted-color;
+    in property <color> accent-color;
+    callback clicked();
+
+    property <bool> has-status: root.status-text != "";
+    property <color> active-label-color: signature_touch.has-hover ? root.accent-color : root.label-color;
+    property <length> lockup-width: root.has-status ? root.width : 96px;
+    property <length> lockup-x: (root.width - root.lockup-width) / 2;
+    property <length> lockup-y: (root.height - 32px) / 2;
+
+    background: transparent;
+
+    Path {
+        x: root.lockup-x;
+        y: root.lockup-y + 6px;
+        width: 19px;
+        height: 19px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: "M 8 0 C 3.58 0 0 3.58 0 8 C 0 11.54 2.29 14.53 5.47 15.59 C 5.87 15.66 6.02 15.42 6.02 15.21 C 6.02 15.02 6.01 14.39 6.01 13.72 C 4 14.09 3.48 13.23 3.32 12.78 C 3.23 12.55 2.84 11.84 2.5 11.65 C 2.22 11.5 1.82 11.13 2.49 11.12 C 3.12 11.11 3.57 11.7 3.72 11.94 C 4.44 13.15 5.59 12.81 6.05 12.6 C 6.12 12.08 6.33 11.73 6.56 11.53 C 4.78 11.33 2.92 10.64 2.92 7.58 C 2.92 6.71 3.23 5.99 3.74 5.43 C 3.66 5.23 3.38 4.41 3.82 3.31 C 3.82 3.31 4.49 3.1 6.02 4.13 C 6.66 3.95 7.34 3.86 8.02 3.86 C 8.7 3.86 9.38 3.95 10.02 4.13 C 11.55 3.09 12.22 3.31 12.22 3.31 C 12.66 4.41 12.38 5.23 12.3 5.43 C 12.81 5.99 13.12 6.7 13.12 7.58 C 13.12 10.65 11.25 11.33 9.47 11.53 C 9.76 11.78 10.01 12.26 10.01 13.01 C 10.01 14.08 10 14.94 10 15.21 C 10 15.42 10.15 15.67 10.55 15.59 C 13.71 14.53 16 11.53 16 8 C 16 3.58 12.42 0 8 0 Z";
+        fill: root.active-label-color;
+        stroke: transparent;
+    }
+
+    Text {
+        x: root.lockup-x + 29px;
+        y: root.lockup-y + 2px;
+        width: root.lockup-width - 29px;
+        height: 14px;
+        text: root.project-name;
+        color: root.active-label-color;
+        font-size: 11px;
+        font-weight: 800;
+        overflow: elide;
+    }
+
+    Text {
+        x: root.lockup-x + 29px;
+        y: root.lockup-y + 20px;
+        width: root.has-status ? 47px : root.lockup-width - 29px;
+        height: 12px;
+        text: "v" + root.version-text;
+        color: root.muted-color;
+        font-size: 9px;
+        font-weight: 600;
+        overflow: elide;
+    }
+
+    Rectangle {
+        x: root.lockup-x + 83px;
+        y: root.lockup-y + 25px;
+        width: 4px;
+        height: 4px;
+        border-radius: 2px;
+        background: root.accent-color;
+        visible: root.has-status;
+    }
+
+    Text {
+        x: root.lockup-x + 93px;
+        y: root.lockup-y + 20px;
+        width: root.lockup-width - 93px;
+        height: 12px;
+        text: root.status-text;
+        color: root.muted-color;
+        font-size: 9px;
+        font-weight: 600;
+        horizontal-alignment: right;
+        overflow: elide;
+        visible: root.has-status;
+    }
+
+    signature_touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 component PluginPreviewCarousel inherits Rectangle {
     in property <PluginMarketItem> plugin;
     in property <color> surface-color;
@@ -323,6 +408,102 @@ component PluginPreviewCarousel inherits Rectangle {
     }
 }
 
+component WidgetListPreviewCarousel inherits Rectangle {
+    in property <int> image-count;
+    in property <image> preview-image-a;
+    in property <image> preview-image-b;
+    in property <image> preview-image-c;
+    in property <image> preview-image-d;
+    in property <image> preview-image-e;
+    in property <int> frame-index;
+    in property <color> surface-color;
+    in property <color> preview-border-color;
+    in property <color> muted-color;
+    in property <color> accent-color;
+    in property <color> fallback-background;
+    in property <color> fallback-text-color;
+
+    property <int> preview-count: root.image-count < 5 ? root.image-count : 5;
+    property <int> active-index: root.preview-count <= 0 ? 0 : Math.mod(root.frame-index, root.preview-count);
+
+    border-radius: 4px;
+    background: root.surface-color;
+    border-width: 1px;
+    border-color: root.preview-border-color;
+    clip: true;
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.preview-image-a;
+        image-fit: contain;
+        visible: root.preview-count > 0 && root.active-index == 0;
+    }
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.preview-image-b;
+        image-fit: contain;
+        visible: root.preview-count > 1 && root.active-index == 1;
+    }
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.preview-image-c;
+        image-fit: contain;
+        visible: root.preview-count > 2 && root.active-index == 2;
+    }
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.preview-image-d;
+        image-fit: contain;
+        visible: root.preview-count > 3 && root.active-index == 3;
+    }
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.preview-image-e;
+        image-fit: contain;
+        visible: root.preview-count > 4 && root.active-index == 4;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: root.fallback-background;
+        visible: root.preview-count <= 0;
+
+        Text {
+            x: 7px;
+            y: 16px;
+            width: parent.width - 14px;
+            height: 12px;
+            text: "HUD";
+            color: root.fallback-text-color;
+            font-size: 8px;
+            font-weight: 800;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    for dot[index] in 5 : Rectangle {
+        x: parent.width - root.preview-count * 6px + index * 6px - 2px;
+        y: parent.height - 7px;
+        width: 3px;
+        height: 3px;
+        border-radius: 1px;
+        background: index == root.active-index ? root.accent-color : root.muted-color;
+        visible: root.preview-count > 1 && index < root.preview-count;
+    }
+}
+
 export component SettingsWindow inherits Window {
     property <length> settings-design-width: 1120px;
     property <length> settings-design-height: 720px;
@@ -376,6 +557,13 @@ export component SettingsWindow inherits Window {
     in property <[string]> widget-list-detail-options;
     in property <[bool]> widget-visible-options;
     in property <[int]> widget-preview-kinds;
+    in property <[int]> widget-preview-image-counts;
+    in property <[image]> widget-preview-image-1-options;
+    in property <[image]> widget-preview-image-2-options;
+    in property <[image]> widget-preview-image-3-options;
+    in property <[image]> widget-preview-image-4-options;
+    in property <[image]> widget-preview-image-5-options;
+    in property <[int]> widget-preview-frame-indices;
     in property <[int]> widget-scale-options;
     in property <[int]> widget-scale-min-options;
     in property <[int]> widget-scale-max-options;
@@ -701,7 +889,7 @@ export component SettingsWindow inherits Window {
                 y: 17px;
                 width: 19px;
                 height: 19px;
-                source: @image-url("icon.png");
+                source: @image-url("icon-small.png");
                 image-fit: contain;
             }
 
@@ -857,46 +1045,24 @@ export component SettingsWindow inherits Window {
 
             Rectangle {
                 x: 6px;
-                y: parent.height - 59px;
+                y: parent.height - 65px;
                 width: parent.width - 17px;
                 height: 1px;
                 background: root.settings-divider-color;
             }
 
-            Text {
-                x: 19px;
-                y: parent.height - 40px;
-                width: root.status-text == "" ? parent.width - 38px : 53px;
-                height: 15px;
-                text: "v" + root.app-version-value-text;
-                color: root.settings-muted-color;
-                font-size: 11px;
-                font-weight: 500;
-                horizontal-alignment: center;
-                overflow: elide;
-            }
-
-            Rectangle {
-                x: 106px;
-                y: parent.height - 34px;
-                width: 4px;
-                height: 4px;
-                border-radius: 2px;
-                background: root.settings-accent-color;
-                visible: root.status-text != "";
-            }
-
-            Text {
-                x: 119px;
-                y: parent.height - 39px;
-                width: 44px;
-                height: 13px;
-                text: root.status-text;
-                color: root.settings-muted-color;
-                font-size: 10px;
-                font-weight: 500;
-                overflow: elide;
-                visible: root.status-text != "";
+            GithubProjectSignature {
+                x: 6px;
+                y: parent.height - 51px;
+                width: parent.width - 17px;
+                height: 36px;
+                project-name: "crypto-hud";
+                version-text: root.app-version-value-text;
+                status-text: root.status-text;
+                label-color: root.settings-heading-color;
+                muted-color: root.settings-muted-color;
+                accent-color: root.settings-accent-color;
+                clicked => { root.open-about-link(); }
             }
 
         }
@@ -961,8 +1127,28 @@ export component SettingsWindow inherits Window {
                         border-radius: 4px;
                         background: root.selected-widget-index == index ? root.settings-selected-background : list_row_touch.has-hover ? root.settings-content-background : transparent;
 
+                        WidgetListPreviewCarousel {
+                            x: 58px;
+                            y: 10px;
+                            width: 64px;
+                            height: 46px;
+                            image-count: root.widget-preview-image-counts[index];
+                            preview-image-a: root.widget-preview-image-1-options[index];
+                            preview-image-b: root.widget-preview-image-2-options[index];
+                            preview-image-c: root.widget-preview-image-3-options[index];
+                            preview-image-d: root.widget-preview-image-4-options[index];
+                            preview-image-e: root.widget-preview-image-5-options[index];
+                            frame-index: root.widget-preview-frame-indices[index];
+                            surface-color: root.settings-surface-background;
+                            preview-border-color: root.settings-border-color;
+                            muted-color: root.settings-muted-color;
+                            accent-color: root.settings-accent-color;
+                            fallback-background: root.settings-content-background;
+                            fallback-text-color: root.settings-muted-color;
+                        }
+
                         Rectangle {
-                            x: 47px;
+                            x: 14px;
                             y: 24px;
                             width: 34px;
                             height: 19px;
@@ -990,9 +1176,9 @@ export component SettingsWindow inherits Window {
                         }
 
                         Text {
-                            x: 97px;
+                            x: 136px;
                             y: 19px;
-                            width: 247px;
+                            width: 211px;
                             height: 13px;
                             text: widget_label;
                             color: root.widget-visible-options[index] ? root.settings-label-color : root.settings-muted-color;
@@ -1002,9 +1188,9 @@ export component SettingsWindow inherits Window {
                         }
 
                         Text {
-                            x: 97px;
+                            x: 136px;
                             y: 40px;
-                            width: 247px;
+                            width: 211px;
                             height: 11px;
                             text: root.widget-list-detail-options[index];
                             color: root.settings-muted-color;
@@ -1044,9 +1230,9 @@ export component SettingsWindow inherits Window {
                         }
 
                         list_row_touch := TouchArea {
-                            x: 90px;
+                            x: 130px;
                             y: 0px;
-                            width: 193px;
+                            width: 222px;
                             height: 60px;
                             mouse-cursor: pointer;
                             clicked => {
@@ -2187,7 +2373,7 @@ export component SettingsWindow inherits Window {
                 x: 17px;
                 y: 66px;
                 width: market_tab.width - 34px;
-                height: 182px;
+                height: 226px;
                 border-radius: 6px;
                 background: root.settings-surface-background;
                 border-width: 1px;
@@ -2197,14 +2383,14 @@ export component SettingsWindow inherits Window {
                     x: 17px;
                     y: 13px;
                     width: parent.width - 34px;
-                    title: root.market-provider-text;
+                    title: root.tab-market-data-text;
                     title-color: root.settings-heading-color;
                     divider-color: root.settings-divider-color;
                 }
 
                 Rectangle {
                     x: 0px;
-                    y: 93px;
+                    y: 126px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -2212,26 +2398,25 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: 138px;
+                    y: 171px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
                 }
 
-                Text {
+                SettingLabel {
                     x: 17px;
                     y: 54px;
                     width: 301px;
-                    height: 31px;
-                    text: root.market-provider-help-text;
-                    color: root.settings-muted-color;
-                    font-size: 11px;
-                    wrap: word-wrap;
+                    label: root.market-provider-text;
+                    help: root.market-provider-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
                 }
 
                 SettingSwitch {
-                    x: parent.width - 488px;
-                    y: 56px;
+                    x: 17px;
+                    y: 94px;
                     checked <=> root.market-binance-enabled;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
@@ -2243,8 +2428,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 Text {
-                    x: parent.width - 442px;
-                    y: 61px;
+                    x: 63px;
+                    y: 99px;
                     width: 60px;
                     text: "Binance";
                     color: root.settings-label-color;
@@ -2254,8 +2439,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingSwitch {
-                    x: parent.width - 368px;
-                    y: 56px;
+                    x: 139px;
+                    y: 94px;
                     checked <=> root.market-coinbase-enabled;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
@@ -2267,8 +2452,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 Text {
-                    x: parent.width - 322px;
-                    y: 61px;
+                    x: 185px;
+                    y: 99px;
                     width: 72px;
                     text: "Coinbase";
                     color: root.settings-label-color;
@@ -2278,8 +2463,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingSwitch {
-                    x: parent.width - 236px;
-                    y: 56px;
+                    x: 281px;
+                    y: 94px;
                     checked <=> root.market-okx-enabled;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
@@ -2291,8 +2476,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 Text {
-                    x: parent.width - 190px;
-                    y: 61px;
+                    x: 327px;
+                    y: 99px;
                     width: 40px;
                     text: "OKX";
                     color: root.settings-label-color;
@@ -2302,8 +2487,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingSwitch {
-                    x: parent.width - 136px;
-                    y: 56px;
+                    x: 379px;
+                    y: 94px;
                     checked <=> root.market-hyperliquid-enabled;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
@@ -2315,8 +2500,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 Text {
-                    x: parent.width - 90px;
-                    y: 61px;
+                    x: 425px;
+                    y: 99px;
                     width: 82px;
                     text: "Hyperliquid";
                     color: root.settings-label-color;
@@ -2327,7 +2512,7 @@ export component SettingsWindow inherits Window {
 
                 SettingLabel {
                     x: 17px;
-                    y: 99px;
+                    y: 132px;
                     width: 301px;
                     label: root.refresh-interval-text;
                     help: root.refresh-interval-help-text;
@@ -2336,8 +2521,8 @@ export component SettingsWindow inherits Window {
                 }
 
                 PercentStepper {
-                    x: parent.width - 252px;
-                    y: 97px;
+                    x: parent.width - 207px;
+                    y: 130px;
                     width: 150px;
                     height: 34px;
                     enabled: true;
@@ -2354,9 +2539,9 @@ export component SettingsWindow inherits Window {
                 }
 
                 Text {
-                    x: parent.width - 94px;
-                    y: 108px;
-                    width: 76px;
+                    x: parent.width - 49px;
+                    y: 141px;
+                    width: 32px;
                     text: root.seconds-unit-text;
                     color: root.settings-muted-color;
                     font-size: 9px;
@@ -2366,7 +2551,7 @@ export component SettingsWindow inherits Window {
 
                 SettingLabel {
                     x: 17px;
-                    y: 143px;
+                    y: 177px;
                     width: 301px;
                     label: root.market-fallback-text;
                     help: root.market-fallback-help-text;
@@ -2376,7 +2561,7 @@ export component SettingsWindow inherits Window {
 
                 SettingSwitch {
                     x: parent.width - 54px;
-                    y: 142px;
+                    y: 176px;
                     checked <=> root.market-fallback-enabled;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
@@ -2386,7 +2571,7 @@ export component SettingsWindow inherits Window {
 
                 TouchArea {
                     x: 17px;
-                    y: 138px;
+                    y: 172px;
                     width: parent.width - 88px;
                     height: 42px;
                     clicked => {
@@ -2398,7 +2583,7 @@ export component SettingsWindow inherits Window {
 
             Rectangle {
                 x: 17px;
-                y: 262px;
+                y: 306px;
                 width: market_tab.width - 34px;
                 height: 104px;
                 border-radius: 6px;

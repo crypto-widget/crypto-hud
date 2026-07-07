@@ -301,7 +301,7 @@ export component TrustCard inherits Window {
             background: root.layout-locked || lock_touch.has-hover ? #07111dcc : transparent;
             border-width: root.s(1px);
             border-color: root.layout-locked || lock_touch.has-hover ? #ffffff66 : transparent;
-            visible: root.layout-locked || drag_area.has-hover || lock_touch.has-hover;
+            visible: drag_area.has-hover || lock_touch.has-hover;
 
             Path {
                 x: root.s(5px);

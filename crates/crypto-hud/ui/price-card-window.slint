@@ -326,7 +326,7 @@ export component PriceCardWindow inherits Window {
             background: root.layout-locked ? root.lock-button-hover-background : (lock_button_hit_area.has-hover ? root.lock-button-background : transparent);
             border-width: root.s(1px);
             border-color: root.layout-locked || lock_button_hit_area.has-hover ? root.lock-button-border-color : transparent;
-            visible: root.layout-locked || drag_area.has-hover || lock_button_hit_area.has-hover;
+            visible: drag_area.has-hover || lock_button_hit_area.has-hover;
 
             Path {
                 x: root.s(root.compact-mode ? 7px : 4px);

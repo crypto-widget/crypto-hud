@@ -53,10 +53,10 @@ use settings_actions::{
 };
 pub(crate) use settings_models::widget_type_usage_text;
 use settings_models::{
-    bool_model, int_model, owned_string_model, plugin_market_items_model, string_model,
-    widget_instance_detail_options, widget_instance_options, widget_preview_kind_options,
-    widget_scale_max_options, widget_scale_min_options, widget_scale_options,
-    widget_visibility_options,
+    bool_model, image_model, int_model, owned_string_model, plugin_market_items_model,
+    string_model, widget_instance_detail_options, widget_instance_options,
+    widget_preview_image_options, widget_preview_kind_options, widget_scale_max_options,
+    widget_scale_min_options, widget_scale_options, widget_visibility_options,
 };
 use settings_theme::apply_theme_to_settings_window;
 
@@ -384,6 +384,8 @@ pub(crate) fn install_preview_carousel_timer(
     let timer = Timer::default();
     let schedules = Rc::new(RefCell::new(Vec::<PreviewCarouselSchedule>::new()));
     let random_seed = Rc::new(RefCell::new(preview_carousel_seed()));
+    let widget_preview_schedules = Rc::new(RefCell::new(Vec::<PreviewCarouselSchedule>::new()));
+    let widget_preview_random_seed = Rc::new(RefCell::new(preview_carousel_seed()));
 
     timer.start(
         TimerMode::Repeated,
@@ -414,6 +416,36 @@ pub(crate) fn install_preview_carousel_timer(
 
                     item.preview_frame_index = (item.preview_frame_index + 1) % 10_000;
                     items.set_row_data(row, item);
+                }
+
+                let widget_preview_counts = ui.get_widget_preview_image_counts();
+                let widget_preview_indices = ui.get_widget_preview_frame_indices();
+                let widget_row_count = widget_preview_counts
+                    .row_count()
+                    .min(widget_preview_indices.row_count());
+                let mut widget_preview_schedules = widget_preview_schedules.borrow_mut();
+                let mut widget_preview_random_seed = widget_preview_random_seed.borrow_mut();
+                sync_preview_carousel_schedules(
+                    &mut widget_preview_schedules,
+                    widget_row_count,
+                    now,
+                    &mut *widget_preview_random_seed,
+                );
+
+                for row in 0..widget_row_count {
+                    if now < widget_preview_schedules[row].next_switch_at {
+                        continue;
+                    }
+
+                    widget_preview_schedules[row].next_switch_at =
+                        now + preview_carousel_interval(&mut widget_preview_schedules[row].seed);
+
+                    if widget_preview_counts.row_data(row).unwrap_or_default() <= 1 {
+                        continue;
+                    }
+
+                    let frame_index = widget_preview_indices.row_data(row).unwrap_or_default();
+                    widget_preview_indices.set_row_data(row, (frame_index + 1) % 10_000);
                 }
             }
         },
@@ -2664,6 +2696,14 @@ pub(crate) fn refresh_settings_window(
     )));
     ui.set_widget_visible_options(bool_model(widget_visibility_options(&store)));
     ui.set_widget_preview_kinds(int_model(widget_preview_kind_options(&store)));
+    let widget_preview_images = widget_preview_image_options(&store, plugin_catalog);
+    ui.set_widget_preview_image_counts(int_model(widget_preview_images.counts));
+    ui.set_widget_preview_image_1_options(image_model(widget_preview_images.image_1));
+    ui.set_widget_preview_image_2_options(image_model(widget_preview_images.image_2));
+    ui.set_widget_preview_image_3_options(image_model(widget_preview_images.image_3));
+    ui.set_widget_preview_image_4_options(image_model(widget_preview_images.image_4));
+    ui.set_widget_preview_image_5_options(image_model(widget_preview_images.image_5));
+    ui.set_widget_preview_frame_indices(int_model(vec![0; store.widgets.len()]));
     ui.set_widget_scale_options(int_model(widget_scale_options(&store, plugin_catalog)));
     ui.set_widget_scale_min_options(int_model(widget_scale_min_options(&store, plugin_catalog)));
     ui.set_widget_scale_max_options(int_model(widget_scale_max_options(&store, plugin_catalog)));

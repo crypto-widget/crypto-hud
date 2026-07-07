@@ -33,6 +33,11 @@ const DISABLED_PROTOTYPE_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.orbit-pulse",
     "com.example.stage3-price-card",
 ];
+const BUNDLED_BUILTIN_SLINT_PLUGIN_IDS: &[&str] = &[
+    "com.cryptohud.focus-ticker",
+    "com.cryptohud.trust-card",
+    "com.cryptohud.status-strip",
+];
 #[cfg(test)]
 const HOST_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.focus-ticker",
@@ -356,6 +361,14 @@ fn load_local_plugin(root: &Path) -> Result<PluginDefinition> {
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
     let mut plugin = manifest_to_definition(manifest, root)?;
     let prototype_plugin = is_prototype_plugin(&plugin.id);
+    let bundled_builtin_slint_plugin = matches!(
+        &plugin.renderer,
+        PluginRendererDefinition::Slint { root_dir, .. }
+            if is_bundled_builtin_slint_plugin(&plugin.id, root_dir)
+    );
+    if bundled_builtin_slint_plugin {
+        plugin.source = PluginSource::Builtin;
+    }
 
     if let PluginRendererDefinition::Slint {
         root_dir,
@@ -380,6 +393,18 @@ fn load_local_plugin(root: &Path) -> Result<PluginDefinition> {
     }
 
     Ok(plugin)
+}
+
+fn is_bundled_builtin_slint_plugin(plugin_id: &str, root_dir: &Path) -> bool {
+    if !BUNDLED_BUILTIN_SLINT_PLUGIN_IDS.contains(&plugin_id) {
+        return false;
+    }
+
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("plugins")
+        .canonicalize()
+        .map(|bundled_plugin_root| root_dir.starts_with(bundled_plugin_root))
+        .unwrap_or(false)
 }
 
 pub fn manifest_to_definition(
@@ -792,6 +817,52 @@ export component ExamplePriceCard inherits Window {
         assert!(!market_ids.contains(&"com.cryptohud.market-compass"));
         assert!(!market_ids.contains(&"com.cryptohud.orbit-pulse"));
         assert!(!market_ids.contains(&"com.example.stage3-price-card"));
+    }
+
+    #[test]
+    fn current_market_widgets_are_marked_builtin() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+
+        let catalog = PluginCatalog::discover(vec![root]);
+
+        for plugin_id in [
+            BUILTIN_QUOTE_BOARD_PLUGIN_ID,
+            "com.cryptohud.focus-ticker",
+            "com.cryptohud.trust-card",
+            "com.cryptohud.status-strip",
+        ] {
+            let plugin = catalog
+                .find(plugin_id)
+                .expect("current market widget should be registered");
+            assert!(plugin.is_available(), "{plugin_id} should be available");
+            assert_eq!(
+                plugin.source,
+                PluginSource::Builtin,
+                "{plugin_id} should be treated as built-in"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_builtin_id_outside_repo_plugins_stays_local() {
+        let root = temp_plugin_root("bundled-builtin-id-outside-repo-plugins-stays-local");
+        let plugin_dir = root.join("com.cryptohud.focus-ticker");
+        fs::create_dir_all(plugin_dir.join("ui")).unwrap();
+        fs::write(
+            plugin_dir.join(MANIFEST_FILE_NAME),
+            valid_manifest_json().replace("com.example.price-card", "com.cryptohud.focus-ticker"),
+        )
+        .unwrap();
+        fs::write(
+            plugin_dir.join("ui").join("main.slint"),
+            valid_slint_source(),
+        )
+        .unwrap();
+
+        let plugin = load_local_plugin(&plugin_dir).unwrap();
+
+        assert_eq!(plugin.source, PluginSource::LocalUnsigned);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
