@@ -41,6 +41,7 @@ fn widget_definition_from_plugin(plugin: &plugin::PluginDefinition) -> WidgetDef
         size_policy: widget_size_policy_from_plugin(plugin.size_policy),
         min_symbol_limit: plugin.min_symbol_limit,
         symbol_limit: plugin.symbol_limit,
+        default_symbols: plugin.default_symbols.clone(),
     }
 }
 

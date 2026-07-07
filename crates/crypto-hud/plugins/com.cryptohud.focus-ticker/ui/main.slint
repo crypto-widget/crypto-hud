@@ -8,8 +8,11 @@ export struct QuoteRow {
 export component FocusTicker inherits Window {
     in property <string> widget-id;
     in property <[QuoteRow]> quote-rows;
+    in property <[image]> quote-icons;
+    property <image> empty-quote-icon;
     in property <string> pairs-heading-text;
     in property <string> source-text;
+    in property <string> source-name-text: root.source-text;
     in property <string> updated-text;
     in property <string> empty-text;
     in property <bool> pin-to-top;
@@ -20,32 +23,50 @@ export component FocusTicker inherits Window {
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
-    property <bool> light-theme: root.theme-name == "light";
-    property <color> card-background: root.light-theme ? #f8faf0f2 : #15212cf2;
-    property <color> card-header-background: root.light-theme ? #dff6f0dd : #0f172acc;
-    property <color> card-border-color: root.light-theme ? #0f8f82aa : #62e5f0c8;
-    property <color> card-primary-text-color: root.light-theme ? #0f172a : #f8fafc;
-    property <color> card-source-text-color: root.light-theme ? #0369a1 : #8f9aa8;
-    property <color> card-updated-text-color: root.light-theme ? #64748b : #8f9aa8;
-    property <color> gain-color: root.light-theme ? #16a34a : #45d980;
-    property <color> loss-color: root.light-theme ? #dc2626 : #ff6b76;
+    in property <bool> show-coin-logos: true;
     in property <string> chart-line-path;
     in property <string> chart-fill-path;
     in property <bool> chart-ready;
     in property <bool> chart-positive;
+    in property <int> chart-end-y-ratio;
     in-out property <bool> card-left-drag-active: false;
-    property <color> chart-color: root.chart-positive
-        ? (root.red-up-enabled ? root.loss-color : root.gain-color)
-        : (root.red-up-enabled ? root.gain-color : root.loss-color);
-    property <color> chart-glow-color: root.light-theme ? #16a34a4c : #22c55e55;
-    property <color> chart-fill-color: root.light-theme ? #16a34a2e : #22c55e2e;
+
+    property <bool> light-theme: root.theme-name == "light";
     property <float> content-scale: root.widget-scale;
+    property <length> card-width: 796px;
+    property <length> card-height: 120px;
+    property <bool> chart-uses-gain-color: root.chart-positive ? !root.red-up-enabled : root.red-up-enabled;
+    property <color> card-background: root.light-theme ? #f7fcfff6 : #07111bf6;
+    property <color> card-border-color: root.light-theme ? #139ccca6 : #4be9ffd8;
+    property <color> card-inner-border-color: root.light-theme ? #ffffffc6 : #c8fbff24;
+    property <color> card-primary-text-color: root.light-theme ? #071426 : #f8fbff;
+    property <color> card-source-text-color: root.light-theme ? #0f6f95 : #a9b8c9;
+    property <color> card-updated-text-color: root.light-theme ? #66788e : #8ea1b6;
+    property <color> divider-color: root.light-theme ? #7ea3ba78 : #9bc3d238;
+    property <color> gain-color: root.light-theme ? #118447 : #5ce37d;
+    property <color> loss-color: root.light-theme ? #ca2938 : #ff6f7e;
+    property <color> chart-color: root.chart-uses-gain-color ? root.gain-color : root.loss-color;
+    property <color> chart-fill-color: root.chart-uses-gain-color
+        ? (root.light-theme ? #16a34a18 : #22c55e20)
+        : (root.light-theme ? #dc262616 : #ff6f7e22);
+    property <color> chart-glow-color: root.chart-uses-gain-color
+        ? (root.light-theme ? #16a34a12 : #22c55e16)
+        : (root.light-theme ? #dc262610 : #ff6f7e18);
+    property <color> gain-pill-background: root.light-theme ? #dcfce7dc : #06381fee;
+    property <color> loss-pill-background: root.light-theme ? #fee2e2e6 : #421923ef;
+    property <color> gain-pill-border: root.light-theme ? #22c55e72 : #36d87882;
+    property <color> loss-pill-border: root.light-theme ? #ef444472 : #ff6f7e7e;
+    property <color> lock-button-background: root.light-theme ? #ffffffd8 : #0c1725d8;
+    property <color> lock-button-hover-background: root.light-theme ? #e6f7ffe8 : #12263be8;
+    property <color> lock-button-border-color: root.light-theme ? #82a9bd86 : #b8f8ff52;
+    property <color> lock-icon-color: root.light-theme ? #315064 : #b9d7e8;
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
     function s(value: length) -> length {
         return value * root.content-scale;
     }
+
     title: root.widget-id;
     width: root.widget-width * 1px;
     height: root.widget-height * 1px;
@@ -71,176 +92,328 @@ export component FocusTicker inherits Window {
         }
     }
 
+    card_shadow := Rectangle {
+        x: (root.widget-width * 1px - root.s(root.card-width)) / 2;
+        y: (root.widget-height * 1px - root.s(root.card-height)) / 2;
+        width: root.s(root.card-width);
+        height: root.s(root.card-height);
+        border-radius: root.s(18px);
+        background: transparent;
+        border-width: root.s(1px);
+        border-color: root.card-border-color;
+        opacity: root.content-opacity / 100;
+        drop-shadow-offset-y: root.s(root.light-theme ? 10px : 0px);
+        drop-shadow-blur: root.s(root.light-theme ? 22px : 24px);
+        drop-shadow-color: root.light-theme ? #0ea5e92d : #00d8ff63;
+    }
+
     card := Rectangle {
-        x: (root.widget-width * 1px - root.s(820px)) / 2 + root.s(20px);
-        y: (root.widget-height * 1px - root.s(156px)) / 2 + root.s(18px);
-        width: root.s(780px);
-        height: root.s(120px);
-        border-radius: root.s(16px);
+        x: card_shadow.x;
+        y: card_shadow.y;
+        width: card_shadow.width;
+        height: card_shadow.height;
+        border-radius: root.s(18px);
         background: root.card-background;
         border-width: root.s(1px);
         border-color: root.card-border-color;
         opacity: root.content-opacity / 100;
-        drop-shadow-offset-y: root.s(20px);
-        drop-shadow-blur: root.s(30px);
-        drop-shadow-color: #00000085;
         clip: true;
 
         Rectangle {
-            x: 0px;
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: parent.height - root.s(2px);
+            border-radius: root.s(17px);
+            background: @linear-gradient(120deg, #1b3145f4 0%, #0c1b2af2 36%, #07111bf6 68%, #050b12fa 100%);
+            visible: !root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: parent.height - root.s(2px);
+            border-radius: root.s(17px);
+            background: @linear-gradient(120deg, #fffffffb 0%, #eef9fffb 42%, #e7f2fbf4 74%, #f8fcfff4 100%);
+            visible: root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: root.s(316px);
+            height: parent.height - root.s(2px);
+            border-radius: root.s(17px);
+            background: @linear-gradient(115deg, #8fdfff30 0%, #4f9edc22 38%, #0d1d2c00 82%);
+            visible: !root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: root.s(316px);
+            height: parent.height - root.s(2px);
+            border-radius: root.s(17px);
+            background: @linear-gradient(115deg, #ffffffd8 0%, #d8f2ff86 45%, #eaf6ff00 86%);
+            visible: root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: root.s(42px);
+            border-radius: root.s(17px);
+            background: @linear-gradient(180deg, #ffffff14 0%, #ffffff06 42%, #ffffff00 100%);
+            visible: !root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: root.s(42px);
+            border-radius: root.s(17px);
+            background: @linear-gradient(180deg, #ffffffba 0%, #ffffff4c 46%, #ffffff00 100%);
+            visible: root.light-theme;
+        }
+
+        Rectangle {
+            x: parent.width * 0.68;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
-            border-radius: root.s(16px);
-            background: @linear-gradient(90deg, #ffffff11 0%, #ffffff07 30%, #ffffff02 56%, #ffffff00 100%);
+            width: root.s(28px);
+            height: root.s(2px);
+            border-radius: root.s(1px);
+            background: root.card-border-color;
         }
 
         Rectangle {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            height: root.s(72px);
-            border-radius: root.s(16px);
-            background: @linear-gradient(180deg, #ffffff12 0%, #ffffff06 24%, #00000000 58%, #0000001e 100%);
+            x: parent.width * 0.68;
+            y: parent.height - root.s(2px);
+            width: root.s(28px);
+            height: root.s(2px);
+            border-radius: root.s(1px);
+            background: root.card-border-color;
         }
 
         Rectangle {
-            x: parent.width * 0.52;
-            y: root.s(10px);
-            width: parent.width * 0.48 - root.s(18px);
-            height: parent.height - root.s(20px);
-            background: @linear-gradient(90deg, #00000000 0%, #00000000 54%, #00000016 84%, #0000002d 100%);
+            x: root.s(214px);
+            y: root.s(22px);
+            width: root.s(1px);
+            height: root.s(76px);
+            background: root.divider-color;
         }
 
         Rectangle {
-            x: 0px;
-            y: parent.height - root.s(40px);
-            width: parent.width;
-            height: root.s(38px);
-            border-radius: root.s(16px);
-            background: @linear-gradient(180deg, #00000000 0%, #00000000 66%, #0000003c 100%);
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: parent.height - root.s(2px);
+            border-radius: root.s(17px);
+            background: transparent;
+            border-width: root.s(1px);
+            border-color: root.card-inner-border-color;
         }
 
         for quote[index] in root.quote-rows : Rectangle {
+            x: 0px;
+            y: 0px;
             width: parent.width;
             height: parent.height;
             visible: index == 0;
 
+            coin_plate := Rectangle {
+                x: root.s(24px);
+                y: root.s(29px);
+                width: root.s(40px);
+                height: root.s(40px);
+                border-radius: root.s(20px);
+                background: root.light-theme ? #ffffffcc : #0b1624b8;
+                border-width: root.s(1px);
+                border-color: root.light-theme ? #ffffffd6 : #ffffff18;
+                drop-shadow-offset-y: root.s(6px);
+                drop-shadow-blur: root.s(12px);
+                drop-shadow-color: root.light-theme ? #0ea5e91c : #00000050;
+                visible: root.show-coin-logos && root.quote-icons.length > index;
+
+                Image {
+                    x: root.s(4px);
+                    y: root.s(4px);
+                    width: root.s(32px);
+                    height: root.s(32px);
+                    source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
+                    image-fit: contain;
+                }
+            }
+
             Text {
-                x: root.s(22px);
-                y: root.s(32px);
-                width: root.s(175px);
+                x: root.show-coin-logos && root.quote-icons.length > index ? root.s(68px) : root.s(26px);
+                y: root.s(31px);
+                width: root.show-coin-logos && root.quote-icons.length > index ? root.s(116px) : root.s(158px);
+                height: root.s(38px);
                 text: quote.symbol;
                 color: root.card-primary-text-color;
-                font-size: root.s(24px);
-                font-weight: 800;
+                font-size: root.s(19px);
+                font-weight: 900;
+                vertical-alignment: center;
                 overflow: elide;
-            }
-
-            Rectangle {
-                x: root.s(176px);
-                y: root.s(43px);
-                width: root.s(11px);
-                height: root.s(11px);
-                border-radius: root.s(5.5px);
-                background: root.gain-color;
-                drop-shadow-offset-y: 0px;
-                drop-shadow-blur: root.s(10px);
-                drop-shadow-color: #45d980aa;
             }
 
             Text {
-                x: root.s(22px);
-                y: root.s(83px);
-                width: root.s(178px);
-                text: root.source-text;
-                color: root.card-source-text-color;
-                font-size: root.s(17px);
-                font-weight: 500;
-                overflow: elide;
-            }
-
-            Rectangle {
-                x: root.s(212px);
+                x: root.s(28px);
                 y: root.s(82px);
-                width: root.s(1px);
-                height: root.s(20px);
-                background: root.light-theme ? #64748b66 : #8f9aa866;
-            }
-
-            Text {
-                x: root.s(230px);
-                y: root.s(83px);
-                width: root.s(132px);
-                text: root.updated-text;
-                color: root.card-updated-text-color;
-                font-size: root.s(17px);
-                font-weight: 500;
+                width: root.s(184px);
+                height: root.s(24px);
+                text: root.source-name-text + " · " + root.updated-text;
+                color: root.card-source-text-color;
+                font-size: root.s(12px);
+                font-weight: 600;
+                vertical-alignment: center;
                 overflow: elide;
             }
 
             Text {
-                x: root.s(226px);
-                y: root.s(24px);
-                width: root.s(312px);
+                x: root.s(222px);
+                y: root.s(22px);
+                width: root.s(176px);
+                height: root.s(76px);
                 text: quote.price;
                 color: root.card-primary-text-color;
-                font-size: root.s(48px);
+                font-size: root.s(47px);
                 font-weight: 900;
                 horizontal-alignment: center;
+                vertical-alignment: center;
                 overflow: elide;
+            }
+
+            change_pill := Rectangle {
+                x: root.s(404px);
+                y: root.s(45px);
+                width: root.s(70px);
+                height: root.s(30px);
+                border-radius: root.s(7px);
+                background: quote.positive
+                    ? (root.red-up-enabled ? root.loss-pill-background : root.gain-pill-background)
+                    : (root.red-up-enabled ? root.gain-pill-background : root.loss-pill-background);
+                border-width: root.s(1px);
+                border-color: quote.positive
+                    ? (root.red-up-enabled ? root.loss-pill-border : root.gain-pill-border)
+                    : (root.red-up-enabled ? root.gain-pill-border : root.loss-pill-border);
+
+                Text {
+                    x: root.s(2px);
+                    y: 0px;
+                    width: parent.width - root.s(4px);
+                    height: parent.height;
+                    text: quote.change;
+                    color: quote.positive
+                        ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+                        : (root.red-up-enabled ? root.gain-color : root.loss-color);
+                    font-size: root.s(15px);
+                    font-weight: 900;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
             }
 
             chart := Rectangle {
-                x: root.s(588px);
-                y: root.s(28px);
-                width: root.s(158px);
-                height: root.s(74px);
+                x: root.s(504px);
+                y: root.s(20px);
+                width: root.s(270px);
+                height: root.s(84px);
                 background: transparent;
 
+                Rectangle {
+                    x: root.s(2px);
+                    y: root.s(3px);
+                    width: parent.width - root.s(4px);
+                    height: parent.height - root.s(6px);
+                    border-radius: root.s(14px);
+                    background: @linear-gradient(90deg, #f7fcff00 0%, #ffffff5c 16%, #ffffff34 72%, #f7fcff00 100%);
+                    visible: root.light-theme;
+                }
+
+                Rectangle {
+                    x: root.s(22px);
+                    y: root.s(7px);
+                    width: parent.width - root.s(30px);
+                    height: root.s(72px);
+                    border-radius: root.s(14px);
+                    background: @linear-gradient(90deg, #16a34a00 0%, #16a34a14 42%, #16a34a08 82%, #16a34a00 100%);
+                    visible: root.light-theme && root.chart-uses-gain-color;
+                }
+
+                Rectangle {
+                    x: root.s(22px);
+                    y: root.s(7px);
+                    width: parent.width - root.s(30px);
+                    height: root.s(72px);
+                    border-radius: root.s(14px);
+                    background: @linear-gradient(90deg, #dc262600 0%, #dc262612 42%, #dc262608 82%, #dc262600 100%);
+                    visible: root.light-theme && !root.chart-uses-gain-color;
+                }
+
+                Rectangle {
+                    x: root.s(18px);
+                    y: root.s(7px);
+                    width: parent.width - root.s(26px);
+                    height: root.s(72px);
+                    border-radius: root.s(14px);
+                    background: @linear-gradient(90deg, #22c55e00 0%, #22c55e14 40%, #22c55e08 82%, #22c55e00 100%);
+                    visible: !root.light-theme && root.chart-uses-gain-color;
+                }
+
+                Rectangle {
+                    x: root.s(18px);
+                    y: root.s(7px);
+                    width: parent.width - root.s(26px);
+                    height: root.s(72px);
+                    border-radius: root.s(14px);
+                    background: @linear-gradient(90deg, #ff6f7e00 0%, #ff6f7e14 40%, #ff6f7e08 82%, #ff6f7e00 100%);
+                    visible: !root.light-theme && !root.chart-uses-gain-color;
+                }
+
                 Path {
-                    x: root.s(1px);
+                    x: root.s(4px);
                     y: root.s(8px);
-                    width: root.s(156px);
-                    height: root.s(62px);
+                    width: root.s(260px);
+                    height: root.s(70px);
                     viewbox-width: 100;
                     viewbox-height: 40;
                     fit: fill;
                     commands: root.chart-fill-path;
                     fill: root.chart-fill-color;
                     stroke-width: 0px;
-                    opacity: root.chart-ready ? 1 : 0.36;
+                    opacity: root.chart-ready ? (root.light-theme ? 0.78 : 0.9) : 0.28;
                 }
 
                 Rectangle {
                     x: 0px;
-                    y: root.s(9px);
-                    width: root.s(42px);
-                    height: root.s(61px);
-                    background: @linear-gradient(90deg, #0710199a 0%, #07101956 38%, #07101900 100%);
-                }
-
-                Rectangle {
-                    x: root.s(1px);
-                    y: root.s(40px);
-                    width: root.s(156px);
-                    height: root.s(30px);
-                    background: @linear-gradient(180deg, #07101900 0%, #0710192e 54%, #0710198c 100%);
-                }
-
-                Rectangle {
-                    x: root.s(42px);
-                    y: root.s(4px);
-                    width: root.s(116px);
+                    y: root.s(8px);
+                    width: root.s(56px);
                     height: root.s(70px);
-                    background: @radial-gradient(circle 86px at 82px 49px, #22c55e25 0%, #22c55e0e 46%, #22c55e00 100%);
+                    background: root.light-theme
+                        ? @linear-gradient(90deg, #f7fcfff4 0%, #f7fcff9c 42%, #f7fcff00 100%)
+                        : @linear-gradient(90deg, #07111bf0 0%, #07111b90 42%, #07111b00 100%);
+                }
+
+                Rectangle {
+                    x: parent.width - root.s(44px);
+                    y: root.s(8px);
+                    width: root.s(44px);
+                    height: root.s(70px);
+                    background: root.light-theme
+                        ? @linear-gradient(90deg, #f7fcff00 0%, #f7fcff8c 70%, #f7fcffd6 100%)
+                        : @linear-gradient(90deg, #07111b00 0%, #07111b76 70%, #07111bc8 100%);
                 }
 
                 Path {
-                    x: root.s(1px);
+                    x: root.s(4px);
                     y: root.s(8px);
-                    width: root.s(156px);
-                    height: root.s(62px);
+                    width: root.s(260px);
+                    height: root.s(70px);
                     viewbox-width: 100;
                     viewbox-height: 40;
                     fit: fill;
@@ -250,32 +423,21 @@ export component FocusTicker inherits Window {
                     stroke-width: root.s(3px);
                     stroke-line-cap: round;
                     stroke-line-join: round;
-                    opacity: root.chart-ready ? 1 : 0.42;
+                    opacity: root.chart-ready ? 0.96 : 0.42;
                 }
             }
-
-            Text {
-                x: root.s(538px);
-                y: root.s(38px);
-                width: root.s(100px);
-                text: quote.change;
-                color: root.chart-color;
-                font-size: root.s(25px);
-                font-weight: 900;
-                horizontal-alignment: center;
-                overflow: elide;
-            }
-
         }
 
         Text {
             x: root.s(24px);
             y: root.s(48px);
             width: parent.width - root.s(48px);
+            height: root.s(24px);
             text: root.empty-text;
             color: root.card-updated-text-color;
             font-size: root.s(18px);
             horizontal-alignment: center;
+            vertical-alignment: center;
             visible: root.quote-rows.length == 0;
             overflow: elide;
         }
@@ -286,10 +448,9 @@ export component FocusTicker inherits Window {
             width: root.s(28px);
             height: root.s(28px);
             border-radius: root.s(7px);
-            background: root.layout-locked || lock_touch.has-hover ? #07111dcc : transparent;
+            background: root.layout-locked || lock_button_hit_area.has-hover ? root.lock-button-hover-background : root.lock-button-background;
             border-width: root.s(1px);
-            border-color: root.layout-locked || lock_touch.has-hover ? #ffffff66 : transparent;
-            visible: drag_area.has-hover || lock_touch.has-hover;
+            border-color: root.lock-button-border-color;
 
             Path {
                 x: root.s(5px);
@@ -299,23 +460,22 @@ export component FocusTicker inherits Window {
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
-                fill: root.layout-locked ? #cbd5e1cc : transparent;
-                stroke: #cbd5e1cc;
+                fill: root.layout-locked ? root.lock-icon-color : transparent;
+                stroke: root.lock-icon-color;
                 stroke-width: root.s(2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }
 
-            lock_touch := TouchArea {
-                width: parent.width;
-                height: parent.height;
-                mouse-cursor: pointer;
-                clicked => { root.toggle-layout-lock(); }
-            }
         }
+    }
 
-
-
-
+    lock_button_hit_area := TouchArea {
+        x: card.x + card.width - root.s(42px);
+        y: card.y + root.s(8px);
+        width: root.s(28px);
+        height: root.s(28px);
+        mouse-cursor: pointer;
+        clicked => { root.toggle-layout-lock(); }
     }
 }

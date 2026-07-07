@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
+use crypto_hud_core::{default_market_symbols, normalize_market_pair_key};
 pub use crypto_hud_runtime::{
     parse_manifest, validate_manifest, PluginDataRequirement, PluginManifest, PluginSize,
     PluginSizePolicy, MAX_SYMBOL_LIMIT, MIN_SYMBOL_LIMIT,
@@ -152,6 +153,7 @@ pub struct PluginDefinition {
     pub size_policy: PluginSizePolicy,
     pub min_symbol_limit: usize,
     pub symbol_limit: usize,
+    pub default_symbols: Vec<String>,
     pub data_requirements: Vec<PluginDataRequirement>,
     pub status: PluginStatus,
 }
@@ -243,6 +245,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             size_policy: PluginSizePolicy::Fixed,
             min_symbol_limit: MIN_SYMBOL_LIMIT,
             symbol_limit: MAX_SYMBOL_LIMIT,
+            default_symbols: default_market_symbols(),
             data_requirements: vec![PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
@@ -261,6 +264,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             size_policy: PluginSizePolicy::Fixed,
             min_symbol_limit: MIN_SYMBOL_LIMIT,
             symbol_limit: MIN_SYMBOL_LIMIT,
+            default_symbols: default_market_symbols().into_iter().take(1).collect(),
             data_requirements: vec![PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
@@ -396,9 +400,22 @@ pub fn manifest_to_definition(
         size_policy: manifest.size_policy,
         min_symbol_limit: manifest.min_symbol_limit,
         symbol_limit: manifest.symbol_limit,
+        default_symbols: normalize_default_symbols(manifest.default_symbols),
         data_requirements: manifest.data_requirements,
         status: PluginStatus::Unavailable("Slint renderer has not been compiled".to_string()),
     })
+}
+
+fn normalize_default_symbols(symbols: Vec<String>) -> Vec<String> {
+    symbols
+        .iter()
+        .filter_map(|symbol| normalize_market_pair_key(symbol))
+        .fold(Vec::new(), |mut unique, symbol| {
+            if !unique.contains(&symbol) {
+                unique.push(symbol);
+            }
+            unique
+        })
 }
 
 fn compile_slint_renderer(
@@ -670,6 +687,7 @@ export component ExamplePriceCard inherits Window {
         assert_eq!(manifest.size_policy, PluginSizePolicy::Fixed);
         assert_eq!(manifest.min_symbol_limit, 1);
         assert_eq!(manifest.symbol_limit, 5);
+        assert!(manifest.default_symbols.is_empty());
     }
 
     #[test]
@@ -876,7 +894,7 @@ export component ExamplePriceCard inherits Window {
             plugin.size_policy,
             PluginSizePolicy::SymbolGrid {
                 cell_size: PluginSize {
-                    width: 136,
+                    width: 122,
                     height: 84
                 },
                 content_padding: PluginSize {
@@ -886,6 +904,22 @@ export component ExamplePriceCard inherits Window {
                 columns: Some(5),
                 rows: None
             }
+        );
+    }
+
+    #[test]
+    fn market_board_manifest_declares_default_symbols() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let plugin = catalog.find("com.cryptohud.market-board").unwrap();
+
+        assert_eq!(
+            plugin.default_symbols,
+            vec![
+                "binance:spot:BTC/USDT",
+                "binance:spot:ETH/USDT",
+                "binance:spot:SOL/USDT",
+            ]
         );
     }
 

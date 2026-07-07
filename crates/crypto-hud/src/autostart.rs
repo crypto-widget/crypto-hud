@@ -21,21 +21,35 @@ fn build_auto_launch_with_name(
     app_name: &str,
     widget_count: usize,
 ) -> Result<auto_launch::AutoLaunch, String> {
-    use auto_launch::{AutoLaunch, WindowsEnableMode};
-
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let exe = exe
         .to_str()
         .ok_or_else(|| "current exe path is not valid UTF-8".to_string())?;
+    Ok(build_windows_auto_launch_with_path(
+        app_name,
+        exe,
+        widget_count,
+    ))
+}
+
+#[cfg(windows)]
+fn build_windows_auto_launch_with_path(
+    app_name: &str,
+    exe: &str,
+    widget_count: usize,
+) -> auto_launch::AutoLaunch {
+    use auto_launch::{AutoLaunch, WindowsEnableMode};
+
+    let exe = quote_windows_auto_launch_path(exe);
     let widget_count = widget_count.to_string();
     let args = ["--widgets", widget_count.as_str()];
 
-    Ok(AutoLaunch::new(
-        app_name,
-        exe,
-        WindowsEnableMode::CurrentUser,
-        &args,
-    ))
+    AutoLaunch::new(app_name, &exe, WindowsEnableMode::CurrentUser, &args)
+}
+
+#[cfg(windows)]
+fn quote_windows_auto_launch_path(exe: &str) -> String {
+    format!("\"{exe}\"")
 }
 
 #[cfg(not(windows))]
@@ -55,4 +69,42 @@ fn build_auto_launch_with_name(
         .set_args(&["--widgets", widget_count.as_str()])
         .build()
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(windows)]
+    use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_auto_launch_quotes_paths_with_spaces() {
+        let launch = build_windows_auto_launch_with_path(
+            "Crypto HUD",
+            r"C:\Users\Ada Lovelace\AppData\Local\CryptoHud\crypto-hud.exe",
+            3,
+        );
+
+        assert_eq!(
+            launch.get_app_path(),
+            r#""C:\Users\Ada Lovelace\AppData\Local\CryptoHud\crypto-hud.exe""#
+        );
+        assert_eq!(
+            launch.get_args(),
+            &["--widgets".to_string(), "3".to_string()]
+        );
+        assert_eq!(
+            format!("{} {}", launch.get_app_path(), launch.get_args().join(" ")),
+            r#""C:\Users\Ada Lovelace\AppData\Local\CryptoHud\crypto-hud.exe" --widgets 3"#
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_auto_launch_quotes_paths_without_spaces_too() {
+        assert_eq!(
+            quote_windows_auto_launch_path(r"C:\Dev\crypto-hud\target\debug\crypto-hud.exe"),
+            r#""C:\Dev\crypto-hud\target\debug\crypto-hud.exe""#
+        );
+    }
 }

@@ -117,7 +117,7 @@ try {
         throw "Installed update handoff script was not copied"
     }
 
-    powershell -ExecutionPolicy Bypass -File (Join-Path $PackageRoot "uninstall.ps1") -InstallDir $InstallDir
+    powershell -ExecutionPolicy Bypass -File (Join-Path $PackageRoot "uninstall.ps1") -InstallDir $InstallDir -SkipShellIntegration
     if ($LASTEXITCODE -ne 0) {
         throw "Uninstall smoke failed with code $LASTEXITCODE"
     }

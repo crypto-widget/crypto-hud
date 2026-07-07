@@ -98,6 +98,27 @@ export component PriceCardWindow inherits Window {
         border-width: root.s(1px);
         border-color: root.card-border-color;
         opacity: root.content-opacity / 100;
+        clip: true;
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: parent.height - root.s(2px);
+            border-radius: root.s(7px);
+            background: @linear-gradient(135deg, #17334dff 0%, #111f33ff 36%, #0f1726ff 76%, #0f1726ff 100%);
+            visible: !root.compact-mode && !root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: parent.height - root.s(2px);
+            border-radius: root.s(7px);
+            background: @linear-gradient(135deg, #f4fbffff 0%, #edf8ffff 34%, #f8fbffff 78%, #f8fbffff 100%);
+            visible: !root.compact-mode && root.light-theme;
+        }
 
         Rectangle {
             x: root.s(1px);
@@ -105,8 +126,38 @@ export component PriceCardWindow inherits Window {
             width: parent.width - root.s(2px);
             height: root.s(31px);
             border-radius: root.s(7px);
-            background: root.card-header-background;
-            visible: !root.compact-mode;
+            background: @linear-gradient(180deg, #142947ff 0%, #10213aff 48%, #0c1729ff 100%);
+            visible: !root.compact-mode && !root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: root.s(31px);
+            border-radius: root.s(7px);
+            background: @linear-gradient(180deg, #f5fcffff 0%, #eaf7ffff 54%, #dcedfbff 100%);
+            visible: !root.compact-mode && root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: root.s(31px);
+            border-radius: root.s(7px);
+            background: @linear-gradient(115deg, #2b74aaa8 0%, #1c4d7d72 28%, #10294430 55%, #0d1a2d00 80%);
+            visible: !root.compact-mode && !root.light-theme;
+        }
+
+        Rectangle {
+            x: root.s(1px);
+            y: root.s(1px);
+            width: parent.width - root.s(2px);
+            height: root.s(31px);
+            border-radius: root.s(7px);
+            background: @linear-gradient(115deg, #ffffffb8 0%, #cdeeff80 34%, #eaf7ff30 62%, #eaf7ff00 88%);
+            visible: !root.compact-mode && root.light-theme;
         }
 
         Rectangle {
@@ -280,37 +331,40 @@ export component PriceCardWindow inherits Window {
         }
 
         lock_button := Rectangle {
-            x: parent.width - root.s(root.compact-mode ? 40px : 27px);
-            y: root.s(root.compact-mode ? 6px : 7px);
-            width: root.s(root.compact-mode ? 32px : 18px);
-            height: root.s(root.compact-mode ? 32px : 18px);
+            x: parent.width - root.s(root.compact-mode ? 40px : 31px);
+            y: root.s(6px);
+            width: root.s(root.compact-mode ? 32px : 24px);
+            height: root.s(root.compact-mode ? 32px : 24px);
             border-radius: root.s(root.compact-mode ? 8px : 6px);
-            background: root.layout-locked || lock_touch.has-hover ? root.lock-button-hover-background : root.lock-button-background;
+            background: root.layout-locked ? root.lock-button-hover-background : (lock_button_hit_area.has-hover ? root.lock-button-background : transparent);
             border-width: root.s(1px);
-            border-color: root.lock-button-border-color;
-            visible: root.layout-locked || drag_area.has-hover || lock_touch.has-hover;
+            border-color: root.layout-locked || lock_button_hit_area.has-hover ? root.lock-button-border-color : transparent;
+            visible: root.layout-locked || drag_area.has-hover || lock_button_hit_area.has-hover;
 
             Path {
-                x: root.s(root.compact-mode ? 7px : 3px);
+                x: root.s(root.compact-mode ? 7px : 4px);
                 y: root.s(root.compact-mode ? 6px : 3px);
-                width: root.s(root.compact-mode ? 18px : 12px);
-                height: root.s(root.compact-mode ? 20px : 12px);
+                width: root.s(root.compact-mode ? 18px : 16px);
+                height: root.s(root.compact-mode ? 20px : 18px);
                 viewbox-width: 24;
                 viewbox-height: 24;
-                commands: "M 5 11 H 19 C 20.1 11 21 11.9 21 13 V 20 C 21 21.1 20.1 22 19 22 H 5 C 3.9 22 3 21.1 3 20 V 13 C 3 11.9 3.9 11 5 11 Z M 7 11 V 7 C 7 4.2 9.2 2 12 2 C 14.8 2 17 4.2 17 7 V 11 M 12 16 V 18";
-                fill: transparent;
+                commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
+                fill: root.layout-locked ? root.lock-icon-color : transparent;
                 stroke: root.lock-icon-color;
                 stroke-width: root.s(2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }
 
-            lock_touch := TouchArea {
-                width: parent.width;
-                height: parent.height;
-                mouse-cursor: pointer;
-                clicked => { root.toggle-layout-lock(); }
-            }
         }
+    }
+
+    lock_button_hit_area := TouchArea {
+        x: card.x + card.width - root.s(root.compact-mode ? 40px : 31px);
+        y: card.y + root.s(6px);
+        width: root.s(root.compact-mode ? 32px : 24px);
+        height: root.s(root.compact-mode ? 32px : 24px);
+        mouse-cursor: pointer;
+        clicked => { root.toggle-layout-lock(); }
     }
 }

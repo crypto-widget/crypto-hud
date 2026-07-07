@@ -14,13 +14,13 @@
     "filesystem": false
   },
   "defaultSize": {
-    "width": 688,
+    "width": 618,
     "height": 92
   },
   "sizePolicy": {
     "kind": "symbolGrid",
     "cellSize": {
-      "width": 136,
+      "width": 122,
       "height": 84
     },
     "contentPadding": {
@@ -31,6 +31,11 @@
   },
   "minSymbolLimit": 1,
   "symbolLimit": 5,
+  "defaultSymbols": [
+    "binance:spot:BTC/USDT",
+    "binance:spot:ETH/USDT",
+    "binance:spot:SOL/USDT"
+  ],
   "dataRequirements": [
     {
       "capability": "market.price"

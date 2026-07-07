@@ -1,5 +1,6 @@
 param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "CryptoHud"),
+    [switch]$SkipShellIntegration,
     [switch]$RemoveUserData
 )
 
@@ -12,24 +13,35 @@ $LegacyInstallDir = Join-Path $env:LOCALAPPDATA "CryptoWidget\CryptoHud"
 $LegacyStartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Crypto Widget"
 $LegacyShortcutPath = Join-Path $LegacyStartMenuDir "Crypto Widget.lnk"
 $LegacyUninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CryptoWidget.CryptoHud"
+$AutoStartRunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$AutoStartApprovalKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+$AutoStartValueNames = @("Crypto HUD", "Crypto Widget Slint")
 
-Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
-if (Test-Path $StartMenuDir) {
-    $remaining = Get-ChildItem -LiteralPath $StartMenuDir -Force -ErrorAction SilentlyContinue
-    if (-not $remaining) {
-        Remove-Item -LiteralPath $StartMenuDir -Force -ErrorAction SilentlyContinue
+if (-not $SkipShellIntegration) {
+    foreach ($valueName in $AutoStartValueNames) {
+        Remove-ItemProperty -LiteralPath $AutoStartRunKey -Name $valueName -Force -ErrorAction SilentlyContinue
+        Remove-ItemProperty -LiteralPath $AutoStartApprovalKey -Name $valueName -Force -ErrorAction SilentlyContinue
     }
-}
-Remove-Item -LiteralPath $LegacyShortcutPath -Force -ErrorAction SilentlyContinue
-if (Test-Path $LegacyStartMenuDir) {
-    $remaining = Get-ChildItem -LiteralPath $LegacyStartMenuDir -Force -ErrorAction SilentlyContinue
-    if (-not $remaining) {
-        Remove-Item -LiteralPath $LegacyStartMenuDir -Force -ErrorAction SilentlyContinue
+
+    Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
+    if (Test-Path $StartMenuDir) {
+        $remaining = Get-ChildItem -LiteralPath $StartMenuDir -Force -ErrorAction SilentlyContinue
+        if (-not $remaining) {
+            Remove-Item -LiteralPath $StartMenuDir -Force -ErrorAction SilentlyContinue
+        }
     }
+    Remove-Item -LiteralPath $LegacyShortcutPath -Force -ErrorAction SilentlyContinue
+    if (Test-Path $LegacyStartMenuDir) {
+        $remaining = Get-ChildItem -LiteralPath $LegacyStartMenuDir -Force -ErrorAction SilentlyContinue
+        if (-not $remaining) {
+            Remove-Item -LiteralPath $LegacyStartMenuDir -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Remove-Item -LiteralPath $UninstallKey -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $LegacyUninstallKey -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item -LiteralPath $UninstallKey -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $LegacyUninstallKey -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $LegacyInstallDir -Recurse -Force -ErrorAction SilentlyContinue
 

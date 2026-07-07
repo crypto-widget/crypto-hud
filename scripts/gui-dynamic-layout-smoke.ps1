@@ -177,7 +177,7 @@ try {
     Assert-Widget $widgets["quote-board-1"] 274 80 1 1.00 100
     Assert-Widget $widgets["plugin-ticker-2"] 1025 195 1 1.25 125
     Assert-Widget $widgets["plugin-strip-3"] 624 138 3 1.50 150
-    Assert-Widget $widgets["plugin-card-4"] 520 410 1 1.00 100
+    Assert-Widget $widgets["plugin-card-4"] 520 386 1 1.00 100
 } finally {
     Pop-Location
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue

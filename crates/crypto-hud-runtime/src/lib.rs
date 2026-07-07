@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 pub use crypto_hud_core::{evaluate_alerts, AlertCondition, AlertEvaluation, AlertRule};
 use crypto_hud_core::{
     format_market_pair_symbol, format_pair_change, format_price, market_pair_source,
-    parse_market_pair, AlertQuote, MarketDataSource,
+    normalize_market_pair_key, parse_market_pair, AlertQuote, MarketDataSource,
 };
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,8 @@ pub struct PluginManifest {
     #[serde(default = "default_min_symbol_limit")]
     pub min_symbol_limit: usize,
     pub symbol_limit: usize,
+    #[serde(default)]
+    pub default_symbols: Vec<String>,
     #[serde(default)]
     pub data_requirements: Vec<PluginDataRequirement>,
 }
@@ -140,6 +142,11 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
     if manifest.min_symbol_limit > manifest.symbol_limit {
         bail!("minSymbolLimit must be less than or equal to symbolLimit");
     }
+    validate_default_symbols(
+        &manifest.default_symbols,
+        manifest.min_symbol_limit,
+        manifest.symbol_limit,
+    )?;
     validate_size_policy(
         manifest.size_policy,
         manifest.default_size,
@@ -153,6 +160,30 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+fn validate_default_symbols(symbols: &[String], min: usize, limit: usize) -> Result<()> {
+    if symbols.is_empty() {
+        return Ok(());
+    }
+    if symbols.len() < min {
+        bail!("defaultSymbols must contain at least minSymbolLimit entries");
+    }
+    if symbols.len() > limit {
+        bail!("defaultSymbols must not exceed symbolLimit");
+    }
+
+    let mut normalized_symbols = Vec::new();
+    for symbol in symbols {
+        let normalized = normalize_market_pair_key(symbol)
+            .with_context(|| format!("defaultSymbols contains invalid market pair {symbol}"))?;
+        if normalized_symbols.contains(&normalized) {
+            bail!("defaultSymbols contains duplicate market pair {normalized}");
+        }
+        normalized_symbols.push(normalized);
+    }
+
     Ok(())
 }
 
@@ -395,6 +426,8 @@ pub struct WidgetDisplayOptions {
 pub struct WidgetRuntimeView {
     pub widget_id: String,
     pub quote_rows: Vec<QuoteRowView>,
+    #[serde(default)]
+    pub source_name_text: String,
     pub source_text: String,
     pub updated_text: String,
     pub chart_line_path: String,
@@ -525,6 +558,11 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             params.quote_cache,
             params.labels,
             params.display_options,
+        ),
+        source_name_text: source_name_text_for_symbols(
+            params.symbols,
+            params.quote_cache,
+            params.provider_labels,
         ),
         source_text: source_text_for_symbols(
             params.source_prefix,
@@ -772,6 +810,14 @@ pub fn source_text_for_symbols(
     parts.join(" · ")
 }
 
+pub fn source_name_text_for_symbols(
+    symbols: &[String],
+    quote_cache: &QuoteCache,
+    labels: ProviderLabels<'_>,
+) -> String {
+    source_display_text(symbols, quote_cache, labels)
+}
+
 fn source_display_text(
     symbols: &[String],
     quote_cache: &QuoteCache,
@@ -943,6 +989,7 @@ mod tests {
         assert_eq!(manifest.size_policy, PluginSizePolicy::Fixed);
         assert_eq!(manifest.min_symbol_limit, 1);
         assert_eq!(manifest.symbol_limit, 5);
+        assert!(manifest.default_symbols.is_empty());
     }
 
     #[test]
@@ -1075,6 +1122,44 @@ mod tests {
     }
 
     #[test]
+    fn parses_default_symbols() {
+        let json = valid_manifest_json().replace(
+            r#""symbolLimit": 5"#,
+            r#""symbolLimit": 5,
+            "defaultSymbols": [
+                "binance:spot:BTC/USDT",
+                "eth/usdt",
+                "sol"
+            ]"#,
+        );
+
+        let manifest = parse_manifest(&json).unwrap();
+
+        assert_eq!(
+            manifest.default_symbols,
+            vec!["binance:spot:BTC/USDT", "eth/usdt", "sol"]
+        );
+    }
+
+    #[test]
+    fn rejects_default_symbols_above_symbol_limit() {
+        let json = valid_manifest_json().replace(
+            r#""symbolLimit": 5"#,
+            r#""symbolLimit": 2,
+            "defaultSymbols": [
+                "BTC",
+                "ETH",
+                "SOL"
+            ]"#,
+        );
+
+        assert!(parse_manifest(&json)
+            .unwrap_err()
+            .to_string()
+            .contains("defaultSymbols"));
+    }
+
+    #[test]
     fn rejects_min_symbol_limit_above_symbol_limit() {
         let json = valid_manifest_json().replace(
             r#""symbolLimit": 5"#,
@@ -1187,6 +1272,7 @@ mod tests {
         });
 
         assert_eq!(view.widget_id, "quote-board-1");
+        assert_eq!(view.source_name_text, "Binance");
         assert_eq!(view.source_text, "live feed · Binance · 1/2 live");
         assert_eq!(view.updated_text, "Updated 42s · 1/2 live");
         assert_eq!(view.quote_rows[0].symbol, "BTC/USDT");
@@ -1248,6 +1334,7 @@ mod tests {
             display_options: WidgetDisplayOptions::default(),
         });
 
+        assert_eq!(view.source_name_text, "OKX");
         assert_eq!(view.source_text, "实时行情 · OKX · 已连 0/1");
         assert_eq!(view.updated_text, "连接中");
         assert_eq!(view.quote_rows[0].price, "连接中");
@@ -1314,6 +1401,7 @@ mod tests {
             display_options: WidgetDisplayOptions::default(),
         });
 
+        assert_eq!(view.source_name_text, "Mixed");
         assert_eq!(
             view.source_text,
             "live feed · Mixed · source issue · 1/2 live"

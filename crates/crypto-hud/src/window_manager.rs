@@ -135,8 +135,8 @@ pub(crate) fn apply_widget_pinning_for_settings_mode(
     }
 }
 
-pub(crate) fn widget_pin_to_top(instance: &WidgetInstance, settings_mode_active: bool) -> bool {
-    !settings_mode_active && instance.layout.always_on_top
+pub(crate) fn widget_pin_to_top(instance: &WidgetInstance, _settings_mode_active: bool) -> bool {
+    instance.layout.always_on_top
 }
 
 pub(crate) fn install_tray_hover_display_timer(
@@ -431,8 +431,8 @@ fn configure_windows_for_widget_shell() {
     use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, SetWindowLongPtrW,
-        SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE,
+        SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE,
     };
 
     unsafe extern "system" fn enum_window(hwnd: HWND, lparam: LPARAM) -> i32 {
@@ -467,11 +467,13 @@ fn configure_windows_for_widget_shell() {
                 if style_changed {
                     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, widget_style as isize);
                 }
-                let should_change_z_order = if settings_mode_active {
-                    is_topmost_style(style) || is_topmost_style(widget_style)
-                } else {
-                    !is_topmost_style(widget_style) || visible_topmost_window_above(hwnd, true)
-                };
+                let topmost_window_above =
+                    !settings_mode_active && visible_topmost_window_above(hwnd, true);
+                let should_change_z_order = widget_shell_should_change_z_order(
+                    widget_style,
+                    settings_mode_active,
+                    topmost_window_above,
+                );
                 if style_changed || should_change_z_order {
                     let mut flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
                     if style_changed {
@@ -480,12 +482,7 @@ fn configure_windows_for_widget_shell() {
                     if !should_change_z_order {
                         flags |= SWP_NOZORDER;
                     }
-                    let insert_after = if settings_mode_active {
-                        HWND_NOTOPMOST
-                    } else {
-                        HWND_TOPMOST
-                    };
-                    SetWindowPos(hwnd, insert_after, 0, 0, 0, 0, flags);
+                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
                 }
             }
         }
@@ -519,17 +516,12 @@ fn is_settings_window_title(title: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn widget_shell_ex_style(style: u32, settings_mode_active: bool) -> u32 {
+fn widget_shell_ex_style(style: u32, _settings_mode_active: bool) -> u32 {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
 
-    let widget_style = (style & !WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
-    if settings_mode_active {
-        widget_style & !WS_EX_TOPMOST
-    } else {
-        widget_style
-    }
+    (style & !WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
 }
 
 #[cfg(windows)]
@@ -546,6 +538,19 @@ fn is_topmost_style(style: u32) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST;
 
     style & WS_EX_TOPMOST != 0
+}
+
+#[cfg(windows)]
+fn widget_shell_should_change_z_order(
+    widget_style: u32,
+    settings_mode_active: bool,
+    visible_topmost_above: bool,
+) -> bool {
+    if settings_mode_active {
+        return false;
+    }
+
+    !is_topmost_style(widget_style) || visible_topmost_above
 }
 
 #[cfg(windows)]
@@ -701,14 +706,37 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn widget_shell_style_drops_topmost_during_settings_mode() {
+    fn widget_shell_style_preserves_topmost_during_settings_mode() {
         use windows_sys::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_TOPMOST};
 
         let normal_style = widget_shell_ex_style(WS_EX_APPWINDOW | WS_EX_TOPMOST, false);
         assert_ne!(normal_style & WS_EX_TOPMOST, 0);
 
         let settings_mode_style = widget_shell_ex_style(WS_EX_APPWINDOW | WS_EX_TOPMOST, true);
-        assert_eq!(settings_mode_style & WS_EX_TOPMOST, 0);
+        assert_ne!(settings_mode_style & WS_EX_TOPMOST, 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn widget_shell_z_order_is_not_changed_during_settings_mode() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST;
+
+        assert!(!widget_shell_should_change_z_order(
+            WS_EX_TOPMOST,
+            true,
+            true
+        ));
+        assert!(widget_shell_should_change_z_order(0, false, false));
+        assert!(widget_shell_should_change_z_order(
+            WS_EX_TOPMOST,
+            false,
+            true
+        ));
+        assert!(!widget_shell_should_change_z_order(
+            WS_EX_TOPMOST,
+            false,
+            false
+        ));
     }
 
     #[cfg(windows)]

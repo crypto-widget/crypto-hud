@@ -47,6 +47,9 @@ com.example.my-widget/
   },
   "minSymbolLimit": 1,
   "symbolLimit": 1,
+  "defaultSymbols": [
+    "binance:spot:BTC/USDT"
+  ],
   "dataRequirements": [
     { "capability": "market.price" }
   ]
@@ -65,6 +68,9 @@ com.example.my-widget/
 - `sizePolicy` 可省略，默认 `{ "kind": "fixed" }`。
 - `minSymbolLimit` 可省略，默认 `1`，必须在 `1` 到 `symbolLimit` 之间。
 - `symbolLimit` 是最大币种数量，必须在 `1` 到 `5` 之间。
+- `defaultSymbols` 可省略；填写时必须是有效交易对，数量不能超过 `symbolLimit`，
+  也不能少于 `minSymbolLimit`。未写数据源的输入会按 Binance 现货和 USDT
+  默认报价规范化，例如 `BTC` 等价于 `binance:spot:BTC/USDT`。
 - `dataRequirements` 当前只支持 `market.price` 和 `market.candles`。
 - 允许的文件扩展名为 `json`、`slint`、`png`、`jpg`、`jpeg`、`svg`。
 

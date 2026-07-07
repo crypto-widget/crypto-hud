@@ -33,7 +33,7 @@ export component StatusStrip inherits Window {
     in property <string> empty-text;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
-    in property <int> widget-width: 688;
+    in property <int> widget-width: 618;
     in property <int> widget-height: 92;
     in property <float> widget-scale: 1.0;
     in property <[int]> quote-cell-widths;
@@ -45,12 +45,13 @@ export component StatusStrip inherits Window {
     property <int> block-count: root.quote-rows.length <= 0 ? 1 : (root.quote-rows.length > root.max-block-count ? root.max-block-count : root.quote-rows.length);
     property <length> visible-height: 84px;
     property <length> window-padding: 4px;
-    property <length> block-width: 136px;
+    property <length> block-width: 122px;
     property <length> card-radius: 10px;
     property <length> upper-highlight-radius: root.card-radius - 1px;
     property <length> top-highlight-radius: root.card-radius - 2px;
     property <length> text-left: 13px;
     property <length> text-horizontal-padding: root.text-left * 2;
+    property <length> price-right-gap: 7px;
     property <length> separator-top: 30px;
     property <length> separator-bottom-gap: 37px;
     property <length> lock-button-size: 26px;
@@ -229,7 +230,7 @@ export component StatusStrip inherits Window {
                 Text {
                     x: root.s(root.text-left);
                     y: root.s(32px);
-                    width: parent.width - root.s(root.text-horizontal-padding);
+                    width: parent.width - root.s(root.text-left + root.price-right-gap);
                     height: root.s(27px);
                     text: quote.price;
                     color: parent.contrast-cell ? root.contrast-text-color : root.default-text-color;

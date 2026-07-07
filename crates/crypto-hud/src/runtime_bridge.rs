@@ -959,7 +959,7 @@ mod tests {
             name: "Status Strip 1".to_string(),
             visible: true,
             layout: settings::WidgetLayout {
-                width: 832,
+                width: 748,
                 height: 184,
                 scale_percent: 0,
                 ..settings::WidgetLayout::default()
@@ -978,7 +978,7 @@ mod tests {
         );
 
         instance.symbols.truncate(1);
-        instance.layout.width = 288;
+        instance.layout.width = 260;
         instance.layout.height = 184;
         instance.layout.scale_percent = 0;
 

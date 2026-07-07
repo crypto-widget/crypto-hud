@@ -105,7 +105,7 @@ try {
     }
 
     $uninstallScript = Join-Path $InstallDir "uninstall.ps1"
-    powershell -ExecutionPolicy Bypass -File $uninstallScript -InstallDir $InstallDir
+    powershell -ExecutionPolicy Bypass -File $uninstallScript -InstallDir $InstallDir -SkipShellIntegration
     if ($LASTEXITCODE -ne 0) {
         throw "Update uninstall smoke failed with code $LASTEXITCODE"
     }

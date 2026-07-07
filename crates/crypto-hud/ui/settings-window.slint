@@ -236,6 +236,10 @@ component SettingsSmallButton inherits Rectangle {
 }
 
 export component SettingsWindow inherits Window {
+    property <length> settings-design-width: 1120px;
+    property <length> settings-design-height: 720px;
+    property <float> settings-window-scale: min(1.0, min(root.width / root.settings-design-width, root.height / root.settings-design-height));
+
     in-out property <int> settings-tab-index: 0;
     in-out property <bool> widgets-always-on-top;
     in-out property <bool> widget-layout-locked;
@@ -561,8 +565,13 @@ export component SettingsWindow inherits Window {
     }
 
     panel := Rectangle {
-        width: parent.width;
-        height: parent.height;
+        x: (root.width - root.settings-design-width * root.settings-window-scale) / 2;
+        y: (root.height - root.settings-design-height * root.settings-window-scale) / 2;
+        width: root.settings-design-width;
+        height: root.settings-design-height;
+        transform-origin: { x: 0px, y: 0px };
+        transform-scale-x: root.settings-window-scale;
+        transform-scale-y: root.settings-window-scale;
         background: root.settings-background;
 
         titlebar := Rectangle {
@@ -577,7 +586,10 @@ export component SettingsWindow inherits Window {
                 height: parent.height;
                 mouse-cursor: self.pressed ? grabbing : grab;
                 moved => {
-                    root.drag-settings(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                    root.drag-settings(
+                        (self.mouse-x - self.pressed-x) * root.settings-window-scale,
+                        (self.mouse-y - self.pressed-y) * root.settings-window-scale
+                    );
                 }
             }
 

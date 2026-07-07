@@ -10,12 +10,13 @@ export component TrustCard inherits Window {
     in property <[QuoteRow]> quote-rows;
     in property <string> pairs-heading-text;
     in property <string> source-text;
+    in property <string> source-name-text;
     in property <string> updated-text;
     in property <string> empty-text;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 520;
-    in property <int> widget-height: 410;
+    in property <int> widget-height: 386;
     in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
@@ -74,9 +75,9 @@ export component TrustCard inherits Window {
 
     card := Rectangle {
         x: (root.widget-width * 1px - root.s(520px)) / 2 + root.s(20px);
-        y: (root.widget-height * 1px - root.s(410px)) / 2 + root.s(20px);
+        y: (root.widget-height * 1px - root.s(386px)) / 2 + root.s(20px);
         width: root.s(480px);
-        height: root.s(375px);
+        height: root.s(351px);
         border-radius: root.s(13px);
         background: root.card-background;
         border-width: root.s(1px);
@@ -135,47 +136,13 @@ export component TrustCard inherits Window {
                 Text {
                     x: root.s(36px);
                     y: root.s(6px);
-                    width: root.s(34px);
-                    text: "OK";
+                    width: root.s(92px);
+                    text: root.source-name-text;
                     color: root.gain-color;
                     font-size: root.s(17px);
                     font-weight: 800;
                     overflow: elide;
                 }
-
-                Text {
-                    x: root.s(72px);
-                    y: root.s(6px);
-                    width: root.s(54px);
-                    text: root.source-text;
-                    color: root.card-source-text-color;
-                    font-size: root.s(15px);
-                    font-weight: 500;
-                    overflow: elide;
-                }
-
-                Rectangle {
-                    x: root.s(65px);
-                    y: root.s(15px);
-                    width: root.s(3px);
-                    height: root.s(3px);
-                    border-radius: root.s(1.5px);
-                    background: root.card-updated-text-color;
-                }
-            }
-
-            close_icon := Path {
-                x: parent.width - root.s(46px);
-                y: root.s(22px);
-                width: root.s(23px);
-                height: root.s(23px);
-                viewbox-width: 24;
-                viewbox-height: 24;
-                commands: "M 5 5 L 19 19 M 19 5 L 5 19";
-                fill: transparent;
-                stroke: #a7b0bf;
-                stroke-width: root.s(2.2px);
-                stroke-line-cap: round;
             }
 
             Rectangle {
@@ -311,43 +278,6 @@ export component TrustCard inherits Window {
                 overflow: elide;
             }
 
-            bell_icon := Path {
-                x: root.s(28px);
-                y: root.s(342px);
-                width: root.s(21px);
-                height: root.s(21px);
-                viewbox-width: 24;
-                viewbox-height: 24;
-                commands: "M 6 17 L 18 17 M 8 17 L 8 10 A 4 4 0 0 1 16 10 L 16 17 M 10 19 A 2 2 0 0 0 14 19 M 12 4 L 12 2";
-                fill: transparent;
-                stroke: #fbbf24;
-                stroke-width: root.s(2.2px);
-                stroke-line-cap: round;
-                stroke-line-join: round;
-            }
-
-            Text {
-                x: root.s(62px);
-                y: root.s(340px);
-                width: root.s(160px);
-                text: root.source-text;
-                color: root.card-source-text-color;
-                font-size: root.s(18px);
-                font-weight: 500;
-                overflow: elide;
-            }
-
-            Text {
-                x: parent.width - root.s(150px);
-                y: root.s(340px);
-                width: root.s(126px);
-                text: root.updated-text;
-                color: root.card-updated-text-color;
-                font-size: root.s(16px);
-                font-weight: 500;
-                horizontal-alignment: right;
-                overflow: elide;
-            }
         }
 
         Text {
@@ -363,7 +293,7 @@ export component TrustCard inherits Window {
         }
 
         lock_button := Rectangle {
-            x: parent.width - root.s(96px);
+            x: parent.width - root.s(52px);
             y: root.s(16px);
             width: root.s(34px);
             height: root.s(34px);
@@ -371,7 +301,7 @@ export component TrustCard inherits Window {
             background: root.layout-locked || lock_touch.has-hover ? #07111dcc : transparent;
             border-width: root.s(1px);
             border-color: root.layout-locked || lock_touch.has-hover ? #ffffff66 : transparent;
-            visible: drag_area.has-hover || lock_touch.has-hover;
+            visible: root.layout-locked || drag_area.has-hover || lock_touch.has-hover;
 
             Path {
                 x: root.s(5px);

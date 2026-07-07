@@ -349,11 +349,7 @@ fn seed_each_widget_on_empty_start(
         .market_plugins()
         .filter(|plugin| plugin.is_available())
     {
-        let id = add_plugin_instance(store, plugin, &app_settings);
-        let symbols = initial_symbols_for_slot(&app_settings, slot);
-        if let Some(instance) = store.widgets.iter_mut().find(|instance| instance.id == id) {
-            instance.symbols = symbols;
-        }
+        add_plugin_instance(store, plugin, &app_settings);
         slot += 1;
     }
 
@@ -364,24 +360,6 @@ fn seed_each_widget_on_empty_start(
     store.selected_widget_id = store.widgets.first().map(|widget| widget.id.clone());
     normalize_store_with_catalog(store, 0, Some(plugin_catalog));
     true
-}
-
-fn initial_symbols_for_slot(app_settings: &settings::AppSettings, slot: usize) -> Vec<String> {
-    let defaults = if app_settings.market_default_symbols.is_empty() {
-        settings::default_market_symbols()
-    } else {
-        app_settings.market_default_symbols.clone()
-    };
-    defaults
-        .get(slot % defaults.len().max(1))
-        .cloned()
-        .map(|symbol| vec![symbol])
-        .unwrap_or_else(|| {
-            settings::default_market_symbols()
-                .into_iter()
-                .take(1)
-                .collect()
-        })
 }
 
 #[cfg(test)]
@@ -407,6 +385,7 @@ mod tests {
             size_policy: plugin::PluginSizePolicy::Fixed,
             min_symbol_limit: 1,
             symbol_limit: 2,
+            default_symbols: Vec::new(),
             data_requirements: vec![plugin::PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
@@ -579,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_mode_suspends_pinned_widgets_topmost() {
+    fn settings_mode_preserves_pinned_widgets_topmost() {
         let instance = WidgetInstance {
             id: "quote-board-1".to_string(),
             plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
@@ -595,7 +574,7 @@ mod tests {
         };
 
         assert!(widget_pin_to_top(&instance, false));
-        assert!(!widget_pin_to_top(&instance, true));
+        assert!(widget_pin_to_top(&instance, true));
     }
 
     #[test]
@@ -835,6 +814,18 @@ mod tests {
     }
 
     #[test]
+    fn normalizing_empty_store_creates_single_quote_board_with_default_symbols() {
+        let mut store = LayoutStore::default();
+
+        normalize_store(&mut store, 1);
+
+        assert_eq!(store.widgets.len(), 1);
+        assert_eq!(store.widgets[0].id, "quote-board-1");
+        assert_eq!(store.selected_widget_id.as_deref(), Some("quote-board-1"));
+        assert_eq!(store.widgets[0].symbols, default_symbols());
+    }
+
+    #[test]
     fn each_widget_launch_seeds_one_instance_per_available_plugin() {
         let catalog = plugin::PluginCatalog::builtins();
         let mut store = LayoutStore::default();
@@ -847,7 +838,7 @@ mod tests {
             plugin::BUILTIN_QUOTE_BOARD_PLUGIN_ID
         );
         assert_eq!(store.selected_widget_id.as_deref(), Some("quote-board-1"));
-        assert_eq!(store.widgets[0].symbols, vec!["binance:spot:BTC/USDT"]);
+        assert_eq!(store.widgets[0].symbols, default_symbols());
     }
 
     #[test]

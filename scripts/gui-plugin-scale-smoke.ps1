@@ -232,7 +232,7 @@ try {
         $windows = @(Get-ProcessWindows $app.Id)
         $expected = @(
             [pscustomobject]@{ Title = "focus-ticker-10"; Width = 82; Height = 16 },
-            [pscustomobject]@{ Title = "trust-card-10"; Width = 52; Height = 41 },
+            [pscustomobject]@{ Title = "trust-card-10"; Width = 52; Height = 39 },
             [pscustomobject]@{ Title = "status-strip-10"; Width = 42; Height = 9 }
         )
 

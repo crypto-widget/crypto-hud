@@ -19,6 +19,11 @@
   },
   "minSymbolLimit": 1,
   "symbolLimit": 4,
+  "defaultSymbols": [
+    "binance:spot:BTC/USDT",
+    "binance:spot:ETH/USDT",
+    "binance:spot:SOL/USDT"
+  ],
   "dataRequirements": [
     {
       "capability": "market.price"

@@ -249,6 +249,7 @@ pub struct WidgetDefinition {
     pub size_policy: WidgetSizePolicy,
     pub min_symbol_limit: usize,
     pub symbol_limit: usize,
+    pub default_symbols: Vec<String>,
 }
 
 impl WidgetDefinition {
@@ -260,6 +261,7 @@ impl WidgetDefinition {
             size_policy: WidgetSizePolicy::Fixed,
             min_symbol_limit: widget_type.min_symbol_limit(),
             symbol_limit: widget_type.symbol_limit(),
+            default_symbols: default_symbols_for_type(widget_type),
         }
     }
 }
@@ -972,16 +974,18 @@ pub fn normalize_store_with_catalog(
         let settings = store.settings.clone();
         for index in 0..requested_widget_count {
             add_widget_instance(store, WidgetKind::QuoteBoard, &settings, desktop_size);
-            if let Some(instance) = store.widgets.last_mut() {
-                instance.symbols =
-                    initial_widget_symbols_for_slot(WidgetKind::QuoteBoard, &settings, index);
-                let size = widget_size_from_scale_percent(
-                    default_widget_size_for_instance(instance, catalog),
-                    settings.widget_scale_percent,
-                );
-                instance.layout.scale_percent = settings.widget_scale_percent;
-                instance.layout.width = size.width;
-                instance.layout.height = size.height;
+            if requested_widget_count > 1 {
+                if let Some(instance) = store.widgets.last_mut() {
+                    instance.symbols =
+                        initial_widget_symbols_for_slot(WidgetKind::QuoteBoard, &settings, index);
+                    let size = widget_size_from_scale_percent(
+                        default_widget_size_for_instance(instance, catalog),
+                        settings.widget_scale_percent,
+                    );
+                    instance.layout.scale_percent = settings.widget_scale_percent;
+                    instance.layout.width = size.width;
+                    instance.layout.height = size.height;
+                }
             }
         }
         store.selected_widget_id = store.widgets.first().map(|widget| widget.id.clone());
@@ -1619,11 +1623,35 @@ pub fn default_symbols_for_definition_from_settings(
     definition: &WidgetDefinition,
     settings: &AppSettings,
 ) -> Vec<String> {
+    let fallback = default_symbols_for_definition(definition);
+    if is_custom_market_default_symbols(&settings.market_default_symbols) {
+        return normalized_symbols_with_bounds(
+            settings.market_default_symbols.clone(),
+            definition.min_symbol_limit,
+            definition.symbol_limit,
+            fallback,
+        );
+    }
+
+    fallback
+}
+
+fn is_custom_market_default_symbols(symbols: &[String]) -> bool {
+    let normalized = normalize_market_symbols(symbols.to_vec());
+    normalized != default_market_symbols()
+}
+
+pub fn default_symbols_for_definition(definition: &WidgetDefinition) -> Vec<String> {
+    let fallback = default_symbols_with_limit(definition.symbol_limit);
+    if definition.default_symbols.is_empty() {
+        return fallback;
+    }
+
     normalized_symbols_with_bounds(
-        settings.market_default_symbols.clone(),
+        definition.default_symbols.clone(),
         definition.min_symbol_limit,
         definition.symbol_limit,
-        default_symbols_with_limit(definition.symbol_limit),
+        fallback,
     )
 }
 
@@ -1644,7 +1672,7 @@ pub fn default_symbols_for_instance(
     catalog: &[WidgetDefinition],
 ) -> Vec<String> {
     if let Some(definition) = definition_for_instance(instance, catalog) {
-        default_symbols_with_limit(definition.symbol_limit)
+        default_symbols_for_definition(definition)
     } else {
         default_symbols_for_type(instance.widget_type())
     }
@@ -2130,6 +2158,7 @@ mod tests {
             },
             min_symbol_limit: 1,
             symbol_limit: 5,
+            default_symbols: Vec::new(),
         }];
         let mut widget = WidgetInstance {
             id: "plugin-strip-1".to_string(),
@@ -2185,6 +2214,7 @@ mod tests {
             },
             min_symbol_limit: 1,
             symbol_limit: 5,
+            default_symbols: Vec::new(),
         }];
         let mut widget = WidgetInstance {
             id: "plugin-grid-1".to_string(),
@@ -2218,6 +2248,34 @@ mod tests {
                 width: 416,
                 height: 176,
             }
+        );
+    }
+
+    #[test]
+    fn plugin_definition_default_symbols_seed_new_instances() {
+        let settings = AppSettings::default();
+        let mut store = LayoutStore::default();
+        let plugin = WidgetDefinition {
+            id: "com.example.watchlist".to_string(),
+            name: "Watchlist".to_string(),
+            default_size: WidgetSize {
+                width: 300,
+                height: 180,
+            },
+            size_policy: WidgetSizePolicy::Fixed,
+            min_symbol_limit: 1,
+            symbol_limit: 5,
+            default_symbols: vec![
+                "okx:spot:ETH/USDT".to_string(),
+                "binance:spot:SOL/USDT".to_string(),
+            ],
+        };
+
+        add_plugin_instance(&mut store, &plugin, &settings, (1920, 1080));
+
+        assert_eq!(
+            store.widgets[0].symbols,
+            vec!["okx:spot:ETH/USDT", "binance:spot:SOL/USDT"]
         );
     }
 
@@ -2639,6 +2697,7 @@ mod tests {
             size_policy: WidgetSizePolicy::Fixed,
             min_symbol_limit: 2,
             symbol_limit: 3,
+            default_symbols: Vec::new(),
         }];
 
         normalize_store_with_catalog(&mut store, 0, &catalog, (1920, 1080));

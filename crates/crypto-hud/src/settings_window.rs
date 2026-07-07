@@ -16,7 +16,10 @@ use settings::{
     LayoutStore, ShortcutPreference, ThemePreference, WidgetDefinition, WidgetInstance,
     WidgetKind as WidgetType, WidgetSize,
 };
-use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer};
+use slint::{
+    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition, SharedString, Timer,
+    WindowPosition,
+};
 
 use crate::{
     autostart,
@@ -71,12 +74,154 @@ const SYMBOL_PICKER_MODE_WIDGET_REPLACE: i32 = 2;
 const STATUS_STRIP_PLUGIN_ID: &str = "com.cryptohud.status-strip";
 const STATUS_STRIP_VISIBLE_HEIGHT: i32 = 84;
 const STATUS_STRIP_PREVIOUS_TIGHT_HEIGHT: i32 = 84;
+const SETTINGS_WINDOW_DESIGN_WIDTH: f32 = 1120.0;
+const SETTINGS_WINDOW_DESIGN_HEIGHT: f32 = 720.0;
+const SETTINGS_WINDOW_WORK_AREA_MARGIN_LOGICAL: f32 = 32.0;
+const SETTINGS_WINDOW_MIN_SCALE: f32 = 0.3;
 const POPULAR_SYMBOL_ORDER: &[&str] = &[
     "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX", "TON", "LINK", "AVAX", "DOT", "LTC",
     "BCH", "SUI", "APT", "NEAR", "ARB", "OP", "ATOM", "FIL", "ETC", "UNI", "AAVE", "MKR", "INJ",
     "PEPE", "SHIB", "WIF", "BONK", "JUP", "SEI", "TIA", "RNDR", "FET", "ONDO", "PYTH", "ICP",
     "HBAR", "XLM", "MATIC", "POL",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SettingsWindowWorkArea {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SettingsWindowGeometry {
+    logical_width: f32,
+    logical_height: f32,
+    physical_x: i32,
+    physical_y: i32,
+}
+
+fn configure_settings_window_geometry(ui: &SettingsWindow) {
+    let work_area = settings_window_work_area();
+    let display_scale_factor = settings_window_display_scale_factor(ui);
+    let geometry = settings_window_geometry_for_work_area(work_area, display_scale_factor);
+    ui.window().set_size(LogicalSize::new(
+        geometry.logical_width,
+        geometry.logical_height,
+    ));
+    ui.window()
+        .set_position(WindowPosition::Physical(PhysicalPosition::new(
+            geometry.physical_x,
+            geometry.physical_y,
+        )));
+}
+
+fn settings_window_geometry_for_work_area(
+    work_area: SettingsWindowWorkArea,
+    display_scale_factor: f32,
+) -> SettingsWindowGeometry {
+    let display_scale_factor = if display_scale_factor.is_finite() && display_scale_factor > 0.0 {
+        display_scale_factor
+    } else {
+        1.0
+    };
+    let max_logical_width = (work_area.width.max(1) as f32 / display_scale_factor
+        - SETTINGS_WINDOW_WORK_AREA_MARGIN_LOGICAL)
+        .max(1.0);
+    let max_logical_height = (work_area.height.max(1) as f32 / display_scale_factor
+        - SETTINGS_WINDOW_WORK_AREA_MARGIN_LOGICAL)
+        .max(1.0);
+    let window_scale = (max_logical_width / SETTINGS_WINDOW_DESIGN_WIDTH)
+        .min(max_logical_height / SETTINGS_WINDOW_DESIGN_HEIGHT)
+        .min(1.0)
+        .max(SETTINGS_WINDOW_MIN_SCALE);
+    let logical_width = (SETTINGS_WINDOW_DESIGN_WIDTH * window_scale).round();
+    let logical_height = (SETTINGS_WINDOW_DESIGN_HEIGHT * window_scale).round();
+    let physical_width = (logical_width * display_scale_factor).round() as i32;
+    let physical_height = (logical_height * display_scale_factor).round() as i32;
+    let physical_x = work_area.x + (work_area.width - physical_width).max(0) / 2;
+    let physical_y = work_area.y + (work_area.height - physical_height).max(0) / 2;
+
+    SettingsWindowGeometry {
+        logical_width,
+        logical_height,
+        physical_x,
+        physical_y,
+    }
+}
+
+fn settings_window_work_area() -> SettingsWindowWorkArea {
+    platform_settings_window_work_area().unwrap_or_else(|| {
+        let (width, height) = desktop_size();
+        SettingsWindowWorkArea {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }
+    })
+}
+
+#[cfg(windows)]
+fn platform_settings_window_work_area() -> Option<SettingsWindowWorkArea> {
+    use windows_sys::Win32::{
+        Foundation::RECT,
+        UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA},
+    };
+
+    let mut rect = RECT::default();
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            &mut rect as *mut RECT as *mut std::ffi::c_void,
+            0,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some(SettingsWindowWorkArea {
+        x: rect.left,
+        y: rect.top,
+        width,
+        height,
+    })
+}
+
+#[cfg(not(windows))]
+fn platform_settings_window_work_area() -> Option<SettingsWindowWorkArea> {
+    None
+}
+
+fn settings_window_display_scale_factor(ui: &SettingsWindow) -> f32 {
+    ui.window()
+        .scale_factor()
+        .max(platform_settings_window_display_scale_factor())
+        .max(1.0)
+}
+
+#[cfg(windows)]
+fn platform_settings_window_display_scale_factor() -> f32 {
+    use windows_sys::Win32::UI::HiDpi::GetDpiForSystem;
+
+    let dpi = unsafe { GetDpiForSystem() };
+    if dpi == 0 {
+        1.0
+    } else {
+        dpi as f32 / 96.0
+    }
+}
+
+#[cfg(not(windows))]
+fn platform_settings_window_display_scale_factor() -> f32 {
+    1.0
+}
 
 struct SymbolMetadata {
     symbol: &'static str,
@@ -441,6 +586,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         plugin_catalog,
     } = deps;
     let ui = SettingsWindow::new().context("failed to create Slint settings window")?;
+    configure_settings_window_geometry(&ui);
     install_settings_drag_handler(&ui);
     let widget_reorder_state = Rc::new(RefCell::new(WidgetReorderState::default()));
     refresh_settings_window(
@@ -3119,6 +3265,53 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn settings_window_geometry_keeps_default_size_when_roomy() {
+        let geometry = settings_window_geometry_for_work_area(
+            SettingsWindowWorkArea {
+                x: 0,
+                y: 0,
+                width: 3840,
+                height: 2160,
+            },
+            2.0,
+        );
+
+        assert_eq!(geometry.logical_width, 1120.0);
+        assert_eq!(geometry.logical_height, 720.0);
+        assert_eq!(geometry.physical_x, 800);
+        assert_eq!(geometry.physical_y, 360);
+    }
+
+    #[test]
+    fn settings_window_geometry_shrinks_for_low_screen_high_scale() {
+        let geometry = settings_window_geometry_for_work_area(
+            SettingsWindowWorkArea {
+                x: 0,
+                y: 0,
+                width: 1366,
+                height: 768,
+            },
+            1.5,
+        );
+
+        assert_eq!(geometry.logical_width, 747.0);
+        assert_eq!(geometry.logical_height, 480.0);
+        assert_eq!(geometry.physical_x, 122);
+        assert_eq!(geometry.physical_y, 24);
+    }
+
+    #[test]
+    fn settings_window_ui_scales_existing_design_canvas() {
+        let source = settings_window_ui_source();
+
+        assert!(source.contains("property <length> settings-design-width: 1120px;"));
+        assert!(source.contains("property <length> settings-design-height: 720px;"));
+        assert!(source.contains("transform-scale-x: root.settings-window-scale;"));
+        assert!(source.contains("transform-scale-y: root.settings-window-scale;"));
+        assert!(source.contains("(self.mouse-x - self.pressed-x) * root.settings-window-scale"));
+    }
+
     fn block_before_anchor<'a>(source: &'a str, block_start: &str, anchor: &str) -> &'a str {
         let anchor_index = source.find(anchor).unwrap();
         let block_index = source[..anchor_index].rfind(block_start).unwrap();
@@ -4132,11 +4325,11 @@ mod tests {
             id: STATUS_STRIP_PLUGIN_ID.to_string(),
             name: "Status Strip".to_string(),
             default_size: settings::WidgetSize {
-                width: 688,
+                width: 618,
                 height: 92,
             },
             size_policy: settings::WidgetSizePolicy::SymbolGrid {
-                cell_width: 136,
+                cell_width: 122,
                 cell_height: 84,
                 content_padding_width: 8,
                 content_padding_height: 8,
@@ -4145,6 +4338,7 @@ mod tests {
             },
             min_symbol_limit: 1,
             symbol_limit: 5,
+            default_symbols: Vec::new(),
         }]
     }
 
@@ -4158,12 +4352,12 @@ mod tests {
                 plugin::BuiltinRenderer::QuoteBoard,
             ),
             default_size: plugin::PluginSize {
-                width: 688,
+                width: 618,
                 height: 92,
             },
             size_policy: plugin::PluginSizePolicy::SymbolGrid {
                 cell_size: plugin::PluginSize {
-                    width: 136,
+                    width: 122,
                     height: 84,
                 },
                 content_padding: plugin::PluginSize {
@@ -4175,6 +4369,7 @@ mod tests {
             },
             min_symbol_limit: 1,
             symbol_limit: 5,
+            default_symbols: Vec::new(),
             data_requirements: Vec::new(),
             status: plugin::PluginStatus::Available,
         }])
@@ -4234,13 +4429,13 @@ mod tests {
 
         apply_dynamic_widget_auto_size(&mut instance, &definitions, 100);
 
-        assert_eq!(instance.layout.width, 144);
+        assert_eq!(instance.layout.width, 130);
         assert_eq!(instance.layout.height, 92);
 
         instance.symbols = vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()];
         apply_dynamic_widget_auto_size(&mut instance, &definitions, 100);
 
-        assert_eq!(instance.layout.width, 416);
+        assert_eq!(instance.layout.width, 374);
         assert_eq!(instance.layout.height, 92);
     }
 
@@ -4269,7 +4464,7 @@ mod tests {
             &mut store,
             &status_strip_definitions()
         ));
-        assert_eq!(store.widgets[0].layout.width, 416);
+        assert_eq!(store.widgets[0].layout.width, 374);
         assert_eq!(store.widgets[0].layout.height, 92);
     }
 
@@ -4298,7 +4493,7 @@ mod tests {
             &mut store,
             &status_strip_definitions()
         ));
-        assert_eq!(store.widgets[0].layout.width, 832);
+        assert_eq!(store.widgets[0].layout.width, 748);
         assert_eq!(store.widgets[0].layout.height, 184);
     }
 
@@ -4327,7 +4522,7 @@ mod tests {
             &mut store,
             &status_strip_definitions()
         ));
-        assert_eq!(store.widgets[0].layout.width, 416);
+        assert_eq!(store.widgets[0].layout.width, 374);
         assert_eq!(store.widgets[0].layout.height, 92);
     }
 
@@ -4356,7 +4551,7 @@ mod tests {
             &mut store,
             &status_strip_definitions()
         ));
-        assert_eq!(store.widgets[0].layout.width, 416);
+        assert_eq!(store.widgets[0].layout.width, 374);
         assert_eq!(store.widgets[0].layout.height, 92);
     }
 
@@ -4370,7 +4565,7 @@ mod tests {
                 name: "Status Strip 1".to_string(),
                 visible: true,
                 layout: settings::WidgetLayout {
-                    width: 832,
+                    width: 748,
                     height: 184,
                     scale_percent: 200,
                     ..settings::WidgetLayout::default()
@@ -4385,7 +4580,7 @@ mod tests {
             &mut store,
             &status_strip_definitions()
         ));
-        assert_eq!(store.widgets[0].layout.width, 832);
+        assert_eq!(store.widgets[0].layout.width, 748);
         assert_eq!(store.widgets[0].layout.height, 184);
     }
 }

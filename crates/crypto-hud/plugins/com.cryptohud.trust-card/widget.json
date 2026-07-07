@@ -15,10 +15,13 @@
   },
   "defaultSize": {
     "width": 520,
-    "height": 410
+    "height": 386
   },
   "minSymbolLimit": 1,
   "symbolLimit": 1,
+  "defaultSymbols": [
+    "binance:spot:BTC/USDT"
+  ],
   "dataRequirements": [
     {
       "capability": "market.price"

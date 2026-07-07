@@ -23,9 +23,9 @@ export component MarketBoard inherits Window {
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
     property <bool> light-theme: root.theme-name == "light";
-    property <color> card-background: root.light-theme ? #f8fafcec : #111827ee;
-    property <color> card-header-background: root.light-theme ? #e0f7f4dd : #0f172acc;
-    property <color> card-border-color: root.light-theme ? #0f8f8288 : #2dd4bf88;
+    property <color> card-background: root.light-theme ? #f8fafcec : #0d1625f2;
+    property <color> card-header-background: root.light-theme ? #e0f7f4dd : #0b1728f4;
+    property <color> card-border-color: root.light-theme ? #0f8f8288 : #38bdf8b8;
     property <color> card-primary-text-color: root.light-theme ? #0f172a : #f8fafc;
     property <color> card-source-text-color: root.light-theme ? #047857 : #7dd3fc;
     property <color> card-updated-text-color: root.light-theme ? #64748b : #94a3b8;
@@ -74,6 +74,37 @@ export component MarketBoard inherits Window {
         border-width: 1px;
         border-color: root.card-border-color;
         opacity: root.content-opacity / 100;
+        clip: true;
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            border-radius: 8px;
+            background: @linear-gradient(155deg, #101d31f2 0%, #0e1727f2 46%, #0b1320f2 100%);
+            visible: !root.light-theme;
+        }
+
+        Rectangle {
+            x: -34px;
+            y: -28px;
+            width: 178px;
+            height: 96px;
+            border-radius: 40px;
+            background: @radial-gradient(circle 130px at 48px 20px, #1f6ea355 0%, #1559852a 42%, #15598500 100%);
+            visible: !root.light-theme;
+        }
+
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: parent.width - 2px;
+            height: 58px;
+            border-radius: 7px;
+            background: @linear-gradient(180deg, #1a385628 0%, #15304a14 52%, #15304a00 100%);
+            visible: !root.light-theme;
+        }
 
         Rectangle {
             x: 1px;
@@ -81,7 +112,33 @@ export component MarketBoard inherits Window {
             width: parent.width - 2px;
             height: 38px;
             border-radius: 7px;
-            background: root.card-header-background;
+            background: root.light-theme ? root.card-header-background : @linear-gradient(118deg, #102844f8 0%, #0c1c31f4 48%, #0b1728f4 100%);
+        }
+
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: 126px;
+            height: 38px;
+            border-radius: 7px;
+            background: @linear-gradient(112deg, #255f8a42 0%, #1b4a6f20 42%, #1b4a6f00 100%);
+            visible: !root.light-theme;
+        }
+
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: parent.width - 2px;
+            height: 1px;
+            background: root.light-theme ? #ffffffaa : #8bdcff5c;
+        }
+
+        Rectangle {
+            x: 1px;
+            y: 39px;
+            width: parent.width - 2px;
+            height: 1px;
+            background: root.light-theme ? #0f172a14 : #ffffff12;
         }
 
         Text {
@@ -202,10 +259,10 @@ export component MarketBoard inherits Window {
             width: 24px;
             height: 24px;
             border-radius: 6px;
-            background: root.layout-locked || lock_touch.has-hover ? root.card-header-background : root.card-background;
+            background: root.layout-locked || lock_button_hit_area.has-hover ? root.card-header-background : root.card-background;
             border-width: 1px;
             border-color: root.card-border-color;
-            visible: drag_area.has-hover || lock_touch.has-hover;
+            visible: root.layout-locked || drag_area.has-hover || lock_button_hit_area.has-hover;
 
             Path {
                 x: 4px;
@@ -222,16 +279,19 @@ export component MarketBoard inherits Window {
                 stroke-line-join: round;
             }
 
-            lock_touch := TouchArea {
-                width: parent.width;
-                height: parent.height;
-                mouse-cursor: pointer;
-                clicked => { root.toggle-layout-lock(); }
-            }
         }
 
 
 
 
+    }
+
+    lock_button_hit_area := TouchArea {
+        x: card.x + 269px * root.content-scale;
+        y: card.y + 6px * root.content-scale;
+        width: 24px * root.content-scale;
+        height: 24px * root.content-scale;
+        mouse-cursor: pointer;
+        clicked => { root.toggle-layout-lock(); }
     }
 }

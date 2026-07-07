@@ -8,7 +8,7 @@ use slint_interpreter::{ComponentInstance, Struct as SlintStruct, Value};
 
 use crate::{plugin, PriceCardWindow, QuoteRow};
 
-const STATUS_STRIP_DEFAULT_CELL_WIDTH: i32 = 136;
+const STATUS_STRIP_DEFAULT_CELL_WIDTH: i32 = 122;
 const STATUS_STRIP_MIN_CELL_WIDTH: i32 = 112;
 const STATUS_STRIP_MAX_VISIBLE_ROWS: usize = 5;
 // The Slint window keeps a transparent edge around the visible 84px strip so
@@ -164,6 +164,12 @@ impl WidgetUi {
         match self {
             Self::BuiltinPriceCard(ui) => ui.set_source_text(value),
             Self::DynamicSlint(ui) => ui.set_required_property("source-text", Value::from(value)),
+        }
+    }
+
+    fn set_source_name_text(&self, value: SharedString) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("source-name-text", Value::from(value));
         }
     }
 
@@ -447,6 +453,7 @@ pub(crate) fn apply_runtime_view_to_widget(
         cell_width_basis - STATUS_STRIP_WINDOW_PADDING * 2,
     ));
     ui.set_source_text(view.source_text.clone().into());
+    ui.set_source_name_text(view.source_name_text.clone().into());
     ui.set_updated_text(view.updated_text.clone().into());
     ui.set_chart_line_path(view.chart_line_path.clone().into());
     ui.set_chart_fill_path(view.chart_fill_path.clone().into());
