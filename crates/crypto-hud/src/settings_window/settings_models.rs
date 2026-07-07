@@ -1,5 +1,5 @@
 use crypto_hud_shell_state::{LayoutStore, WidgetInstance, WidgetKind as WidgetType};
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Image, ModelRc, SharedString, VecModel};
 
 use crate::{i18n, plugin, PluginMarketItem};
 
@@ -180,6 +180,7 @@ pub(crate) fn plugin_market_item(
     locale: i18n::Locale,
 ) -> PluginMarketItem {
     let builtin = definition.source == plugin::PluginSource::Builtin;
+    let preview_images = plugin_preview_images(definition);
     PluginMarketItem {
         title: plugin_market_title(definition, locale).into(),
         description: plugin_market_description(definition, locale).into(),
@@ -189,7 +190,47 @@ pub(crate) fn plugin_market_item(
         builtin,
         symbol_limit: definition.symbol_limit as i32,
         preview_kind: plugin_preview_kind(&definition.id),
+        preview_frame_index: 0,
+        preview_image_count: preview_images.count,
+        preview_image_1: preview_images.images[0].clone(),
+        preview_image_2: preview_images.images[1].clone(),
+        preview_image_3: preview_images.images[2].clone(),
+        preview_image_4: preview_images.images[3].clone(),
+        preview_image_5: preview_images.images[4].clone(),
     }
+}
+
+struct PreviewImages {
+    count: i32,
+    images: [Image; plugin::MAX_PREVIEW_IMAGES],
+}
+
+fn plugin_preview_images(definition: &plugin::PluginDefinition) -> PreviewImages {
+    let mut loaded = definition
+        .preview_images
+        .iter()
+        .take(plugin::MAX_PREVIEW_IMAGES)
+        .filter_map(|path| match Image::load_from_path(path) {
+            Ok(image) => Some(image),
+            Err(error) => {
+                eprintln!(
+                    "failed to load plugin preview image {}: {error}",
+                    path.display()
+                );
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let count = loaded.len() as i32;
+    let images = std::array::from_fn(|_| {
+        if loaded.is_empty() {
+            Image::default()
+        } else {
+            loaded.remove(0)
+        }
+    });
+
+    PreviewImages { count, images }
 }
 
 fn plugin_preview_kind(plugin_id: &str) -> i32 {

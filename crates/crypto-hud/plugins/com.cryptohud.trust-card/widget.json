@@ -22,6 +22,10 @@
   "defaultSymbols": [
     "binance:spot:BTC/USDT"
   ],
+  "previewImages": [
+    "ui/preview-light.png",
+    "ui/preview-dark.png"
+  ],
   "dataRequirements": [
     {
       "capability": "market.price"

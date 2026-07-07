@@ -44,7 +44,7 @@ it is still early software and may change quickly.
 ## What It Does
 
 - Shows draggable, optionally always-on-top desktop price widgets.
-- Tracks chosen symbols and fetches live data from Binance, OKX, and
+- Tracks chosen symbols and fetches live data from Binance, Coinbase, OKX, and
   Hyperliquid.
 - Supports widget styles, light/dark themes, English and Simplified Chinese,
   and market color preferences.

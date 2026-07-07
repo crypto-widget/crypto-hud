@@ -168,8 +168,11 @@ impl WidgetUi {
     }
 
     fn set_source_name_text(&self, value: SharedString) {
-        if let Self::DynamicSlint(ui) = self {
-            ui.set_optional_property("source-name-text", Value::from(value));
+        match self {
+            Self::BuiltinPriceCard(ui) => ui.set_source_name_text(value),
+            Self::DynamicSlint(ui) => {
+                ui.set_optional_property("source-name-text", Value::from(value));
+            }
         }
     }
 

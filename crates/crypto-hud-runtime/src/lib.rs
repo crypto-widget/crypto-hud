@@ -16,6 +16,7 @@ use std::{
 pub const HOST_PLUGIN_API_VERSION: &str = "0.1.0";
 pub const MIN_SYMBOL_LIMIT: usize = 1;
 pub const MAX_SYMBOL_LIMIT: usize = 5;
+pub const MAX_PREVIEW_IMAGES: usize = 5;
 
 const MIN_PLUGIN_WIDTH: i32 = 120;
 const MIN_PLUGIN_HEIGHT: i32 = 80;
@@ -46,6 +47,8 @@ pub struct PluginManifest {
     pub symbol_limit: usize,
     #[serde(default)]
     pub default_symbols: Vec<String>,
+    #[serde(default)]
+    pub preview_images: Vec<String>,
     #[serde(default)]
     pub data_requirements: Vec<PluginDataRequirement>,
 }
@@ -147,6 +150,7 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
         manifest.min_symbol_limit,
         manifest.symbol_limit,
     )?;
+    validate_preview_images(&manifest.preview_images)?;
     validate_size_policy(
         manifest.size_policy,
         manifest.default_size,
@@ -160,6 +164,26 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+fn validate_preview_images(preview_images: &[String]) -> Result<()> {
+    if preview_images.len() > MAX_PREVIEW_IMAGES {
+        bail!("previewImages must not exceed {MAX_PREVIEW_IMAGES} entries");
+    }
+
+    for image in preview_images {
+        validate_relative_path(image, "previewImages")?;
+        let extension = Path::new(image)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_lowercase())
+            .ok_or_else(|| anyhow::anyhow!("previewImages entries must have an extension"))?;
+        if !matches!(extension.as_str(), "png" | "jpg" | "jpeg") {
+            bail!("previewImages entries must be png, jpg, or jpeg files");
+        }
+    }
+
     Ok(())
 }
 
@@ -481,6 +505,7 @@ impl Default for RuntimeTextLabels<'static> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderLabels<'a> {
     pub binance: &'a str,
+    pub coinbase: &'a str,
     pub okx: &'a str,
     pub hyperliquid: &'a str,
     pub mixed: &'a str,
@@ -490,6 +515,7 @@ impl Default for ProviderLabels<'static> {
     fn default() -> Self {
         Self {
             binance: "Binance",
+            coinbase: "Coinbase",
             okx: "OKX",
             hyperliquid: "Hyperliquid",
             mixed: "Mixed",
@@ -815,7 +841,7 @@ pub fn source_name_text_for_symbols(
     quote_cache: &QuoteCache,
     labels: ProviderLabels<'_>,
 ) -> String {
-    source_display_text(symbols, quote_cache, labels)
+    source_primary_display_text(symbols, quote_cache, labels)
 }
 
 fn source_display_text(
@@ -839,8 +865,9 @@ fn source_display_text(
         });
     sources.sort_by_key(|source| match source {
         MarketDataSource::Binance => 0,
-        MarketDataSource::Okx => 1,
-        MarketDataSource::Hyperliquid => 2,
+        MarketDataSource::Coinbase => 1,
+        MarketDataSource::Okx => 2,
+        MarketDataSource::Hyperliquid => 3,
     });
 
     match sources.as_slice() {
@@ -850,9 +877,27 @@ fn source_display_text(
     }
 }
 
+fn source_primary_display_text(
+    symbols: &[String],
+    quote_cache: &QuoteCache,
+    labels: ProviderLabels<'_>,
+) -> String {
+    symbols
+        .iter()
+        .find_map(|symbol| {
+            quote_cache
+                .get(symbol)
+                .map(|state| state.source)
+                .or_else(|| market_pair_source(symbol))
+        })
+        .map(|source| provider_display_label(source, labels).to_string())
+        .unwrap_or_else(|| labels.mixed.to_string())
+}
+
 pub fn provider_display_label(provider: MarketDataSource, labels: ProviderLabels<'_>) -> &'_ str {
     match provider {
         MarketDataSource::Binance => labels.binance,
+        MarketDataSource::Coinbase => labels.coinbase,
         MarketDataSource::Okx => labels.okx,
         MarketDataSource::Hyperliquid => labels.hyperliquid,
     }
@@ -1142,6 +1187,46 @@ mod tests {
     }
 
     #[test]
+    fn parses_preview_images() {
+        let json = valid_manifest_json().replace(
+            r#""dataRequirements": ["#,
+            r#""previewImages": [
+                "ui/preview-light.png",
+                "ui/preview-dark.png"
+            ],
+            "dataRequirements": ["#,
+        );
+
+        let manifest = parse_manifest(&json).unwrap();
+
+        assert_eq!(
+            manifest.preview_images,
+            vec!["ui/preview-light.png", "ui/preview-dark.png"]
+        );
+    }
+
+    #[test]
+    fn rejects_more_than_five_preview_images() {
+        let json = valid_manifest_json().replace(
+            r#""dataRequirements": ["#,
+            r#""previewImages": [
+                "ui/preview-1.png",
+                "ui/preview-2.png",
+                "ui/preview-3.png",
+                "ui/preview-4.png",
+                "ui/preview-5.png",
+                "ui/preview-6.png"
+            ],
+            "dataRequirements": ["#,
+        );
+
+        assert!(parse_manifest(&json)
+            .unwrap_err()
+            .to_string()
+            .contains("previewImages"));
+    }
+
+    #[test]
     fn rejects_default_symbols_above_symbol_limit() {
         let json = valid_manifest_json().replace(
             r#""symbolLimit": 5"#,
@@ -1314,6 +1399,7 @@ mod tests {
             source_prefix: "实时行情",
             provider_labels: ProviderLabels {
                 binance: "Binance",
+                coinbase: "Coinbase",
                 okx: "OKX",
                 hyperliquid: "Hyperliquid",
                 mixed: "多个源",
@@ -1401,7 +1487,7 @@ mod tests {
             display_options: WidgetDisplayOptions::default(),
         });
 
-        assert_eq!(view.source_name_text, "Mixed");
+        assert_eq!(view.source_name_text, "OKX");
         assert_eq!(
             view.source_text,
             "live feed · Mixed · source issue · 1/2 live"

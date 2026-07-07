@@ -17,6 +17,7 @@ use crypto_hud_core::{
 use serde::Deserialize;
 
 const BINANCE_BASE_URL: &str = "https://api.binance.com";
+const COINBASE_EXCHANGE_BASE_URL: &str = "https://api.exchange.coinbase.com";
 const OKX_BASE_URL: &str = "https://www.okx.com";
 const HYPERLIQUID_BASE_URL: &str = "https://api.hyperliquid.xyz";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
@@ -158,6 +159,10 @@ fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalog>
         Ok(entries) => catalogs.push(entries),
         Err(error) => errors.push(format!("Binance: {error:#}")),
     }
+    match fetch_coinbase_symbol_catalog(agent) {
+        Ok(entries) => catalogs.push(entries),
+        Err(error) => errors.push(format!("Coinbase: {error:#}")),
+    }
     match fetch_okx_symbol_catalog(agent) {
         Ok(entries) => catalogs.push(entries),
         Err(error) => errors.push(format!("OKX: {error:#}")),
@@ -251,6 +256,7 @@ fn fetch_pair(
 ) -> Result<MarketSnapshot> {
     match pair.source {
         MarketDataSource::Binance => fetch_binance(agent, pair, candle_cache),
+        MarketDataSource::Coinbase => fetch_coinbase(agent, pair, candle_cache),
         MarketDataSource::Okx => fetch_okx(agent, pair, candle_cache),
         MarketDataSource::Hyperliquid => fetch_hyperliquid(agent, pair, candle_cache),
     }
@@ -268,6 +274,21 @@ fn fetch_binance(
     let mut snapshot = parse_binance_ticker(pair, &body)?;
     snapshot.chart_closes_24h =
         cached_or_fetch_candles(agent, pair, candle_cache, fetch_binance_candles)?;
+    Ok(snapshot)
+}
+
+fn fetch_coinbase(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    candle_cache: &mut CandleCache,
+) -> Result<MarketSnapshot> {
+    ensure_spot_pair(pair)?;
+    let product_id = coinbase_product_id(pair);
+    let url = format!("{COINBASE_EXCHANGE_BASE_URL}/products/{product_id}/stats");
+    let body = get_json(agent, &url)?;
+    let mut snapshot = parse_coinbase_stats(pair, &body)?;
+    snapshot.chart_closes_24h =
+        cached_or_fetch_candles(agent, pair, candle_cache, fetch_coinbase_candles)?;
     Ok(snapshot)
 }
 
@@ -390,6 +411,13 @@ fn fetch_binance_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f
     parse_binance_klines(&body)
 }
 
+fn fetch_coinbase_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f64>> {
+    let product_id = coinbase_product_id(pair);
+    let url = format!("{COINBASE_EXCHANGE_BASE_URL}/products/{product_id}/candles?granularity=300");
+    let body = get_json(agent, &url)?;
+    parse_coinbase_candles(&body)
+}
+
 fn fetch_okx_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f64>> {
     let instrument_id = okx_instrument_id(pair);
     let url = format!(
@@ -433,6 +461,12 @@ fn fetch_binance_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalog
     parse_binance_symbol_catalog(&body)
 }
 
+fn fetch_coinbase_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalogEntry>> {
+    let url = format!("{COINBASE_EXCHANGE_BASE_URL}/products");
+    let body = get_json(agent, &url)?;
+    parse_coinbase_symbol_catalog(&body)
+}
+
 fn fetch_okx_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalogEntry>> {
     let url = format!("{OKX_BASE_URL}/api/v5/public/instruments?instType=SPOT");
     let body = get_json(agent, &url)?;
@@ -461,6 +495,10 @@ fn combine_symbol_catalogs(catalogs: Vec<Vec<SymbolCatalogEntry>>) -> SymbolCata
 
 fn binance_ticker_symbol(pair: &MarketPair) -> String {
     format!("{}{}", pair.base, pair.quote)
+}
+
+fn coinbase_product_id(pair: &MarketPair) -> String {
+    format!("{}-{}", pair.base, pair.quote)
 }
 
 fn okx_instrument_id(pair: &MarketPair) -> String {
@@ -546,6 +584,69 @@ fn parse_binance_klines(body: &str) -> Result<Vec<f64>> {
         .context("failed to parse Binance klines")?;
     rows.iter()
         .map(|row| parse_json_decimal(row.get(4), "Binance kline close"))
+        .collect()
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinbaseStats {
+    open: String,
+    last: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinbaseProduct {
+    base_currency: String,
+    quote_currency: String,
+    status: String,
+    #[serde(default)]
+    trading_disabled: bool,
+}
+
+fn parse_coinbase_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
+    let products = serde_json::from_str::<Vec<CoinbaseProduct>>(body)
+        .context("failed to parse Coinbase products")?;
+    Ok(unique_catalog_entries(products.into_iter().filter_map(
+        |product| {
+            (product.status == "online"
+                && !product.trading_disabled
+                && coinbase_quote(&product.quote_currency))
+            .then(|| {
+                catalog_entry(
+                    MarketDataSource::Coinbase,
+                    MarketType::Spot,
+                    product.base_currency,
+                    product.quote_currency,
+                )
+            })
+            .flatten()
+        },
+    )))
+}
+
+fn parse_coinbase_stats(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
+    let stats =
+        serde_json::from_str::<CoinbaseStats>(body).context("failed to parse Coinbase stats")?;
+    let price = parse_decimal(&stats.last, "Coinbase last")?;
+    let open_24h = parse_decimal(&stats.open, "Coinbase open")?;
+    if open_24h <= 0.0 {
+        bail!("Coinbase open must be greater than zero");
+    }
+
+    Ok(MarketSnapshot {
+        symbol: pair.key(),
+        price,
+        change_percent_24h: ((price - open_24h) / open_24h) * 100.0,
+        chart_closes_24h: Vec::new(),
+        source: MarketDataSource::Coinbase,
+    })
+}
+
+fn parse_coinbase_candles(body: &str) -> Result<Vec<f64>> {
+    let rows = serde_json::from_str::<Vec<Vec<serde_json::Value>>>(body)
+        .context("failed to parse Coinbase candles")?;
+    rows.iter()
+        .rev()
+        .map(|row| parse_json_decimal(row.get(4), "Coinbase candle close"))
         .collect()
 }
 
@@ -742,6 +843,13 @@ fn stable_quote(quote: &str) -> bool {
     matches!(quote.trim().to_ascii_uppercase().as_str(), "USDT" | "USDC")
 }
 
+fn coinbase_quote(quote: &str) -> bool {
+    matches!(
+        quote.trim().to_ascii_uppercase().as_str(),
+        "USD" | "USDT" | "USDC"
+    )
+}
+
 fn unique_catalog_entries(
     entries: impl IntoIterator<Item = SymbolCatalogEntry>,
 ) -> Vec<SymbolCatalogEntry> {
@@ -863,6 +971,62 @@ mod tests {
                 .map(|entry| entry.key.as_str())
                 .collect::<Vec<_>>(),
             vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDC"]
+        );
+    }
+
+    #[test]
+    fn parses_coinbase_stats_and_derives_24hr_change() {
+        let snapshot = parse_coinbase_stats(
+            &pair("coinbase:spot:BTC/USD"),
+            r#"{"open":"100000.00","high":"108000.00","low":"99000.00","last":"106800.00","volume":"12.0"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.symbol, "coinbase:spot:BTC/USD");
+        assert_eq!(snapshot.source, MarketDataSource::Coinbase);
+        assert_eq!(snapshot.price, 106800.0);
+        assert!((snapshot.change_percent_24h - 6.8).abs() < 0.000001);
+        assert!(snapshot.chart_closes_24h.is_empty());
+    }
+
+    #[test]
+    fn parses_coinbase_5m_candles_oldest_first() {
+        let closes = parse_coinbase_candles(
+            r#"[
+                [1499040300,101.5,106.0,99.0,104.25,10.0],
+                [1499040000,100.0,105.0,95.0,101.5,12.0]
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(closes, vec![101.5, 104.25]);
+    }
+
+    #[test]
+    fn parses_coinbase_symbol_catalog_for_online_stable_spot_pairs() {
+        let entries = parse_coinbase_symbol_catalog(
+            r#"[
+                {"id":"BTC-USD","base_currency":"BTC","quote_currency":"USD","status":"online","trading_disabled":false},
+                {"id":"ETH-USDT","base_currency":"ETH","quote_currency":"USDT","status":"online","trading_disabled":false},
+                {"id":"SOL-USDC","base_currency":"SOL","quote_currency":"USDC","status":"online","trading_disabled":false},
+                {"id":"BTC-USDC","base_currency":"BTC","quote_currency":"USDC","status":"delisted","trading_disabled":true},
+                {"id":"ETH-BTC","base_currency":"ETH","quote_currency":"BTC","status":"online","trading_disabled":false},
+                {"id":"DOGE-USD","base_currency":"DOGE","quote_currency":"USD","status":"online","trading_disabled":true},
+                {"id":"btc-usd","base_currency":"btc","quote_currency":"USD","status":"online","trading_disabled":false}
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "coinbase:spot:BTC/USD",
+                "coinbase:spot:ETH/USDT",
+                "coinbase:spot:SOL/USDC"
+            ]
         );
     }
 

@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
     sync::{Arc, Mutex, OnceLock},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
@@ -17,7 +17,7 @@ use settings::{
     WidgetKind as WidgetType, WidgetSize,
 };
 use slint::{
-    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition, SharedString, Timer,
+    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition, SharedString, Timer, TimerMode,
     WindowPosition,
 };
 
@@ -68,9 +68,14 @@ const PREVIEW_KIND_TRUST_CARD: i32 = 3;
 const PREVIEW_KIND_ORBIT_PULSE: i32 = 4;
 const PREVIEW_KIND_MARKET_COMPASS: i32 = 5;
 const PREVIEW_KIND_STATUS_STRIP: i32 = 6;
+const PREVIEW_CAROUSEL_TICK_MS: u64 = 160;
+const PREVIEW_CAROUSEL_BASE_INTERVAL_MS: u64 = 2_200;
+const PREVIEW_CAROUSEL_JITTER_MS: u64 = 1_200;
+const PREVIEW_CAROUSEL_INITIAL_OFFSET_MS: u64 = 400;
 const SYMBOL_PICKER_MODE_WIDGET: i32 = 0;
 const SYMBOL_PICKER_MODE_DEFAULT: i32 = 1;
 const SYMBOL_PICKER_MODE_WIDGET_REPLACE: i32 = 2;
+const SYMBOL_PICKER_MODE_DEFAULT_REPLACE: i32 = 3;
 const STATUS_STRIP_PLUGIN_ID: &str = "com.cryptohud.status-strip";
 const STATUS_STRIP_VISIBLE_HEIGHT: i32 = 84;
 const STATUS_STRIP_PREVIOUS_TIGHT_HEIGHT: i32 = 84;
@@ -373,6 +378,101 @@ pub(crate) struct SettingsWindowDeps {
     pub(crate) plugin_catalog: Rc<plugin::PluginCatalog>,
 }
 
+pub(crate) fn install_preview_carousel_timer(
+    settings_window: slint::Weak<SettingsWindow>,
+) -> Timer {
+    let timer = Timer::default();
+    let schedules = Rc::new(RefCell::new(Vec::<PreviewCarouselSchedule>::new()));
+    let random_seed = Rc::new(RefCell::new(preview_carousel_seed()));
+
+    timer.start(
+        TimerMode::Repeated,
+        Duration::from_millis(PREVIEW_CAROUSEL_TICK_MS),
+        move || {
+            if let Some(ui) = settings_window.upgrade() {
+                let items = ui.get_plugin_market_items();
+                let row_count = items.row_count();
+                let now = Instant::now();
+                let mut schedules = schedules.borrow_mut();
+                let mut random_seed = random_seed.borrow_mut();
+                sync_preview_carousel_schedules(&mut schedules, row_count, now, &mut *random_seed);
+
+                for row in 0..row_count {
+                    if now < schedules[row].next_switch_at {
+                        continue;
+                    }
+
+                    schedules[row].next_switch_at =
+                        now + preview_carousel_interval(&mut schedules[row].seed);
+
+                    let Some(mut item) = items.row_data(row) else {
+                        continue;
+                    };
+                    if item.preview_image_count <= 1 {
+                        continue;
+                    }
+
+                    item.preview_frame_index = (item.preview_frame_index + 1) % 10_000;
+                    items.set_row_data(row, item);
+                }
+            }
+        },
+    );
+    timer
+}
+
+#[derive(Clone, Copy)]
+struct PreviewCarouselSchedule {
+    next_switch_at: Instant,
+    seed: u64,
+}
+
+fn sync_preview_carousel_schedules(
+    schedules: &mut Vec<PreviewCarouselSchedule>,
+    row_count: usize,
+    now: Instant,
+    random_seed: &mut u64,
+) {
+    while schedules.len() < row_count {
+        let mut item_seed = preview_carousel_random(random_seed)
+            ^ ((schedules.len() as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        schedules.push(PreviewCarouselSchedule {
+            next_switch_at: now + preview_carousel_initial_delay(&mut item_seed),
+            seed: item_seed,
+        });
+    }
+    schedules.truncate(row_count);
+}
+
+fn preview_carousel_seed() -> u64 {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+    nanos ^ ((std::process::id() as u64) << 32)
+}
+
+fn preview_carousel_initial_delay(seed: &mut u64) -> Duration {
+    let spread = PREVIEW_CAROUSEL_BASE_INTERVAL_MS + PREVIEW_CAROUSEL_JITTER_MS;
+    Duration::from_millis(
+        PREVIEW_CAROUSEL_INITIAL_OFFSET_MS + preview_carousel_random(seed) % spread,
+    )
+}
+
+fn preview_carousel_interval(seed: &mut u64) -> Duration {
+    Duration::from_millis(
+        PREVIEW_CAROUSEL_BASE_INTERVAL_MS
+            + preview_carousel_random(seed) % (PREVIEW_CAROUSEL_JITTER_MS + 1),
+    )
+}
+
+fn preview_carousel_random(seed: &mut u64) -> u64 {
+    *seed = seed
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407);
+    *seed ^ (*seed >> 32)
+}
+
 #[derive(Clone)]
 struct SettingsCommitContext {
     widgets: Rc<RefCell<Vec<WidgetRuntime>>>,
@@ -619,6 +719,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         let weak = ui.as_weak();
         move |red_up_enabled,
               market_binance_enabled,
+              market_coinbase_enabled,
               market_okx_enabled,
               market_hyperliquid_enabled,
               auto_start_enabled,
@@ -643,6 +744,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 red_up_enabled,
                 market_provider: previous.market_provider,
                 market_binance_enabled,
+                market_coinbase_enabled,
                 market_okx_enabled,
                 market_hyperliquid_enabled,
                 refresh_interval_seconds: settings::clamp_refresh_interval(
@@ -826,7 +928,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         let weak = ui.as_weak();
         move |symbol_index| {
             if let Some(ui) = weak.upgrade() {
-                open_symbol_replace_picker(&ui, symbol_index);
+                open_symbol_replace_picker(&ui, SYMBOL_PICKER_MODE_WIDGET_REPLACE, symbol_index);
             }
         }
     });
@@ -836,6 +938,15 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         move || {
             if let Some(ui) = weak.upgrade() {
                 open_symbol_picker(&ui, SYMBOL_PICKER_MODE_DEFAULT);
+            }
+        }
+    });
+
+    ui.on_open_default_symbol_replace_picker({
+        let weak = ui.as_weak();
+        move |symbol_index| {
+            if let Some(ui) = weak.upgrade() {
+                open_symbol_replace_picker(&ui, SYMBOL_PICKER_MODE_DEFAULT_REPLACE, symbol_index);
             }
         }
     });
@@ -894,6 +1005,22 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 let Some(settings) =
                     add_default_symbol_to_store(&commit.layouts, &commit.state_path, &symbol)
                 else {
+                    ui.set_symbol_picker_status_text(
+                        symbol_picker_empty_status_text(mode, current_ui_locale(&ui)).into(),
+                    );
+                    return;
+                };
+                close_symbol_picker(&ui);
+                commit.update_market_feed_config_from_store();
+                commit.set_saved_status(settings);
+                commit.refresh_settings_window(&weak);
+            } else if mode == SYMBOL_PICKER_MODE_DEFAULT_REPLACE {
+                let Some(settings) = replace_default_symbol_in_store(
+                    &commit.layouts,
+                    &commit.state_path,
+                    ui.get_symbol_picker_replace_index(),
+                    &symbol,
+                ) else {
                     ui.set_symbol_picker_status_text(
                         symbol_picker_empty_status_text(mode, current_ui_locale(&ui)).into(),
                     );
@@ -1599,6 +1726,9 @@ fn enabled_market_sources_from_ui(ui: &SettingsWindow) -> Vec<settings::MarketDa
     if ui.get_market_binance_enabled() {
         sources.push(settings::MarketDataSource::Binance);
     }
+    if ui.get_market_coinbase_enabled() {
+        sources.push(settings::MarketDataSource::Coinbase);
+    }
     if ui.get_market_okx_enabled() {
         sources.push(settings::MarketDataSource::Okx);
     }
@@ -1646,6 +1776,32 @@ fn remove_default_symbol_from_store(
     app_settings.market_default_symbols = remove_symbol_with_limit(
         app_settings.market_default_symbols.clone(),
         symbol_index as usize,
+        WidgetType::QuoteBoard.symbol_limit(),
+        settings::default_symbols_for_type(WidgetType::QuoteBoard),
+    );
+    store.settings = app_settings.normalized();
+    if let Err(error) = save_layout_store(state_path, &store) {
+        eprintln!("failed to save default symbols: {error:#}");
+    }
+    Some(store.settings.clone())
+}
+
+fn replace_default_symbol_in_store(
+    layouts: &Rc<RefCell<LayoutStore>>,
+    state_path: &std::path::Path,
+    symbol_index: i32,
+    symbol: &str,
+) -> Option<AppSettings> {
+    if symbol_index < 0 {
+        return None;
+    }
+    let symbol = settings::normalize_market_pair_key(symbol)?;
+    let mut store = layouts.borrow_mut();
+    let mut app_settings = store.settings.clone().normalized();
+    app_settings.market_default_symbols = replace_symbol_with_limit(
+        app_settings.market_default_symbols.clone(),
+        symbol_index as usize,
+        symbol,
         WidgetType::QuoteBoard.symbol_limit(),
         settings::default_symbols_for_type(WidgetType::QuoteBoard),
     );
@@ -1815,6 +1971,19 @@ fn remove_symbol_with_limit(
     settings::normalized_symbols_with_limit(symbols, limit, fallback)
 }
 
+fn replace_symbol_with_limit(
+    mut symbols: Vec<String>,
+    symbol_index: usize,
+    symbol: String,
+    limit: usize,
+    fallback: Vec<String>,
+) -> Vec<String> {
+    if symbol_index < symbols.len() && !symbols.contains(&symbol) {
+        symbols[symbol_index] = symbol;
+    }
+    settings::normalized_symbols_with_limit(symbols, limit, fallback)
+}
+
 fn collect_symbol_fallback_symbols(
     store: &LayoutStore,
     plugin_catalog: &plugin::PluginCatalog,
@@ -1870,16 +2039,14 @@ fn open_symbol_picker(ui: &SettingsWindow, mode: i32) {
     refresh_symbol_picker_models_from_ui(ui, &state, locale);
 }
 
-fn open_symbol_replace_picker(ui: &SettingsWindow, symbol_index: i32) {
+fn open_symbol_replace_picker(ui: &SettingsWindow, mode: i32, symbol_index: i32) {
     let locale = current_ui_locale(ui);
     ui.set_symbol_picker_open(true);
-    ui.set_symbol_picker_mode(SYMBOL_PICKER_MODE_WIDGET_REPLACE);
+    ui.set_symbol_picker_mode(mode);
     ui.set_symbol_picker_replace_index(symbol_index);
     ui.set_symbol_picker_search_text("".into());
     ui.set_symbol_picker_candidate_index(0);
-    ui.set_symbol_picker_title_text(
-        symbol_picker_title_text(SYMBOL_PICKER_MODE_WIDGET_REPLACE, locale).into(),
-    );
+    ui.set_symbol_picker_title_text(symbol_picker_title_text(mode, locale).into());
     ui.set_symbol_picker_confirm_text(symbol_picker_confirm_text(locale).into());
     ui.set_symbol_picker_cancel_text(symbol_picker_cancel_text(locale).into());
 
@@ -1912,17 +2079,21 @@ fn refresh_symbol_picker_models_from_ui(
     let mode = ui.get_symbol_picker_mode();
     let enabled_sources = enabled_market_sources_from_ui(ui);
     let query = ui.get_symbol_picker_search_text().to_string();
-    let selected_symbols = if mode == SYMBOL_PICKER_MODE_DEFAULT {
+    let is_default_mode =
+        mode == SYMBOL_PICKER_MODE_DEFAULT || mode == SYMBOL_PICKER_MODE_DEFAULT_REPLACE;
+    let is_replace_mode =
+        mode == SYMBOL_PICKER_MODE_WIDGET_REPLACE || mode == SYMBOL_PICKER_MODE_DEFAULT_REPLACE;
+    let selected_symbols = if is_default_mode {
         model_symbols(ui.get_default_symbol_values())
     } else {
         model_symbols(ui.get_widget_symbol_values())
     };
-    let max = if mode == SYMBOL_PICKER_MODE_DEFAULT {
+    let max = if is_default_mode {
         ui.get_default_symbol_max().max(0) as usize
     } else {
         ui.get_widget_symbol_max().max(0) as usize
     };
-    let options = if mode == SYMBOL_PICKER_MODE_WIDGET_REPLACE {
+    let options = if is_replace_mode {
         symbol_add_options_with_query(state, &enabled_sources, &selected_symbols, &query)
     } else if selected_symbols.len() >= max {
         Vec::new()
@@ -2091,8 +2262,9 @@ fn symbol_rank(symbol: &str, query: &str, source_index: usize) -> (usize, usize,
 fn source_rank(symbol: &str) -> usize {
     match settings::market_pair_source(symbol) {
         Some(settings::MarketDataSource::Binance) => 0,
-        Some(settings::MarketDataSource::Okx) => 1,
-        Some(settings::MarketDataSource::Hyperliquid) => 2,
+        Some(settings::MarketDataSource::Coinbase) => 1,
+        Some(settings::MarketDataSource::Okx) => 2,
+        Some(settings::MarketDataSource::Hyperliquid) => 3,
         None => usize::MAX,
     }
 }
@@ -2552,6 +2724,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_red_up_enabled(settings.red_up_enabled);
     ui.set_provider_index(settings.market_provider.index());
     ui.set_market_binance_enabled(settings.market_binance_enabled);
+    ui.set_market_coinbase_enabled(settings.market_coinbase_enabled);
     ui.set_market_okx_enabled(settings.market_okx_enabled);
     ui.set_market_hyperliquid_enabled(settings.market_hyperliquid_enabled);
     ui.set_refresh_interval_seconds(settings.refresh_interval_seconds);
@@ -2569,6 +2742,12 @@ pub(crate) fn refresh_settings_window(
         default_symbols
             .iter()
             .map(|symbol| format_symbol_option(symbol))
+            .collect(),
+    ));
+    ui.set_default_symbol_chip_values(owned_string_model(
+        default_symbols
+            .iter()
+            .map(|symbol| format_symbol_chip_label(symbol))
             .collect(),
     ));
     let widget_symbol_values = widget_symbols
@@ -3013,6 +3192,8 @@ fn symbol_picker_title_text(mode: i32, locale: i18n::Locale) -> &'static str {
     match (mode, locale) {
         (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::ZhHans) => "添加新建默认交易对",
         (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::En) => "Add new-widget default pair",
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) => "更换新建默认交易对",
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) => "Replace new-widget default pair",
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) => "更换当前组件交易对",
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) => "Replace current widget pair",
         (_, i18n::Locale::ZhHans) => "添加当前组件交易对",
@@ -3040,6 +3221,10 @@ fn symbol_picker_empty_status_text(mode: i32, locale: i18n::Locale) -> &'static 
         (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::En) => {
             "No new-widget default pairs are available"
         }
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) => "没有可更换的新建默认交易对",
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) => {
+            "No new-widget default pairs are available to replace"
+        }
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) => "没有可更换的当前组件交易对",
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) => {
             "No current widget pairs are available to replace"
@@ -3059,6 +3244,20 @@ fn symbol_picker_status_text(
     locale: i18n::Locale,
 ) -> String {
     match (mode, locale) {
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans)
+            if !query.trim().is_empty() && candidate_count == 0 =>
+        {
+            format!("没有匹配交易对")
+        }
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) if candidate_count == 0 => {
+            format!("没有可更换的交易对")
+        }
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) if fallback_only => {
+            format!("候选目录暂不可用，已使用本地候选，找到 {candidate_count} 个")
+        }
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) => {
+            format!("找到 {candidate_count} 个可更换交易对，只影响以后新建的小组件")
+        }
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans)
             if !query.trim().is_empty() && candidate_count == 0 =>
         {
@@ -3090,6 +3289,20 @@ fn symbol_picker_status_text(
         }
         (_, i18n::Locale::ZhHans) => {
             format!("找到 {candidate_count} 个可添加交易对，会立即影响当前小组件")
+        }
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En)
+            if !query.trim().is_empty() && candidate_count == 0 =>
+        {
+            format!("No matching pairs")
+        }
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) if candidate_count == 0 => {
+            format!("No pairs available to replace")
+        }
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) if fallback_only => {
+            format!("Catalog is unavailable; using local candidates. Found {candidate_count}")
+        }
+        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) => {
+            format!("Found {candidate_count} replacement pairs. Only affects newly created widgets")
         }
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En)
             if !query.trim().is_empty() && candidate_count == 0 =>
@@ -3479,6 +3692,25 @@ mod tests {
     }
 
     #[test]
+    fn default_symbol_chip_click_replaces_and_x_removes() {
+        let source = settings_window_ui_source();
+        let chips = block_after_anchor(
+            &source,
+            "for symbol[index] in root.default-symbol-chip-values : Rectangle {",
+            "",
+        );
+
+        assert!(
+            chips.contains("root.open-default-symbol-replace-picker(index);"),
+            "clicking the body of a default symbol chip should open replacement"
+        );
+        assert!(
+            chips.contains("root.remove-default-symbol(index);"),
+            "the default chip x hit area should keep removing symbols"
+        );
+    }
+
+    #[test]
     fn widget_symbol_chip_layout_keeps_max_symbols_in_one_row() {
         let labels = vec![
             "BTC/USDT · Binance · Bitcoin".to_string(),
@@ -3846,6 +4078,12 @@ mod tests {
                         "USDT",
                     ),
                     catalog_entry(
+                        settings::MarketDataSource::Coinbase,
+                        settings::MarketType::Spot,
+                        "BTC",
+                        "USD",
+                    ),
+                    catalog_entry(
                         settings::MarketDataSource::Hyperliquid,
                         settings::MarketType::Perp,
                         "BTC",
@@ -3873,6 +4111,7 @@ mod tests {
                 &state,
                 &enabled_sources(&[
                     settings::MarketDataSource::Binance,
+                    settings::MarketDataSource::Coinbase,
                     settings::MarketDataSource::Okx,
                     settings::MarketDataSource::Hyperliquid,
                 ]),
@@ -3880,6 +4119,7 @@ mod tests {
             ),
             vec![
                 "binance:spot:BTC/USDT",
+                "coinbase:spot:BTC/USD",
                 "okx:spot:BTC/USDT",
                 "hyperliquid:perp:BTC/USDC",
                 "binance:spot:BNB/USDT",
@@ -3901,6 +4141,14 @@ mod tests {
                 Vec::new()
             ),
             vec!["okx:spot:BTC/USDT", "okx:spot:OKB/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options(
+                &state,
+                &enabled_sources(&[settings::MarketDataSource::Coinbase]),
+                Vec::new()
+            ),
+            vec!["coinbase:spot:BTC/USD"]
         );
     }
 
@@ -4370,6 +4618,7 @@ mod tests {
             min_symbol_limit: 1,
             symbol_limit: 5,
             default_symbols: Vec::new(),
+            preview_images: Vec::new(),
             data_requirements: Vec::new(),
             status: plugin::PluginStatus::Available,
         }])

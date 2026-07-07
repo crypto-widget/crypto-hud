@@ -36,6 +36,9 @@
     "binance:spot:ETH/USDT",
     "binance:spot:SOL/USDT"
   ],
+  "previewImages": [
+    "ui/preview-light.png"
+  ],
   "dataRequirements": [
     {
       "capability": "market.price"

@@ -471,6 +471,8 @@ pub struct AppSettings {
     #[serde(default = "default_market_source_enabled")]
     pub market_binance_enabled: bool,
     #[serde(default = "default_market_source_enabled")]
+    pub market_coinbase_enabled: bool,
+    #[serde(default = "default_market_source_enabled")]
     pub market_okx_enabled: bool,
     #[serde(default = "default_market_source_enabled")]
     pub market_hyperliquid_enabled: bool,
@@ -511,6 +513,7 @@ impl Default for AppSettings {
             red_up_enabled: false,
             market_provider: MarketProviderPreference::default(),
             market_binance_enabled: default_market_source_enabled(),
+            market_coinbase_enabled: default_market_source_enabled(),
             market_okx_enabled: default_market_source_enabled(),
             market_hyperliquid_enabled: default_market_source_enabled(),
             refresh_interval_seconds: default_refresh_interval_seconds(),
@@ -540,18 +543,28 @@ impl AppSettings {
             market_provider: self.market_provider,
             market_binance_enabled: source_enabled_or_default(
                 self.market_binance_enabled,
+                self.market_coinbase_enabled,
                 self.market_okx_enabled,
                 self.market_hyperliquid_enabled,
                 MarketDataSource::Binance,
             ),
+            market_coinbase_enabled: source_enabled_or_default(
+                self.market_binance_enabled,
+                self.market_coinbase_enabled,
+                self.market_okx_enabled,
+                self.market_hyperliquid_enabled,
+                MarketDataSource::Coinbase,
+            ),
             market_okx_enabled: source_enabled_or_default(
                 self.market_binance_enabled,
+                self.market_coinbase_enabled,
                 self.market_okx_enabled,
                 self.market_hyperliquid_enabled,
                 MarketDataSource::Okx,
             ),
             market_hyperliquid_enabled: source_enabled_or_default(
                 self.market_binance_enabled,
+                self.market_coinbase_enabled,
                 self.market_okx_enabled,
                 self.market_hyperliquid_enabled,
                 MarketDataSource::Hyperliquid,
@@ -611,13 +624,15 @@ pub fn default_market_fallback_enabled() -> bool {
 
 fn source_enabled_or_default(
     binance_enabled: bool,
+    coinbase_enabled: bool,
     okx_enabled: bool,
     hyperliquid_enabled: bool,
     source: MarketDataSource,
 ) -> bool {
-    if binance_enabled || okx_enabled || hyperliquid_enabled {
+    if binance_enabled || coinbase_enabled || okx_enabled || hyperliquid_enabled {
         match source {
             MarketDataSource::Binance => binance_enabled,
+            MarketDataSource::Coinbase => coinbase_enabled,
             MarketDataSource::Okx => okx_enabled,
             MarketDataSource::Hyperliquid => hyperliquid_enabled,
         }
@@ -631,6 +646,9 @@ pub fn enabled_market_sources(settings: &AppSettings) -> Vec<MarketDataSource> {
     let mut sources = Vec::new();
     if settings.market_binance_enabled {
         sources.push(MarketDataSource::Binance);
+    }
+    if settings.market_coinbase_enabled {
+        sources.push(MarketDataSource::Coinbase);
     }
     if settings.market_okx_enabled {
         sources.push(MarketDataSource::Okx);
@@ -2041,6 +2059,7 @@ mod tests {
         assert!(!settings.red_up_enabled);
         assert_eq!(settings.market_provider, MarketProviderPreference::Auto);
         assert!(settings.market_binance_enabled);
+        assert!(settings.market_coinbase_enabled);
         assert!(settings.market_okx_enabled);
         assert!(settings.market_hyperliquid_enabled);
         assert_eq!(

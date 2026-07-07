@@ -44,7 +44,8 @@ use settings::{
 };
 use settings::{save_layout_store, state_dir_for_path, state_path, LayoutStore};
 use settings_window::{
-    apply_dynamic_widget_auto_sizes_to_store, install_settings_window, SettingsWindowDeps,
+    apply_dynamic_widget_auto_sizes_to_store, install_preview_carousel_timer,
+    install_settings_window, SettingsWindowDeps,
 };
 use slint::{ComponentHandle, Timer, TimerMode};
 use state_bridge::{
@@ -250,6 +251,7 @@ fn main() -> Result<()> {
         coin_icons: coin_icons.clone(),
         plugin_catalog: plugin_catalog.clone(),
     })?;
+    let preview_carousel_timer = install_preview_carousel_timer(settings_window.as_weak());
     let tray = install_tray(
         widgets.clone(),
         settings_window.as_weak(),
@@ -331,6 +333,7 @@ fn main() -> Result<()> {
     drop(runtime_event_timer);
     drop(widget_shell_window_maintenance_timer);
     drop(gui_smoke_settings_interaction_timer);
+    drop(preview_carousel_timer);
     drop(tray_hover_timer);
     drop(hotkey_timer);
     drop(gui_smoke_timer);
@@ -393,6 +396,7 @@ mod tests {
             min_symbol_limit: 1,
             symbol_limit: 2,
             default_symbols: Vec::new(),
+            preview_images: Vec::new(),
             data_requirements: vec![plugin::PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
@@ -695,6 +699,7 @@ mod tests {
         assert!(!item.builtin);
         assert_eq!(item.symbol_limit, 2);
         assert_eq!(item.preview_kind, 0);
+        assert_eq!(item.preview_image_count, 0);
         assert!(item.description.as_str().contains("260x170"));
     }
 

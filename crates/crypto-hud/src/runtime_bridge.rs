@@ -822,6 +822,7 @@ fn runtime_text_labels(text: &'static i18n::UiText) -> RuntimeTextLabels<'static
 fn provider_labels(locale: i18n::Locale) -> ProviderLabels<'static> {
     ProviderLabels {
         binance: "Binance",
+        coinbase: "Coinbase",
         okx: "OKX",
         hyperliquid: "Hyperliquid",
         mixed: match locale {

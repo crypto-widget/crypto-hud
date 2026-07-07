@@ -9,6 +9,7 @@ it remains in the `0.x` alpha series.
 
 ### Changed
 
+- Added Coinbase as a public spot market data source.
 - Prepared the repository for alpha open-source publication.
 - Renamed local development tasks and documentation from prototype wording to
   app-oriented wording.
@@ -26,6 +27,6 @@ it remains in the `0.x` alpha series.
 
 - Native Rust + Slint desktop widget shell.
 - Frameless, draggable, always-on-top market widgets.
-- Live market data from Binance, OKX, and Hyperliquid.
+- Live market data from Binance, Coinbase, OKX, and Hyperliquid.
 - Native settings window, tray controls, shortcuts, localization, theme
   settings, proxy settings, and Windows packaging scripts.

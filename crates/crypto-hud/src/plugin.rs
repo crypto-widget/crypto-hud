@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use crypto_hud_core::{default_market_symbols, normalize_market_pair_key};
 pub use crypto_hud_runtime::{
     parse_manifest, validate_manifest, PluginDataRequirement, PluginManifest, PluginSize,
-    PluginSizePolicy, MAX_SYMBOL_LIMIT, MIN_SYMBOL_LIMIT,
+    PluginSizePolicy, MAX_PREVIEW_IMAGES, MAX_SYMBOL_LIMIT, MIN_SYMBOL_LIMIT,
 };
 use semver::Version;
 use slint_interpreter::{Compiler, ComponentDefinition, ValueType};
@@ -154,6 +154,7 @@ pub struct PluginDefinition {
     pub min_symbol_limit: usize,
     pub symbol_limit: usize,
     pub default_symbols: Vec<String>,
+    pub preview_images: Vec<PathBuf>,
     pub data_requirements: Vec<PluginDataRequirement>,
     pub status: PluginStatus,
 }
@@ -246,6 +247,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             min_symbol_limit: MIN_SYMBOL_LIMIT,
             symbol_limit: MAX_SYMBOL_LIMIT,
             default_symbols: default_market_symbols(),
+            preview_images: builtin_preview_images("quote-board"),
             data_requirements: vec![PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
@@ -265,12 +267,25 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             min_symbol_limit: MIN_SYMBOL_LIMIT,
             symbol_limit: MIN_SYMBOL_LIMIT,
             default_symbols: default_market_symbols().into_iter().take(1).collect(),
+            preview_images: builtin_preview_images("mini-ticker"),
             data_requirements: vec![PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
             status: PluginStatus::Available,
         },
     ]
+}
+
+fn builtin_preview_images(prefix: &str) -> Vec<PathBuf> {
+    ["light", "dark"]
+        .into_iter()
+        .map(|theme| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("ui")
+                .join("previews")
+                .join(format!("{prefix}-{theme}.png"))
+        })
+        .collect()
 }
 
 pub fn plugin_roots(state_dir: &Path) -> Vec<PathBuf> {
@@ -385,13 +400,19 @@ pub fn manifest_to_definition(
     {
         bail!("renderer.entry must point to a .slint file");
     }
+    let preview_images = manifest
+        .preview_images
+        .into_iter()
+        .take(MAX_PREVIEW_IMAGES)
+        .map(|image| root_dir.join(image))
+        .collect();
     Ok(PluginDefinition {
         id: manifest.id,
         name: manifest.name,
         version,
         source: PluginSource::LocalUnsigned,
         renderer: PluginRendererDefinition::Slint {
-            root_dir,
+            root_dir: root_dir.clone(),
             entry,
             component: manifest.renderer.component,
             definition: None,
@@ -401,6 +422,7 @@ pub fn manifest_to_definition(
         min_symbol_limit: manifest.min_symbol_limit,
         symbol_limit: manifest.symbol_limit,
         default_symbols: normalize_default_symbols(manifest.default_symbols),
+        preview_images,
         data_requirements: manifest.data_requirements,
         status: PluginStatus::Unavailable("Slint renderer has not been compiled".to_string()),
     })
