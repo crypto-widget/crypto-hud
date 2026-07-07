@@ -12,6 +12,26 @@ pub fn apply_auto_start(enabled: bool, widget_count: usize) -> Result<(), String
     }
 }
 
+#[cfg(windows)]
+pub fn refresh_auto_start_registration_if_enabled(
+    enabled: bool,
+    widget_count: usize,
+) -> Result<(), String> {
+    if !enabled {
+        return Ok(());
+    }
+
+    let auto_launch = build_auto_launch(widget_count)?;
+    if !auto_launch
+        .is_enabled()
+        .map_err(|error| error.to_string())?
+    {
+        return Ok(());
+    }
+
+    auto_launch.enable().map_err(|error| error.to_string())
+}
+
 fn build_auto_launch(widget_count: usize) -> Result<auto_launch::AutoLaunch, String> {
     build_auto_launch_with_name("Crypto HUD", widget_count)
 }

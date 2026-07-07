@@ -194,6 +194,13 @@ fn main() -> Result<()> {
     }
     let layouts = Rc::new(RefCell::new(layout_store));
     let app_settings = layouts.borrow().settings.clone().normalized();
+    #[cfg(windows)]
+    if let Err(error) = autostart::refresh_auto_start_registration_if_enabled(
+        app_settings.auto_start_enabled,
+        layouts.borrow().widgets.len().max(1),
+    ) {
+        eprintln!("failed to refresh auto-start registration: {error}");
+    }
     let settings_status = Rc::new(RefCell::new(String::new()));
     let shortcut_manager = Rc::new(RefCell::new(shortcuts::ShortcutManager::new()));
     let market_feed_config = Arc::new(Mutex::new(market::MarketFeedConfig {
