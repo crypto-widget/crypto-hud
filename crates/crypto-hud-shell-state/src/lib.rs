@@ -45,6 +45,8 @@ const QUOTE_BOARD_WIDTH_COMPACT_SYMBOLS: i32 = 224;
 const QUOTE_BOARD_ONE_ROW_HEIGHT: i32 = 80;
 const QUOTE_BOARD_MULTI_ROW_BASE_HEIGHT: i32 = 70;
 const QUOTE_BOARD_ROW_HEIGHT_STEP: i32 = 31;
+const QUOTE_BOARD_LEGACY_ROW_HEIGHT_LIMIT: i32 = 5;
+const QUOTE_BOARD_EXTENDED_ROW_HEIGHT_STEP: i32 = 26;
 const LEGACY_QUOTE_BOARD_HEIGHT_WITH_FOOTER: i32 = 232;
 pub const DEFAULT_LAYOUT_SCAN_SLOTS: usize = 80;
 pub const MIN_VISIBLE_WIDGET_PX: i32 = 8;
@@ -58,7 +60,7 @@ pub const DEFAULT_WIDGET_SCALE_PERCENT: i32 = 100;
 pub const PARKED_WIDGET_X: i32 = -32_000;
 pub const PARKED_WIDGET_Y: i32 = -32_000;
 pub const MIN_SYMBOLS_PER_WIDGET: usize = 1;
-pub const MAX_SYMBOLS_PER_WIDGET: usize = 5;
+pub const MAX_SYMBOLS_PER_WIDGET: usize = 20;
 pub const MINI_TICKER_SYMBOL_LIMIT: usize = 1;
 pub const BUILTIN_QUOTE_BOARD_PLUGIN_ID: &str = "builtin.quote-board";
 pub const BUILTIN_MINI_TICKER_PLUGIN_ID: &str = "builtin.mini-ticker";
@@ -1964,8 +1966,12 @@ fn quote_board_height_for_row_count(row_count: usize) -> i32 {
     let row_count = row_count.clamp(MIN_SYMBOLS_PER_WIDGET, MAX_SYMBOLS_PER_WIDGET) as i32;
     if row_count <= 1 {
         QUOTE_BOARD_ONE_ROW_HEIGHT
-    } else {
+    } else if row_count <= QUOTE_BOARD_LEGACY_ROW_HEIGHT_LIMIT {
         QUOTE_BOARD_MULTI_ROW_BASE_HEIGHT + (row_count - 1) * QUOTE_BOARD_ROW_HEIGHT_STEP
+    } else {
+        QUOTE_BOARD_HEIGHT
+            + (row_count - QUOTE_BOARD_LEGACY_ROW_HEIGHT_LIMIT)
+                * QUOTE_BOARD_EXTENDED_ROW_HEIGHT_STEP
     }
 }
 
@@ -2158,6 +2164,26 @@ mod tests {
             "binance:spot:DOGE/USDT".to_string(),
         ];
         assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 194);
+
+        widget.symbols = (0..10)
+            .map(|index| format!("binance:spot:COIN{index}/USDT"))
+            .collect();
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 324);
+    }
+
+    #[test]
+    fn quote_board_symbol_limit_allows_twenty_pairs() {
+        let symbols = (0..25)
+            .map(|index| format!("COIN{index}/USDT"))
+            .collect::<Vec<_>>();
+        let normalized = normalized_symbols_for_type(WidgetKind::QuoteBoard, symbols);
+
+        assert_eq!(WidgetKind::QuoteBoard.symbol_limit(), 20);
+        assert_eq!(normalized.len(), 20);
+        assert_eq!(
+            normalized.last().map(String::as_str),
+            Some("binance:spot:COIN19/USDT")
+        );
     }
 
     #[test]

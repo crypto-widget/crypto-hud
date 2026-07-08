@@ -11,7 +11,7 @@ $DistDir = Join-Path $RepoRoot "dist"
 $PackageRoot = Join-Path $DistDir "crypto-hud-$Version-windows-x64"
 $ZipPath = "$PackageRoot.zip"
 $ChecksumPath = "$ZipPath.sha256"
-$InstallDir = Join-Path $RepoRoot ".package-smoke-install"
+$InstallDir = Join-Path $RepoRoot "target\tmp\package-smoke-install"
 
 function Assert-UnderRepo {
     param([string]$Path)

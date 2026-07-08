@@ -62,7 +62,9 @@ pub struct UiText {
     pub icon_cache: &'static str,
     pub icon_cache_help: &'static str,
     pub clear_icon_cache: &'static str,
-    pub install_update: &'static str,
+    pub custom_components: &'static str,
+    pub custom_components_help: &'static str,
+    pub open_custom_components_folder: &'static str,
     pub theme: &'static str,
     pub language: &'static str,
     pub appearance_interface: &'static str,
@@ -75,6 +77,7 @@ pub struct UiText {
     pub system_startup: &'static str,
     pub system_tray: &'static str,
     pub system_app_info: &'static str,
+    pub system_maintenance: &'static str,
     pub auto_start_help: &'static str,
     pub show_main_window_on_startup_help: &'static str,
     pub shortcut_help: &'static str,
@@ -135,12 +138,11 @@ pub struct UiText {
     pub widget_hidden: &'static str,
     pub delete_widget: &'static str,
     pub status_alert_invalid: &'static str,
-    pub status_update_started: &'static str,
-    pub status_update_failed: &'static str,
     pub status_auto_start_failed: &'static str,
     pub status_shortcut_failed: &'static str,
     pub status_network_proxy_invalid: &'static str,
     pub status_icon_cache_clear_failed: &'static str,
+    pub status_custom_components_folder_open_failed: &'static str,
     pub status_symbol_catalog_fallback: &'static str,
 }
 
@@ -175,7 +177,7 @@ const EN_TEXT: UiText = UiText {
     alert_threshold: "Threshold",
     alert_clear: "Clear Alert",
     symbols: "Pairs",
-    symbols_help: "Up to 5, selected pairs appear as tags",
+    symbols_help: "Up to 20, selected pairs appear as tags",
     empty_pairs: "No pairs configured",
     auto_start: "Launch at login",
     show_main_window_on_startup: "Show main window on startup",
@@ -193,7 +195,9 @@ const EN_TEXT: UiText = UiText {
     icon_cache: "Icon cache",
     icon_cache_help: "Removes locally cached coin logos.",
     clear_icon_cache: "Clear Icons",
-    install_update: "Install Update",
+    custom_components: "Custom widgets",
+    custom_components_help: "Opens the folder for local widget plugins.",
+    open_custom_components_folder: "Open Folder",
     theme: "Theme",
     language: "Language",
     appearance_interface: "Interface",
@@ -206,6 +210,7 @@ const EN_TEXT: UiText = UiText {
     system_startup: "Startup",
     system_tray: "Tray",
     system_app_info: "App Info",
+    system_maintenance: "Maintenance",
     auto_start_help: "Runs Crypto HUD after you sign in.",
     show_main_window_on_startup_help: "Opens the main window on app launch.",
     shortcut_help: "Use Alt+C to hide or restore widgets.",
@@ -245,7 +250,7 @@ const EN_TEXT: UiText = UiText {
         "Configure quote sources, refresh rate, default pairs, and alerts.",
     appearance_settings_description: "Adjust theme, language, and default widget display.",
     system_settings_description: "Manage startup behavior, proxy, tray, and app info.",
-    quote_board_description: "Shows up to 5 pairs for tracking major markets together.",
+    quote_board_description: "Shows up to 20 pairs for tracking major markets together.",
     mini_ticker_title: "Mini Ticker",
     mini_ticker_description: "Shows 1 pair in a compact window for desktop corners.",
     market_settings: "Quote Settings",
@@ -267,12 +272,11 @@ const EN_TEXT: UiText = UiText {
     widget_hidden: "Hidden",
     delete_widget: "Remove widget",
     status_alert_invalid: "Alert rule is incomplete",
-    status_update_started: "Update installer started",
-    status_update_failed: "Update install failed",
     status_auto_start_failed: "Auto-start failed",
     status_shortcut_failed: "Shortcut registration failed",
     status_network_proxy_invalid: "Network proxy is invalid",
     status_icon_cache_clear_failed: "Icon cache clear failed",
+    status_custom_components_folder_open_failed: "Could not open custom widgets folder",
     status_symbol_catalog_fallback: "Using popular pairs list",
 };
 
@@ -307,7 +311,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     alert_threshold: "阈值",
     alert_clear: "清除告警",
     symbols: "交易对",
-    symbols_help: "最多 5 个，选择后以标签显示",
+    symbols_help: "最多 20 个，选择后以标签显示",
     empty_pairs: "未配置交易对",
     auto_start: "开机启动",
     show_main_window_on_startup: "启动时显示主界面",
@@ -325,7 +329,9 @@ const ZH_HANS_TEXT: UiText = UiText {
     icon_cache: "图标缓存",
     icon_cache_help: "移除本地已缓存的币种 Logo。",
     clear_icon_cache: "清空图标",
-    install_update: "安装更新",
+    custom_components: "自定义小组件",
+    custom_components_help: "打开本地小组件插件目录。",
+    open_custom_components_folder: "打开目录",
     theme: "主题",
     language: "语言",
     appearance_interface: "界面",
@@ -338,6 +344,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     system_startup: "启动",
     system_tray: "托盘",
     system_app_info: "应用信息",
+    system_maintenance: "维护",
     auto_start_help: "登录 Windows 后自动运行应用。",
     show_main_window_on_startup_help: "启动应用时同时打开主界面。",
     shortcut_help: "按 Alt+C 快速隐藏或恢复小组件。",
@@ -376,7 +383,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     market_settings_description: "配置行情源、刷新频率、默认交易对和告警规则。",
     appearance_settings_description: "调整主题、语言和新建小组件默认显示。",
     system_settings_description: "管理启动行为、网络代理、托盘和应用信息。",
-    quote_board_description: "最多显示 5 个交易对，适合同时观察主流市场价格。",
+    quote_board_description: "最多显示 20 个交易对，适合同时观察主流市场价格。",
     mini_ticker_title: "迷你行情",
     mini_ticker_description: "只显示 1 个交易对，适合贴在桌面边角持续观察。",
     market_settings: "行情设置",
@@ -398,12 +405,11 @@ const ZH_HANS_TEXT: UiText = UiText {
     widget_hidden: "已隐藏",
     delete_widget: "移除小组件",
     status_alert_invalid: "告警规则不完整",
-    status_update_started: "更新安装器已启动",
-    status_update_failed: "更新安装失败",
     status_auto_start_failed: "自启动设置失败",
     status_shortcut_failed: "快捷键注册失败",
     status_network_proxy_invalid: "网络代理无效",
     status_icon_cache_clear_failed: "图标缓存清理失败",
+    status_custom_components_folder_open_failed: "无法打开自定义小组件目录",
     status_symbol_catalog_fallback: "正在使用热门交易对目录",
 };
 
@@ -574,8 +580,15 @@ mod tests {
         assert_eq!(en.seconds_unit, "sec");
         assert_eq!(en.appearance_widget_defaults, "Widget Defaults");
         assert_eq!(en.system_tray, "Tray");
+        assert_eq!(en.system_maintenance, "Maintenance");
         assert_eq!(en.app_version, "Version");
+        assert_eq!(en.custom_components, "Custom widgets");
+        assert_eq!(en.open_custom_components_folder, "Open Folder");
         assert_eq!(en.status_network_proxy_invalid, "Network proxy is invalid");
+        assert_eq!(
+            en.status_custom_components_folder_open_failed,
+            "Could not open custom widgets folder"
+        );
         assert_eq!(en.runtime_connection_error, "Connection failed");
         assert_eq!(en.runtime_live_count_suffix, " live");
         assert_eq!(en.tab_plugin_market, "Widget Library");
@@ -631,8 +644,15 @@ mod tests {
         assert_eq!(zh.seconds_unit, "秒");
         assert_eq!(zh.appearance_widget_defaults, "小组件默认值");
         assert_eq!(zh.system_tray, "托盘");
+        assert_eq!(zh.system_maintenance, "维护");
         assert_eq!(zh.app_version, "版本");
+        assert_eq!(zh.custom_components, "自定义小组件");
+        assert_eq!(zh.open_custom_components_folder, "打开目录");
         assert_eq!(zh.status_network_proxy_invalid, "网络代理无效");
+        assert_eq!(
+            zh.status_custom_components_folder_open_failed,
+            "无法打开自定义小组件目录"
+        );
         assert_eq!(zh.runtime_connection_error, "连接失败");
         assert_eq!(zh.runtime_live_count_prefix, "已连 ");
         assert_eq!(zh.tab_plugin_market, "组件库");

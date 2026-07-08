@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$StateDir = Join-Path $RepoRoot ".gui-plugin-scale-smoke-state"
+$StateDir = Join-Path $RepoRoot "target\tmp\gui-plugin-scale-smoke-state"
 $ReadyFile = Join-Path $StateDir "ready.json"
 $StateFile = Join-Path $StateDir "layouts.json"
 
@@ -63,7 +63,7 @@ $seedWidgets = @(
             opacity_percent = 96
             locked = $false
             scale_percent = 10
-            width = 42
+            width = 37
             height = 9
         }
         symbols = @("BTC", "ETH", "SOL")
@@ -233,7 +233,7 @@ try {
         $expected = @(
             [pscustomobject]@{ Title = "focus-ticker-10"; Width = 82; Height = 16 },
             [pscustomobject]@{ Title = "trust-card-10"; Width = 52; Height = 39 },
-            [pscustomobject]@{ Title = "status-strip-10"; Width = 42; Height = 9 }
+            [pscustomobject]@{ Title = "status-strip-10"; Width = 37; Height = 9 }
         )
 
         foreach ($widget in $expected) {

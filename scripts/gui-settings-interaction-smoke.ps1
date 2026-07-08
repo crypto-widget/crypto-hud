@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$StateDir = Join-Path $RepoRoot ".gui-settings-interaction-smoke-state"
+$StateDir = Join-Path $RepoRoot "target\tmp\gui-settings-interaction-smoke-state"
 $ReadyFile = Join-Path $StateDir "ready.json"
 $StateFile = Join-Path $StateDir "layouts.json"
 

@@ -535,6 +535,11 @@ mod tests {
             "quote board should derive its height scale basis from row count"
         );
         assert!(
+            source.contains("root.quote-rows.length > 20 ? 20 : root.quote-rows.length")
+                && source.contains("Math.mod(index, 2) == 0"),
+            "quote board should render all rows up to the configured pair limit"
+        );
+        assert!(
             source.contains("visible: root.show-coin-logos && root.quote-icons.length > index;"),
             "hidden quote icons should not render into the compacted symbol column"
         );
@@ -543,6 +548,15 @@ mod tests {
                 "quote-board-change-x: root.quote-board-row-width - root.quote-board-change-width"
             ),
             "change column should follow the compacted price column"
+        );
+        assert!(
+            source.contains(
+                "quote-board-symbol-width: root.s(root.hide-quote-asset ? 46px : (root.quote-icon-space-visible ? 80px : 92px))"
+            ) && source.contains("quote-board-change-width: root.s(64px)")
+                && source.contains(
+                    "quote-board-price-width: root.quote-board-change-x - root.quote-board-price-x - root.s(8px)"
+                ),
+            "quote board should reserve enough width for compact decimal prices"
         );
         assert!(
             source.contains("in property <float> widget-scale: 1.0;"),
@@ -558,9 +572,17 @@ mod tests {
             "builtin quote board should use a shared helper for direct scaled layout"
         );
         assert!(
-            source.contains("width: root.s(root.content-width);")
-                && source.contains("height: root.s(root.content-height);"),
-            "the card should render at the externally scaled content size"
+            source.contains("property <length> card-edge-inset: root.light-theme ? 2px : 1px;")
+                && source.contains("property <length> window-padding: 6px;")
+                && source.contains("property <length> card-rim-size: 2px;")
+                && source
+                    .contains("x: (root.widget-width * 1px - root.s(root.content-width)) / 2 - root.s(root.card-rim-size);")
+                && source.contains("x: edge_shadow.x + root.s(root.card-rim-size);")
+                && source.contains("width: root.s(root.content-width + root.card-rim-size * 2);")
+                && source.contains("width: edge_shadow.width - root.s(root.card-rim-size * 2);")
+                && source.contains("drop-shadow-blur: root.s(root.card-shadow-blur);")
+                && source.contains("clip: true;"),
+            "the card should keep padding for an unclipped rounded rim"
         );
         assert!(
             source.find("drag_area := TouchArea").unwrap()

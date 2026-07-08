@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use crypto_hud_core::{default_market_symbols, normalize_market_pair_key};
 pub use crypto_hud_runtime::{
     parse_manifest, validate_manifest, PluginDataRequirement, PluginManifest, PluginSize,
-    PluginSizePolicy, MAX_PREVIEW_IMAGES, MAX_SYMBOL_LIMIT, MIN_SYMBOL_LIMIT,
+    PluginSizePolicy, MAX_PREVIEW_IMAGES, MIN_SYMBOL_LIMIT,
 };
 use semver::Version;
 use slint_interpreter::{Compiler, ComponentDefinition, ValueType};
@@ -16,10 +16,15 @@ use slint_interpreter::{Compiler, ComponentDefinition, ValueType};
 pub use crypto_hud_shell_state::{BUILTIN_MINI_TICKER_PLUGIN_ID, BUILTIN_QUOTE_BOARD_PLUGIN_ID};
 
 pub const MANIFEST_FILE_NAME: &str = "widget.json";
+pub const USER_PLUGIN_DEVELOPMENT_GUIDE_FILE_NAME: &str = "CUSTOM_UI_PLUGIN_DEVELOPMENT.md";
 pub const MANIFEST_MAX_BYTES: u64 = 64 * 1024;
 pub const SLINT_FILE_MAX_BYTES: u64 = 256 * 1024;
 pub const ASSET_MAX_BYTES: u64 = 1024 * 1024;
 pub const PLUGIN_DIR_MAX_BYTES: u64 = 5 * 1024 * 1024;
+const USER_PLUGIN_DEVELOPMENT_GUIDE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../CUSTOM_UI_PLUGIN_DEVELOPMENT.md"
+));
 const HIDDEN_MARKET_PLUGIN_IDS: &[&str] = &[
     BUILTIN_MINI_TICKER_PLUGIN_ID,
     "com.cryptohud.market-board",
@@ -250,7 +255,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             },
             size_policy: PluginSizePolicy::Fixed,
             min_symbol_limit: MIN_SYMBOL_LIMIT,
-            symbol_limit: MAX_SYMBOL_LIMIT,
+            symbol_limit: crypto_hud_shell_state::WidgetKind::QuoteBoard.symbol_limit(),
             default_symbols: default_market_symbols(),
             preview_images: builtin_preview_images("quote-board"),
             data_requirements: vec![PluginDataRequirement {
@@ -295,9 +300,23 @@ fn builtin_preview_images(prefix: &str) -> Vec<PathBuf> {
 
 pub fn plugin_roots(state_dir: &Path) -> Vec<PathBuf> {
     vec![
-        state_dir.join("plugins"),
+        user_plugin_root(state_dir),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins"),
     ]
+}
+
+pub fn user_plugin_root(state_dir: &Path) -> PathBuf {
+    state_dir.join("plugins")
+}
+
+pub fn sync_user_plugin_development_guide(state_dir: &Path) -> Result<PathBuf> {
+    let root = user_plugin_root(state_dir);
+    fs::create_dir_all(&root)
+        .with_context(|| format!("failed to create plugin directory {}", root.display()))?;
+    let guide_path = root.join(USER_PLUGIN_DEVELOPMENT_GUIDE_FILE_NAME);
+    fs::write(&guide_path, USER_PLUGIN_DEVELOPMENT_GUIDE)
+        .with_context(|| format!("failed to write {}", guide_path.display()))?;
+    Ok(guide_path)
 }
 
 fn discover_root(root: &Path, catalog: &mut PluginCatalog, seen_ids: &mut HashSet<String>) {
@@ -725,6 +744,39 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
+    fn sync_user_plugin_development_guide_creates_and_overwrites_copy() {
+        let state_dir = temp_plugin_root("sync-user-plugin-development-guide");
+        let user_plugin_root = user_plugin_root(&state_dir);
+        fs::create_dir_all(&user_plugin_root).unwrap();
+        let guide_path = user_plugin_root.join(USER_PLUGIN_DEVELOPMENT_GUIDE_FILE_NAME);
+        fs::write(&guide_path, "stale guide").unwrap();
+
+        let synced_path = sync_user_plugin_development_guide(&state_dir).unwrap();
+
+        assert_eq!(synced_path, guide_path);
+        assert_eq!(
+            fs::read_to_string(&guide_path).unwrap(),
+            USER_PLUGIN_DEVELOPMENT_GUIDE
+        );
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn builtin_quote_board_plugin_uses_quote_board_symbol_limit() {
+        let plugins = builtin_plugins();
+        let quote_board = plugins
+            .iter()
+            .find(|plugin| plugin.id == BUILTIN_QUOTE_BOARD_PLUGIN_ID)
+            .unwrap();
+
+        assert_eq!(
+            quote_board.symbol_limit,
+            crypto_hud_shell_state::WidgetKind::QuoteBoard.symbol_limit()
+        );
+        assert_eq!(quote_board.symbol_limit, 20);
+    }
+
+    #[test]
     fn parses_valid_manifest() {
         let manifest = parse_manifest(&valid_manifest_json()).unwrap();
 
@@ -1056,6 +1108,18 @@ export component ExamplePriceCard inherits Window {
                 "{plugin_id} should avoid transform scaling because tiny live windows clip it"
             );
         }
+    }
+
+    #[test]
+    fn trust_card_chart_omits_horizontal_dotted_grid() {
+        let source = repo_plugin_ui_source("com.cryptohud.trust-card");
+
+        assert!(
+            !source.contains("for dot[i] in 38 : Rectangle"),
+            "trust card chart should not render horizontal dotted guide lines"
+        );
+        assert!(source.contains("commands: root.chart-line-path;"));
+        assert!(source.contains("commands: root.chart-fill-path;"));
     }
 
     #[test]

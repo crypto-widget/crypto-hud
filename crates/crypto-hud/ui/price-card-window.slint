@@ -1,5 +1,73 @@
 import { QuoteRow } from "models.slint";
 
+component RoundedFill inherits Rectangle {
+    in property <length> corner-radius;
+    in property <color> fill-color;
+    background: transparent;
+
+    Rectangle {
+        x: root.corner-radius;
+        width: parent.width - root.corner-radius * 2;
+        height: parent.height;
+        background: root.fill-color;
+    }
+
+    Rectangle {
+        y: root.corner-radius;
+        width: parent.width;
+        height: parent.height - root.corner-radius * 2;
+        background: root.fill-color;
+    }
+
+    Path {
+        x: 0px;
+        y: 0px;
+        width: root.corner-radius;
+        height: root.corner-radius;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 12 0 L 12 12 L 0 12 C 0 5.37 5.37 0 12 0 Z";
+        fill: root.fill-color;
+        stroke-width: 0px;
+    }
+
+    Path {
+        x: parent.width - root.corner-radius;
+        y: 0px;
+        width: root.corner-radius;
+        height: root.corner-radius;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 0 0 L 0 12 L 12 12 C 12 5.37 6.63 0 0 0 Z";
+        fill: root.fill-color;
+        stroke-width: 0px;
+    }
+
+    Path {
+        x: 0px;
+        y: parent.height - root.corner-radius;
+        width: root.corner-radius;
+        height: root.corner-radius;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 0 0 L 12 0 L 12 12 C 5.37 12 0 6.63 0 0 Z";
+        fill: root.fill-color;
+        stroke-width: 0px;
+    }
+
+    Path {
+        x: parent.width - root.corner-radius;
+        y: parent.height - root.corner-radius;
+        width: root.corner-radius;
+        height: root.corner-radius;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 0 0 L 12 0 C 12 6.63 6.63 12 0 12 L 0 0 Z";
+        fill: root.fill-color;
+        stroke-width: 0px;
+    }
+}
+
 export component PriceCardWindow inherits Window {
     in property <string> widget-id;
     in property <[QuoteRow]> quote-rows;
@@ -24,26 +92,44 @@ export component PriceCardWindow inherits Window {
     property <length> quote-board-base-width: root.hide-quote-asset
         ? (root.show-coin-logos ? 246px : 224px)
         : (root.show-coin-logos ? 286px : 274px);
-    property <int> quote-board-row-count: root.quote-rows.length < 1 ? 1 : (root.quote-rows.length > 5 ? 5 : root.quote-rows.length);
-    property <length> quote-board-base-height: root.quote-board-row-count <= 1 ? 80px : 70px + (root.quote-board-row-count - 1) * 31px;
-    property <length> content-width: root.compact-mode ? 236px : root.quote-board-base-width;
-    property <length> content-height: root.compact-mode ? 112px : root.quote-board-base-height;
+    property <int> quote-board-row-count: root.quote-rows.length < 1 ? 1 : (root.quote-rows.length > 20 ? 20 : root.quote-rows.length);
+    property <length> quote-board-base-height: root.quote-board-row-count <= 1
+        ? 80px
+        : (root.quote-board-row-count <= 5
+            ? 70px + (root.quote-board-row-count - 1) * 31px
+            : 194px + (root.quote-board-row-count - 5) * 26px);
+    property <length> shell-width: root.compact-mode ? 236px : root.quote-board-base-width;
+    property <length> shell-height: root.compact-mode ? 112px : root.quote-board-base-height;
+    property <length> window-padding: 6px;
+    property <length> content-width: root.shell-width - root.window-padding * 2;
+    property <length> content-height: root.shell-height - root.window-padding * 2;
     property <float> content-scale: root.widget-scale;
+    property <length> card-edge-inset: root.light-theme ? 2px : 1px;
+    property <length> card-outer-radius: root.light-theme ? 11px : 10px;
+    property <length> card-radius: 12px;
+    property <length> card-inner-radius: 11px;
+    property <length> card-border-width: 1px;
+    property <length> card-rim-size: 2px;
+    property <length> card-shadow-blur: root.light-theme ? 16px : 0px;
+    property <length> card-edge-shadow-blur: root.light-theme ? 8px : 0px;
+    property <color> card-shadow-color: root.light-theme ? #0f172a24 : #00000000;
+    property <color> card-edge-shadow-color: root.light-theme ? #0f172a18 : #7dd3fc24;
     property <bool> quote-icon-space-visible: root.show-coin-logos;
-    property <length> quote-board-row-width: root.s(root.content-width - 24px);
+    property <length> quote-board-row-width: root.s(root.content-width - root.card-edge-inset * 2 - 24px);
     property <length> quote-board-row-start-y: root.s(root.quote-board-row-count <= 1 ? 35px : 41px);
     property <length> quote-board-symbol-x: root.s(root.quote-icon-space-visible ? 25px : 4px);
-    property <length> quote-board-symbol-width: root.s(root.hide-quote-asset ? 48px : (root.quote-icon-space-visible ? 84px : 96px));
-    property <length> quote-board-price-x: root.quote-board-symbol-x + root.quote-board-symbol-width + root.s(root.hide-quote-asset ? 6px : 8px);
-    property <length> quote-board-change-width: root.s(66px);
+    property <length> quote-board-symbol-width: root.s(root.hide-quote-asset ? 46px : (root.quote-icon-space-visible ? 80px : 92px));
+    property <length> quote-board-price-x: root.quote-board-symbol-x + root.quote-board-symbol-width + root.s(6px);
+    property <length> quote-board-change-width: root.s(64px);
     property <length> quote-board-change-x: root.quote-board-row-width - root.quote-board-change-width;
-    property <length> quote-board-price-width: root.quote-board-change-x - root.quote-board-price-x - root.s(20px);
+    property <length> quote-board-price-width: root.quote-board-change-x - root.quote-board-price-x - root.s(8px);
     in property <int> content-opacity;
     in property <string> theme-name: "dark";
     property <bool> light-theme: root.theme-name == "light";
-    property <color> card-background: root.light-theme ? #f8fbffff : #0f1726ff;
+    property <color> card-background: root.light-theme ? #f8fbffff : #101c2dff;
     property <color> card-header-background: root.light-theme ? #eaf7ffff : #0d1a2dff;
-    property <color> card-border-color: root.light-theme ? #0ea5e980 : #0ea5e9a0;
+    property <color> card-border-color: root.light-theme ? #0f172a16 : #d8f4ff0e;
+    property <color> card-inner-border-color: root.light-theme ? #0f172a10 : #d8f4ff08;
     property <color> row-background: root.light-theme ? #ffffffb8 : #1722358a;
     property <color> row-divider-color: root.light-theme ? #cbd5e155 : #33415580;
     property <color> gain-pill-background: root.light-theme ? #d1fae5ff : #064e3bcc;
@@ -89,26 +175,46 @@ export component PriceCardWindow inherits Window {
         }
     }
 
-    card := Rectangle {
-        x: (root.widget-width * 1px - root.s(root.content-width)) / 2;
-        y: (root.widget-height * 1px - root.s(root.content-height)) / 2;
-        width: root.s(root.content-width);
-        height: root.s(root.content-height);
-        border-radius: root.s(8px);
-        background: root.card-background;
-        border-width: root.s(1px);
-        border-color: root.card-border-color;
+    edge_shadow := Rectangle {
+        x: (root.widget-width * 1px - root.s(root.content-width)) / 2 - root.s(root.card-rim-size);
+        y: (root.widget-height * 1px - root.s(root.content-height)) / 2 - root.s(root.card-rim-size);
+        width: root.s(root.content-width + root.card-rim-size * 2);
+        height: root.s(root.content-height + root.card-rim-size * 2);
+        border-radius: root.s(root.card-radius + root.card-rim-size);
+        background: transparent;
         opacity: root.content-opacity / 100;
+        drop-shadow-offset-y: 0px;
+        drop-shadow-blur: root.s(root.card-edge-shadow-blur);
+        drop-shadow-color: root.card-edge-shadow-color;
+
+        RoundedFill {
+            width: parent.width;
+            height: parent.height;
+            corner-radius: root.s(root.card-radius + root.card-rim-size);
+            fill-color: root.card-edge-shadow-color;
+        }
+    }
+
+    card := Rectangle {
+        x: edge_shadow.x + root.s(root.card-rim-size);
+        y: edge_shadow.y + root.s(root.card-rim-size);
+        width: edge_shadow.width - root.s(root.card-rim-size * 2);
+        height: edge_shadow.height - root.s(root.card-rim-size * 2);
+        border-radius: root.s(root.card-radius);
+        background: transparent;
+        border-width: 0px;
+        border-color: transparent;
+        opacity: root.content-opacity / 100;
+        drop-shadow-offset-y: root.s(root.light-theme ? 4px : 0px);
+        drop-shadow-blur: root.s(root.card-shadow-blur);
+        drop-shadow-color: root.card-shadow-color;
         clip: true;
 
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: parent.height - root.s(2px);
-            border-radius: root.s(7px);
-            background: @linear-gradient(135deg, #17334dff 0%, #111f33ff 36%, #0f1726ff 76%, #0f1726ff 100%);
-            visible: !root.compact-mode && !root.light-theme;
+        RoundedFill {
+            width: parent.width;
+            height: parent.height;
+            corner-radius: root.s(root.card-radius);
+            fill-color: root.card-background;
         }
 
         Rectangle {
@@ -116,49 +222,10 @@ export component PriceCardWindow inherits Window {
             y: root.s(1px);
             width: parent.width - root.s(2px);
             height: parent.height - root.s(2px);
-            border-radius: root.s(7px);
-            background: @linear-gradient(135deg, #f4fbffff 0%, #edf8ffff 34%, #f8fbffff 78%, #f8fbffff 100%);
-            visible: !root.compact-mode && root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: root.s(31px);
-            border-radius: root.s(7px);
-            background: @linear-gradient(180deg, #142947ff 0%, #10213aff 48%, #0c1729ff 100%);
-            visible: !root.compact-mode && !root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: root.s(31px);
-            border-radius: root.s(7px);
-            background: @linear-gradient(180deg, #f5fcffff 0%, #eaf7ffff 54%, #dcedfbff 100%);
-            visible: !root.compact-mode && root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: root.s(31px);
-            border-radius: root.s(7px);
-            background: @linear-gradient(115deg, #2b74aaa8 0%, #1c4d7d72 28%, #10294430 55%, #0d1a2d00 80%);
-            visible: !root.compact-mode && !root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: root.s(31px);
-            border-radius: root.s(7px);
-            background: @linear-gradient(115deg, #ffffffb8 0%, #cdeeff80 34%, #eaf7ff30 62%, #eaf7ff00 88%);
-            visible: !root.compact-mode && root.light-theme;
+            border-radius: root.s(root.card-inner-radius);
+            background: transparent;
+            border-width: 0px;
+            border-color: transparent;
         }
 
         Rectangle {
@@ -203,7 +270,7 @@ export component PriceCardWindow inherits Window {
             width: root.compact-mode ? parent.width - root.s(20px) : root.quote-board-row-width;
             height: root.s(root.compact-mode ? 30px : 25px);
             border-radius: root.s(5px);
-            background: !root.compact-mode && (index == 0 || index == 2 || index == 4) ? root.row-background : transparent;
+            background: !root.compact-mode && Math.mod(index, 2) == 0 ? root.row-background : transparent;
             visible: root.compact-mode ? index == 0 : index < root.quote-board-row-count;
 
             Rectangle {

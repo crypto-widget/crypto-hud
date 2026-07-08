@@ -1,4 +1,10 @@
-use std::{cell::RefCell, env, fs, path::PathBuf, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    env, fs,
+    path::{Path, PathBuf},
+    rc::Rc,
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use crypto_hud_shell_state as settings;
@@ -208,6 +214,49 @@ pub(crate) fn open_external_url(url: &str) -> Result<()> {
         .arg(url)
         .spawn()
         .with_context(|| format!("failed to open {url} with {opener}"))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+pub(crate) fn open_path(path: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+
+    let operation = wide_null_str("open");
+    let target = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+
+    if result as isize <= 32 {
+        anyhow::bail!("ShellExecuteW failed with code {}", result as isize);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub(crate) fn open_path(path: &Path) -> Result<()> {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(path)
+        .spawn()
+        .with_context(|| format!("failed to open {} with {opener}", path.display()))?;
     Ok(())
 }
 

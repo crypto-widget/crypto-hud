@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, Mutex, OnceLock},
     thread,
@@ -24,8 +25,10 @@ use slint::{
 use crate::{
     autostart,
     coin_icons::CoinIconRegistry,
-    desktop_shell::{install_settings_drag_handler, open_external_url, refresh_tray_text},
-    feature_flags, i18n, notifications, plugin, shortcuts, updater, AppTray, SettingsWindow,
+    desktop_shell::{
+        install_settings_drag_handler, open_external_url, open_path, refresh_tray_text,
+    },
+    feature_flags, i18n, notifications, plugin, shortcuts, AppTray, SettingsWindow,
     ABOUT_REPOSITORY_URL, WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT,
 };
 use crate::{
@@ -1601,30 +1604,20 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
-    ui.on_install_update({
-        let layouts = layouts.clone();
-        let settings_status = settings_status.clone();
+    ui.on_open_custom_components_folder({
+        let commit = commit_context.clone();
         let weak = ui.as_weak();
         move || {
-            let settings = layouts.borrow().settings.clone().normalized();
-            let text = i18n::text(i18n::resolve_locale(settings.language));
-            match updater::install_latest_update(settings::effective_network_proxy_url(&settings)) {
-                Ok(()) => {
-                    *settings_status.borrow_mut() = text.status_update_started.to_string();
-                    if let Some(ui) = weak.upgrade() {
-                        ui.set_status_text(settings_status.borrow().as_str().into());
-                    }
-                    if let Err(error) = slint::quit_event_loop() {
-                        eprintln!("failed to quit Slint event loop for update install: {error:#}");
-                    }
-                }
-                Err(error) => {
-                    *settings_status.borrow_mut() =
-                        format!("{}: {error:#}", text.status_update_failed);
-                    if let Some(ui) = weak.upgrade() {
-                        ui.set_status_text(settings_status.borrow().as_str().into());
-                    }
-                }
+            let locale = i18n::resolve_locale(commit.current_settings().language);
+            let custom_components_dir =
+                plugin::user_plugin_root(&settings::state_dir_for_path(&commit.state_path));
+            if let Err(error) = open_custom_components_folder(&custom_components_dir) {
+                let status = format!(
+                    "{}: {error:#}",
+                    i18n::text(locale).status_custom_components_folder_open_failed
+                );
+                *commit.settings_status.borrow_mut() = status;
+                commit.refresh_settings_window(&weak);
             }
         }
     });
@@ -1687,6 +1680,11 @@ fn status_icon_cache_cleared(deleted: usize, locale: i18n::Locale) -> String {
         i18n::Locale::En => format!("Icon cache cleared ({deleted} files removed)"),
         i18n::Locale::ZhHans => format!("图标缓存已清空（已移除 {deleted} 个文件）"),
     }
+}
+
+fn open_custom_components_folder(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
+    open_path(path).with_context(|| format!("failed to open {}", path.display()))
 }
 
 fn normalized_network_proxy_input(
@@ -2409,7 +2407,7 @@ const WIDGET_SYMBOL_CHIP_AVAILABLE_WIDTH: i32 = 485;
 const WIDGET_SYMBOL_CHIP_ROW_HEIGHT: i32 = 36;
 const WIDGET_SYMBOL_CHIP_GAP: i32 = 8;
 const WIDGET_SYMBOL_ADD_BUTTON_WIDTH: i32 = 69;
-const WIDGET_SYMBOL_MAX_COUNT: usize = 5;
+const WIDGET_SYMBOL_MAX_COUNT: usize = 20;
 
 fn widget_symbol_chip_layout(labels: &[String]) -> (Vec<i32>, Vec<i32>, Vec<i32>, i32, i32, i32) {
     let mut x_values = Vec::with_capacity(labels.len());
@@ -2433,7 +2431,10 @@ fn widget_symbol_chip_layout(labels: &[String]) -> (Vec<i32>, Vec<i32>, Vec<i32>
 
     let can_add_symbol = labels.len() < WIDGET_SYMBOL_MAX_COUNT;
     if can_add_symbol {
-        if cursor > 0
+        if row > 0 {
+            row += 1;
+            cursor = 0;
+        } else if cursor > 0
             && cursor + WIDGET_SYMBOL_ADD_BUTTON_WIDTH > WIDGET_SYMBOL_CHIP_AVAILABLE_WIDTH
         {
             row += 1;
@@ -2612,7 +2613,9 @@ pub(crate) fn refresh_settings_window(
     ui.set_icon_cache_text(text.icon_cache.into());
     ui.set_icon_cache_help_text(text.icon_cache_help.into());
     ui.set_clear_icon_cache_text(text.clear_icon_cache.into());
-    ui.set_install_update_text(text.install_update.into());
+    ui.set_custom_components_text(text.custom_components.into());
+    ui.set_custom_components_help_text(text.custom_components_help.into());
+    ui.set_open_custom_components_folder_text(text.open_custom_components_folder.into());
     ui.set_theme_text(text.theme.into());
     ui.set_language_text(text.language.into());
     ui.set_appearance_interface_text(text.appearance_interface.into());
@@ -2625,6 +2628,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_system_startup_text(text.system_startup.into());
     ui.set_system_tray_text(text.system_tray.into());
     ui.set_system_app_info_text(text.system_app_info.into());
+    ui.set_system_maintenance_text(text.system_maintenance.into());
     ui.set_auto_start_help_text(text.auto_start_help.into());
     ui.set_show_main_window_on_startup_help_text(text.show_main_window_on_startup_help.into());
     ui.set_shortcut_help_text(text.shortcut_help.into());
@@ -3586,6 +3590,14 @@ mod tests {
         value[..end].trim().parse().unwrap()
     }
 
+    fn slint_widget_display_y_offset(block: &str) -> i32 {
+        let marker = "y: (root.widget-display-section-y +";
+        let start = block.find(marker).unwrap() + marker.len();
+        let value = block[start..].trim_start();
+        let end = value.find(')').unwrap();
+        value[..end].trim().parse().unwrap()
+    }
+
     fn slint_x_assignment(block: &str, parent_width: i32) -> i32 {
         let start = block.find("x:").unwrap() + "x:".len();
         let value = block[start..].trim_start();
@@ -3624,6 +3636,10 @@ mod tests {
             "label: root.widget-scale-text;",
             "PercentStepper {",
         );
+        let opacity_slider =
+            block_after_anchor(&source, "label: root.opacity-text;", "OpacitySlider {");
+        let opacity_value_box =
+            block_after_anchor(opacity_slider, "committed(value) =>", "Rectangle {");
         let percent_label = block_after_anchor(scale_stepper, "edited(value) =>", "Text {");
         let reset_button = block_after_anchor(
             scale_stepper,
@@ -3631,18 +3647,32 @@ mod tests {
             "SettingsSmallButton {",
         );
 
-        let show_logos_bottom = slint_px_assignment(show_logos_touch, "y")
-            + slint_px_assignment(show_logos_touch, "height");
-        let hide_quote_bottom = slint_px_assignment(hide_quote_touch, "y")
-            + slint_px_assignment(hide_quote_touch, "height");
-        let scale_top = slint_px_assignment(scale_stepper, "y");
+        let scale_top = slint_widget_display_y_offset(scale_stepper);
+        let scale_bottom = scale_top + slint_px_assignment(scale_stepper, "height");
+        let opacity_top = slint_widget_display_y_offset(opacity_slider);
+        let opacity_height = slint_px_assignment(opacity_slider, "height");
+        let opacity_value_top = slint_widget_display_y_offset(opacity_value_box);
+        let opacity_value_height = slint_px_assignment(opacity_value_box, "height");
+        let opacity_bottom = opacity_value_top + opacity_value_height;
+        let show_logos_top = slint_widget_display_y_offset(show_logos_touch);
+        let show_logos_bottom = show_logos_top + slint_px_assignment(show_logos_touch, "height");
+        let hide_quote_top = slint_widget_display_y_offset(hide_quote_touch);
         assert!(
-            show_logos_bottom <= scale_top,
-            "show logos touch area overlaps widget scale stepper"
+            scale_bottom <= opacity_top,
+            "widget scale controls should sit above opacity controls"
+        );
+        assert_eq!(
+            opacity_top - opacity_value_top,
+            (opacity_value_height - opacity_height) / 2,
+            "opacity slider should be vertically centered against its value box"
         );
         assert!(
-            hide_quote_bottom <= scale_top,
-            "hide quote touch area overlaps widget scale stepper"
+            opacity_bottom <= show_logos_top,
+            "opacity controls should sit above show logos touch area"
+        );
+        assert!(
+            show_logos_bottom <= hide_quote_top,
+            "show logos touch area overlaps hide quote touch area"
         );
 
         let stepper_left = slint_x_assignment(scale_stepper, panel_width);
@@ -3686,6 +3716,106 @@ mod tests {
                 "width: selected_widget_panel.width - root.widget-settings-scrollbar-gutter;"
             ),
             "selected widget settings content should reserve the same scrollbar gutter"
+        );
+    }
+
+    #[test]
+    fn selected_widget_pairs_section_omits_duplicate_limit_help() {
+        let source = settings_window_ui_source();
+        let selected_panel =
+            block_after_anchor(&source, "selected_widget_panel := Rectangle {", "");
+
+        assert!(
+            !selected_panel.contains("text: root.symbols-help-text;"),
+            "pairs section should not repeat the selected/max pair count below chips"
+        );
+        assert!(
+            source.contains("property <int> widget-display-section-y: root.widget-symbol-status-y + 10;")
+                && source.contains(
+                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293) * 1px;"
+                ),
+            "removing pair limit help should tighten the spacing below the pair chips"
+        );
+    }
+
+    #[test]
+    fn system_app_info_separates_identity_from_maintenance_actions() {
+        let source = settings_window_ui_source();
+        let system_tab = block_after_anchor(&source, "system_tab := Rectangle {", "");
+        let maintenance_title_index = system_tab
+            .find("title: root.system-maintenance-text;")
+            .unwrap();
+        let app_info_title_index = system_tab
+            .find("title: root.system-app-info-text;")
+            .unwrap();
+        let maintenance_block = block_before_anchor(
+            system_tab,
+            "Rectangle {",
+            "title: root.system-maintenance-text;",
+        );
+        let app_info_start_in_maintenance_block = maintenance_block
+            .find("title: root.system-app-info-text;")
+            .unwrap();
+        let maintenance_card = &maintenance_block[..app_info_start_in_maintenance_block];
+        let app_info_card = block_before_anchor(
+            system_tab,
+            "Rectangle {",
+            "title: root.system-app-info-text;",
+        );
+        let about_label = block_before_anchor(app_info_card, "Text {", "text: root.about-us-text;");
+        let about_link = block_after_anchor(app_info_card, "about_link := Rectangle {", "");
+
+        assert!(source.contains("in property <string> system-maintenance-text;"));
+        assert!(source.contains("viewport-height: 854px;"));
+        assert!(
+            maintenance_title_index < app_info_title_index,
+            "maintenance actions should appear above app info"
+        );
+        assert!(maintenance_card.contains("y: 546px;"));
+        assert!(app_info_card.contains("y: 699px;"));
+        assert!(app_info_card.contains("text: root.app-version-label-text;"));
+        assert!(app_info_card.contains("text: root.about-us-text;"));
+        assert!(about_label.contains("y: 93px;"));
+        assert!(about_label.contains("height: 46px;"));
+        assert!(about_label.contains("vertical-alignment: center;"));
+        assert!(about_link.contains("y: 103px;"));
+        assert!(about_link.contains("Path {"));
+        assert!(about_link.contains("x: parent.width - 154px;"));
+        assert!(about_link.contains("viewbox-width: 16;"));
+        assert!(about_link.contains("y: (parent.height - 16px) / 2;"));
+        assert!(about_link.contains("x: parent.width - 134px;"));
+        assert!(about_link.contains("width: 117px;"));
+        assert!(about_link.contains("horizontal-alignment: right;"));
+        assert!(about_link.contains("vertical-alignment: center;"));
+        assert!(
+            !app_info_card.contains("root.icon-cache-text")
+                && !app_info_card.contains("root.custom-components-text"),
+            "app info should contain app identity, not maintenance actions"
+        );
+        assert!(maintenance_card.contains("label: root.icon-cache-text;"));
+        assert!(maintenance_card.contains("text: root.clear-icon-cache-text;"));
+        assert!(maintenance_card.contains("label: root.custom-components-text;"));
+        assert!(maintenance_card.contains("text: root.open-custom-components-folder-text;"));
+    }
+
+    #[test]
+    fn advanced_options_row_is_disabled_until_options_exist() {
+        let source = settings_window_ui_source();
+        let advanced_label =
+            block_before_anchor(&source, "Text {", "text: root.advanced-options-text;");
+        let advanced_arrow = block_after_anchor(
+            advanced_label,
+            "text: root.advanced-options-text;",
+            "Text {",
+        );
+
+        assert!(
+            advanced_label.contains("color: root.settings-muted-color;"),
+            "advanced options label should look disabled while it has no content"
+        );
+        assert!(
+            advanced_arrow.contains("text: \">\";") && advanced_arrow.contains("visible: false;"),
+            "advanced options should not show an affordance to enter an empty section"
         );
     }
 
@@ -3751,7 +3881,7 @@ mod tests {
     }
 
     #[test]
-    fn widget_symbol_chip_layout_keeps_max_symbols_in_one_row() {
+    fn widget_symbol_chip_layout_keeps_five_chips_in_one_row() {
         let labels = vec![
             "BTC/USDT · Binance · Bitcoin".to_string(),
             "ETH/USDT · Binance · Ethereum".to_string(),
@@ -3767,20 +3897,42 @@ mod tests {
         assert_eq!(y_values[0], WIDGET_SYMBOL_CHIP_START_Y);
         assert!(widths.iter().all(|width| *width >= 76 && *width <= 84));
         assert!(y_values.iter().all(|y| *y == WIDGET_SYMBOL_CHIP_START_Y));
-        assert!(add_x >= WIDGET_SYMBOL_CHIP_START_X);
-        assert_eq!(add_y, WIDGET_SYMBOL_CHIP_START_Y);
-        assert!(status_y > add_y);
+        assert_eq!(add_x, WIDGET_SYMBOL_CHIP_START_X);
+        assert_eq!(
+            add_y,
+            WIDGET_SYMBOL_CHIP_START_Y + WIDGET_SYMBOL_CHIP_ROW_HEIGHT
+        );
+        assert_eq!(status_y, add_y + WIDGET_SYMBOL_CHIP_ROW_HEIGHT + 8);
     }
 
     #[test]
-    fn widget_symbol_chip_layout_does_not_reserve_add_row_when_full() {
+    fn widget_symbol_chip_layout_moves_add_button_below_wrapped_chips() {
         let labels = vec![
             "BTC/USDT".to_string(),
             "ETH/USDT".to_string(),
             "SOL/USDT".to_string(),
-            "BNB/USDT".to_string(),
-            "XRP/USDT".to_string(),
+            "BCH/USDC".to_string(),
+            "PI/USDC".to_string(),
+            "FIL/USDC".to_string(),
         ];
+
+        let (_x_values, y_values, _widths, add_x, add_y, status_y) =
+            widget_symbol_chip_layout(&labels);
+
+        assert!(y_values.iter().any(|y| *y > WIDGET_SYMBOL_CHIP_START_Y));
+        assert_eq!(add_x, WIDGET_SYMBOL_CHIP_START_X);
+        assert_eq!(
+            add_y,
+            WIDGET_SYMBOL_CHIP_START_Y + WIDGET_SYMBOL_CHIP_ROW_HEIGHT * 2
+        );
+        assert_eq!(status_y, add_y + WIDGET_SYMBOL_CHIP_ROW_HEIGHT + 8);
+    }
+
+    #[test]
+    fn widget_symbol_chip_layout_does_not_reserve_add_row_when_full() {
+        let labels = (0..20)
+            .map(|index| format!("COIN{index}/USDT"))
+            .collect::<Vec<_>>();
 
         let (_x_values, y_values, _widths, _add_x, add_y, status_y) =
             widget_symbol_chip_layout(&labels);

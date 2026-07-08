@@ -5,6 +5,74 @@ export struct QuoteRow {
     positive: bool,
 }
 
+component RoundedFill inherits Rectangle {
+    in property <length> corner-radius;
+    in property <color> fill-color;
+    background: transparent;
+
+    Rectangle {
+        x: root.corner-radius;
+        width: parent.width - root.corner-radius * 2;
+        height: parent.height;
+        background: root.fill-color;
+    }
+
+    Rectangle {
+        y: root.corner-radius;
+        width: parent.width;
+        height: parent.height - root.corner-radius * 2;
+        background: root.fill-color;
+    }
+
+    Path {
+        x: 0px;
+        y: 0px;
+        width: root.corner-radius;
+        height: root.corner-radius;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 12 0 L 12 12 L 0 12 C 0 5.37 5.37 0 12 0 Z";
+        fill: root.fill-color;
+        stroke-width: 0px;
+    }
+
+    Path {
+        x: parent.width - root.corner-radius;
+        y: 0px;
+        width: root.corner-radius;
+        height: root.corner-radius;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 0 0 L 0 12 L 12 12 C 12 5.37 6.63 0 0 0 Z";
+        fill: root.fill-color;
+        stroke-width: 0px;
+    }
+
+    Path {
+        x: 0px;
+        y: parent.height - root.corner-radius;
+        width: root.corner-radius;
+        height: root.corner-radius;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 0 0 L 12 0 L 12 12 C 5.37 12 0 6.63 0 0 Z";
+        fill: root.fill-color;
+        stroke-width: 0px;
+    }
+
+    Path {
+        x: parent.width - root.corner-radius;
+        y: parent.height - root.corner-radius;
+        width: root.corner-radius;
+        height: root.corner-radius;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 0 0 L 12 0 C 12 6.63 6.63 12 0 12 L 0 0 Z";
+        fill: root.fill-color;
+        stroke-width: 0px;
+    }
+}
+
 export component FocusTicker inherits Window {
     in property <string> widget-id;
     in property <[QuoteRow]> quote-rows;
@@ -33,12 +101,19 @@ export component FocusTicker inherits Window {
 
     property <bool> light-theme: root.theme-name == "light";
     property <float> content-scale: root.widget-scale;
-    property <length> card-width: 796px;
-    property <length> card-height: 120px;
+    property <length> card-width: 788px;
+    property <length> card-height: 116px;
+    property <length> card-radius: 20px;
+    property <length> card-inner-radius: 19px;
+    property <length> card-border-width: 1px;
+    property <length> card-rim-size: 2px;
+    property <length> card-edge-shadow-blur: root.light-theme ? 10px : 0px;
     property <bool> chart-uses-gain-color: root.chart-positive ? !root.red-up-enabled : root.red-up-enabled;
-    property <color> card-background: root.light-theme ? #f7fcfff6 : #07111bf6;
-    property <color> card-border-color: root.light-theme ? #139ccca6 : #4be9ffd8;
-    property <color> card-inner-border-color: root.light-theme ? #ffffffc6 : #c8fbff24;
+    property <color> card-background: root.light-theme ? #f7fcfff6 : #0d1826f6;
+    property <color> card-border-color: root.light-theme ? #0f172a18 : #d8f4ff0e;
+    property <color> card-shadow-color: root.light-theme ? #0f172a24 : #00000000;
+    property <color> card-edge-shadow-color: root.light-theme ? #0f172a18 : #7dd3fc24;
+    property <color> card-inner-border-color: root.light-theme ? #0f172a10 : #d8f4ff08;
     property <color> card-primary-text-color: root.light-theme ? #071426 : #f8fbff;
     property <color> card-source-text-color: root.light-theme ? #0f6f95 : #a9b8c9;
     property <color> card-updated-text-color: root.light-theme ? #66788e : #8ea1b6;
@@ -92,91 +167,46 @@ export component FocusTicker inherits Window {
         }
     }
 
-    card_shadow := Rectangle {
-        x: (root.widget-width * 1px - root.s(root.card-width)) / 2;
-        y: (root.widget-height * 1px - root.s(root.card-height)) / 2;
-        width: root.s(root.card-width);
-        height: root.s(root.card-height);
-        border-radius: root.s(18px);
+    edge_shadow := Rectangle {
+        x: (root.widget-width * 1px - root.s(root.card-width)) / 2 - root.s(root.card-rim-size);
+        y: (root.widget-height * 1px - root.s(root.card-height)) / 2 - root.s(root.card-rim-size);
+        width: root.s(root.card-width + root.card-rim-size * 2);
+        height: root.s(root.card-height + root.card-rim-size * 2);
+        border-radius: root.s(root.card-radius + root.card-rim-size);
         background: transparent;
-        border-width: root.s(1px);
-        border-color: root.card-border-color;
         opacity: root.content-opacity / 100;
-        drop-shadow-offset-y: root.s(root.light-theme ? 10px : 0px);
-        drop-shadow-blur: root.s(root.light-theme ? 22px : 24px);
-        drop-shadow-color: root.light-theme ? #0ea5e92d : #00d8ff63;
+        drop-shadow-offset-y: 0px;
+        drop-shadow-blur: root.s(root.card-edge-shadow-blur);
+        drop-shadow-color: root.card-edge-shadow-color;
+
+        RoundedFill {
+            width: parent.width;
+            height: parent.height;
+            corner-radius: root.s(root.card-radius + root.card-rim-size);
+            fill-color: root.card-edge-shadow-color;
+        }
     }
 
     card := Rectangle {
-        x: card_shadow.x;
-        y: card_shadow.y;
-        width: card_shadow.width;
-        height: card_shadow.height;
-        border-radius: root.s(18px);
-        background: root.card-background;
-        border-width: root.s(1px);
-        border-color: root.card-border-color;
+        x: edge_shadow.x + root.s(root.card-rim-size);
+        y: edge_shadow.y + root.s(root.card-rim-size);
+        width: edge_shadow.width - root.s(root.card-rim-size * 2);
+        height: edge_shadow.height - root.s(root.card-rim-size * 2);
+        border-radius: root.s(root.card-radius);
+        background: transparent;
+        border-width: 0px;
+        border-color: transparent;
         opacity: root.content-opacity / 100;
+        drop-shadow-offset-y: root.s(root.light-theme ? 5px : 0px);
+        drop-shadow-blur: root.s(root.light-theme ? 18px : 0px);
+        drop-shadow-color: root.card-shadow-color;
         clip: true;
 
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: parent.height - root.s(2px);
-            border-radius: root.s(17px);
-            background: @linear-gradient(120deg, #1b3145f4 0%, #0c1b2af2 36%, #07111bf6 68%, #050b12fa 100%);
-            visible: !root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: parent.height - root.s(2px);
-            border-radius: root.s(17px);
-            background: @linear-gradient(120deg, #fffffffb 0%, #eef9fffb 42%, #e7f2fbf4 74%, #f8fcfff4 100%);
-            visible: root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: root.s(316px);
-            height: parent.height - root.s(2px);
-            border-radius: root.s(17px);
-            background: @linear-gradient(115deg, #8fdfff30 0%, #4f9edc22 38%, #0d1d2c00 82%);
-            visible: !root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: root.s(316px);
-            height: parent.height - root.s(2px);
-            border-radius: root.s(17px);
-            background: @linear-gradient(115deg, #ffffffd8 0%, #d8f2ff86 45%, #eaf6ff00 86%);
-            visible: root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: root.s(42px);
-            border-radius: root.s(17px);
-            background: @linear-gradient(180deg, #ffffff14 0%, #ffffff06 42%, #ffffff00 100%);
-            visible: !root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(1px);
-            y: root.s(1px);
-            width: parent.width - root.s(2px);
-            height: root.s(42px);
-            border-radius: root.s(17px);
-            background: @linear-gradient(180deg, #ffffffba 0%, #ffffff4c 46%, #ffffff00 100%);
-            visible: root.light-theme;
+        RoundedFill {
+            width: parent.width;
+            height: parent.height;
+            corner-radius: root.s(root.card-radius);
+            fill-color: root.card-background;
         }
 
         Rectangle {
@@ -210,10 +240,10 @@ export component FocusTicker inherits Window {
             y: root.s(1px);
             width: parent.width - root.s(2px);
             height: parent.height - root.s(2px);
-            border-radius: root.s(17px);
+            border-radius: root.s(root.card-inner-radius);
             background: transparent;
-            border-width: root.s(1px);
-            border-color: root.card-inner-border-color;
+            border-width: 0px;
+            border-color: transparent;
         }
 
         for quote[index] in root.quote-rows : Rectangle {

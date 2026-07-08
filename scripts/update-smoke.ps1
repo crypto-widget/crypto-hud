@@ -11,7 +11,7 @@ $DistDir = Join-Path $RepoRoot "dist"
 $PackageRoot = Join-Path $DistDir "crypto-hud-$Version-windows-x64"
 $ZipPath = "$PackageRoot.zip"
 $ChecksumPath = "$ZipPath.sha256"
-$InstallDir = Join-Path $RepoRoot ".update-smoke-install"
+$InstallDir = Join-Path $RepoRoot "target\tmp\update-smoke-install"
 $ExtractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "crypto-hud-update-smoke-$PID"
 
 function Assert-UnderDirectory {

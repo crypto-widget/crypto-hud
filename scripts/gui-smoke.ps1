@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $Widgets = [Math]::Max($Widgets, 1)
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$StateDir = Join-Path $RepoRoot ".gui-smoke-state"
+$StateDir = Join-Path $RepoRoot "target\tmp\gui-smoke-state"
 $ReadyFile = Join-Path $StateDir "ready.json"
 $StateFile = Join-Path $StateDir "layouts.json"
 

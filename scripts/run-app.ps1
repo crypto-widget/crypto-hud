@@ -1,5 +1,5 @@
 param(
-    [string]$StateDir = ".demo-run-state",
+    [string]$StateDir = "target\tmp\demo-run-state",
     [switch]$KeepState,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$AppArgs = @()

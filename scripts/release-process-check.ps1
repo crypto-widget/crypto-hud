@@ -18,7 +18,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Exe = Join-Path $RepoRoot "target\release\crypto-hud.exe"
-$StateRoot = Join-Path $RepoRoot ".release-process-state"
+$StateRoot = Join-Path $RepoRoot "target\tmp\release-process-state"
 
 if ([string]::IsNullOrWhiteSpace($ReportPath)) {
     $ReportPath = Join-Path $RepoRoot "dist\release-process-check.json"

@@ -176,6 +176,9 @@ fn main() -> Result<()> {
     };
     let state_path = state_path()?;
     let state_dir = state_dir_for_path(&state_path);
+    if let Err(error) = plugin::sync_user_plugin_development_guide(&state_dir) {
+        eprintln!("failed to sync custom plugin development guide: {error:#}");
+    }
     let plugin_catalog = Rc::new(plugin::PluginCatalog::load(&state_dir));
     for error in plugin_catalog.errors() {
         eprintln!("plugin catalog warning: {error}");
@@ -607,16 +610,15 @@ mod tests {
 
     #[test]
     fn pair_input_is_capped_to_widget_capacity() {
-        assert_eq!(
-            parse_symbols("BTC, ETH, SOL, BNB, XRP, DOGE"),
-            vec![
-                "binance:spot:BTC/USDT",
-                "binance:spot:ETH/USDT",
-                "binance:spot:SOL/USDT",
-                "binance:spot:BNB/USDT",
-                "binance:spot:XRP/USDT"
-            ]
-        );
+        let input = (0..25)
+            .map(|index| format!("COIN{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let expected = (0..20)
+            .map(|index| format!("binance:spot:COIN{index}/USDT"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(parse_symbols(&input), expected);
     }
 
     #[test]
