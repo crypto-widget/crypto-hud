@@ -21,7 +21,7 @@ it remains in the `0.x` alpha series.
 - Added contribution and security policy documents.
 - Clarified the local Windows release packaging process.
 
-## 0.8.2 - Unreleased
+## 0.8.3 - Unreleased
 
 ### Added
 
