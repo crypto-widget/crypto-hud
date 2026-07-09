@@ -59,7 +59,8 @@ use settings_models::{
     bool_model, image_model, int_model, owned_string_model, plugin_market_items_model,
     string_model, widget_instance_detail_options, widget_instance_options,
     widget_preview_image_options, widget_preview_kind_options, widget_scale_max_options,
-    widget_scale_min_options, widget_scale_options, widget_visibility_options,
+    widget_scale_min_options, widget_scale_options, widget_theme_index, widget_theme_options,
+    widget_visibility_options,
 };
 use settings_theme::apply_theme_to_settings_window;
 
@@ -68,7 +69,6 @@ const PREVIEW_KIND_GENERIC: i32 = 0;
 const PREVIEW_KIND_FOCUS_TICKER: i32 = 1;
 const PREVIEW_KIND_MARKET_BOARD: i32 = 2;
 const PREVIEW_KIND_TRUST_CARD: i32 = 3;
-const PREVIEW_KIND_ORBIT_PULSE: i32 = 4;
 const PREVIEW_KIND_MARKET_COMPASS: i32 = 5;
 const PREVIEW_KIND_STATUS_STRIP: i32 = 6;
 const PREVIEW_CAROUSEL_TICK_MS: u64 = 160;
@@ -1447,6 +1447,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
               layout_locked,
               opacity_percent,
               widget_scale_percent,
+              widget_theme_index,
               show_coin_logos,
               hide_quote_asset| {
             let settings = commit.current_settings();
@@ -1462,6 +1463,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                         layout_locked,
                         opacity_percent,
                         widget_scale_percent,
+                        widget_theme_index,
                         show_coin_logos,
                         hide_quote_asset,
                         locale,
@@ -2648,6 +2650,8 @@ pub(crate) fn refresh_settings_window(
     ui.set_widget_show_coin_logos_help_text(text.widget_show_coin_logos_help.into());
     ui.set_widget_hide_quote_asset_text(text.widget_hide_quote_asset.into());
     ui.set_widget_hide_quote_asset_help_text(text.widget_hide_quote_asset_help.into());
+    ui.set_widget_theme_text(text.widget_theme.into());
+    ui.set_widget_theme_help_text(text.widget_theme_help.into());
     ui.set_widget_topmost_text(text.widget_topmost.into());
     ui.set_widget_topmost_help_text(text.widget_topmost_help.into());
     ui.set_advanced_options_text(text.advanced_options.into());
@@ -2751,6 +2755,16 @@ pub(crate) fn refresh_settings_window(
         selected_widget
             .map(|widget| widget_scale_percent(widget, plugin_catalog))
             .unwrap_or(settings.widget_scale_percent),
+    );
+    ui.set_widget_theme_options(owned_string_model(
+        selected_widget
+            .map(|widget| widget_theme_options(widget, plugin_catalog, locale))
+            .unwrap_or_default(),
+    ));
+    ui.set_widget_theme_index(
+        selected_widget
+            .map(|widget| widget_theme_index(widget, plugin_catalog))
+            .unwrap_or(0),
     );
     ui.set_widget_show_coin_logos(
         selected_widget
@@ -3569,6 +3583,24 @@ mod tests {
         assert!(source.contains("(self.mouse-x - self.pressed-x) * root.settings-window-scale"));
     }
 
+    #[test]
+    fn plugin_market_design_previews_do_not_show_behind_image_thumbnails() {
+        let source = settings_window_ui_source();
+
+        for preview_kind in [0, 1, 2, 3, 5, 6] {
+            assert!(
+                source.contains(&format!(
+                    "visible: plugin.preview_image_count <= 0 && plugin.preview_kind == {preview_kind};"
+                )),
+                "design preview kind {preview_kind} should be hidden when real thumbnails exist"
+            );
+            assert!(
+                !source.contains(&format!("visible: plugin.preview_kind == {preview_kind};")),
+                "design preview kind {preview_kind} should not render unconditionally behind thumbnails"
+            );
+        }
+    }
+
     fn block_before_anchor<'a>(source: &'a str, block_start: &str, anchor: &str) -> &'a str {
         let anchor_index = source.find(anchor).unwrap();
         let block_index = source[..anchor_index].rfind(block_start).unwrap();
@@ -3595,7 +3627,13 @@ mod tests {
         let start = block.find(marker).unwrap() + marker.len();
         let value = block[start..].trim_start();
         let end = value.find(')').unwrap();
-        value[..end].trim().parse().unwrap()
+        let expression = value[..end].trim();
+        expression
+            .strip_prefix("root.widget-theme-settings-offset +")
+            .unwrap_or(expression)
+            .trim()
+            .parse()
+            .unwrap()
     }
 
     fn slint_x_assignment(block: &str, parent_width: i32) -> i32 {
@@ -3732,7 +3770,7 @@ mod tests {
         assert!(
             source.contains("property <int> widget-display-section-y: root.widget-symbol-status-y + 10;")
                 && source.contains(
-                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293) * 1px;"
+                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset) * 1px;"
                 ),
             "removing pair limit help should tighten the spacing below the pair chips"
         );
@@ -4048,6 +4086,7 @@ mod tests {
                 layout_locked: true,
                 opacity_percent: 42,
                 widget_scale_percent: 150,
+                widget_theme_index: 1,
                 show_coin_logos: false,
                 hide_quote_asset: true,
                 locale: i18n::Locale::En,
@@ -4068,6 +4107,7 @@ mod tests {
         assert_eq!(widget.layout.height, expected_size.height);
         assert!(!settings::widget_show_coin_logos(widget));
         assert!(settings::widget_hide_quote_asset(widget));
+        assert_eq!(settings::widget_theme_preference(widget), "light");
     }
 
     #[test]
@@ -4112,6 +4152,7 @@ mod tests {
                 layout_locked: false,
                 opacity_percent: 96,
                 widget_scale_percent: 172,
+                widget_theme_index: 0,
                 show_coin_logos: false,
                 hide_quote_asset: false,
                 locale: i18n::Locale::En,
@@ -4716,16 +4757,6 @@ mod tests {
                     config: settings::default_widget_config(),
                 },
                 WidgetInstance {
-                    id: "plugin-pulse-1".to_string(),
-                    plugin_id: "com.cryptohud.orbit-pulse".to_string(),
-                    legacy_widget_type: None,
-                    name: "Orbit Pulse 1".to_string(),
-                    visible: true,
-                    layout: settings::WidgetLayout::default(),
-                    symbols: vec!["BTC".to_string()],
-                    config: settings::default_widget_config(),
-                },
-                WidgetInstance {
                     id: "plugin-compass-1".to_string(),
                     plugin_id: "com.cryptohud.market-compass".to_string(),
                     legacy_widget_type: None,
@@ -4737,6 +4768,10 @@ mod tests {
                         "ETH".to_string(),
                         "SOL".to_string(),
                         "BNB".to_string(),
+                        "XRP".to_string(),
+                        "DOGE".to_string(),
+                        "ADA".to_string(),
+                        "DOT".to_string(),
                     ],
                     config: settings::default_widget_config(),
                 },
@@ -4754,10 +4789,7 @@ mod tests {
             ..LayoutStore::default()
         };
 
-        assert_eq!(
-            widget_preview_kind_options(&store),
-            vec![1, 2, 3, 0, 4, 5, 6]
-        );
+        assert_eq!(widget_preview_kind_options(&store), vec![1, 2, 3, 0, 5, 6]);
     }
 
     fn status_strip_definitions() -> Vec<WidgetDefinition> {
@@ -4811,6 +4843,7 @@ mod tests {
             symbol_limit: 5,
             default_symbols: Vec::new(),
             preview_images: Vec::new(),
+            themes: plugin::single_default_theme(),
             data_requirements: Vec::new(),
             status: plugin::PluginStatus::Available,
         }])

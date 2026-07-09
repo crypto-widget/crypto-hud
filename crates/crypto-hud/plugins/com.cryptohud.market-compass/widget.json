@@ -18,11 +18,33 @@
     "height": 480
   },
   "minSymbolLimit": 1,
-  "symbolLimit": 4,
+  "symbolLimit": 8,
   "defaultSymbols": [
     "binance:spot:BTC/USDT",
     "binance:spot:ETH/USDT",
-    "binance:spot:SOL/USDT"
+    "binance:spot:SOL/USDT",
+    "binance:spot:BNB/USDT",
+    "binance:spot:XRP/USDT",
+    "binance:spot:DOGE/USDT",
+    "binance:spot:ADA/USDT",
+    "binance:spot:DOT/USDT"
+  ],
+  "previewImages": [
+    "ui/preview-light.png",
+    "ui/preview-dark.png"
+  ],
+  "themes": [
+    {
+      "id": "light",
+      "name": "Light",
+      "role": "light"
+    },
+    {
+      "id": "dark",
+      "name": "Dark",
+      "role": "dark",
+      "default": true
+    }
   ],
   "dataRequirements": [
     {

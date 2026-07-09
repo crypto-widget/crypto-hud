@@ -23,6 +23,7 @@ pub(crate) struct WidgetRuntime {
     pub(crate) show_coin_logos: bool,
     pub(crate) display_options: widget_runtime::WidgetDisplayOptions,
     pub(crate) widget_scale: f32,
+    pub(crate) theme_name: String,
 }
 
 pub(crate) enum WidgetUi {
@@ -133,6 +134,12 @@ impl WidgetUi {
         }
     }
 
+    fn set_quote_icon_ready(&self, values: &[bool]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-icon-ready", bool_model_value(values));
+        }
+    }
+
     fn set_hide_quote_asset(&self, value: bool) {
         match self {
             Self::BuiltinPriceCard(ui) => ui.set_hide_quote_asset(value),
@@ -148,6 +155,48 @@ impl WidgetUi {
             Self::DynamicSlint(ui) => {
                 ui.set_optional_property("show-coin-logos", Value::Bool(value));
             }
+        }
+    }
+
+    fn set_quote_assets(&self, values: &[String]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-assets", string_model_value(values));
+        }
+    }
+
+    fn set_quote_chart_line_paths(&self, values: &[String]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-chart-line-paths", string_model_value(values));
+        }
+    }
+
+    fn set_quote_chart_fill_paths(&self, values: &[String]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-chart-fill-paths", string_model_value(values));
+        }
+    }
+
+    fn set_quote_chart_up_candle_paths(&self, values: &[String]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-chart-up-candle-paths", string_model_value(values));
+        }
+    }
+
+    fn set_quote_chart_down_candle_paths(&self, values: &[String]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-chart-down-candle-paths", string_model_value(values));
+        }
+    }
+
+    fn set_quote_chart_ready(&self, values: &[bool]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-chart-ready", bool_model_value(values));
+        }
+    }
+
+    fn set_quote_chart_positive(&self, values: &[bool]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-chart-positive", bool_model_value(values));
         }
     }
 
@@ -274,6 +323,18 @@ impl WidgetUi {
         }
     }
 
+    fn set_chart_up_candle_path(&self, value: SharedString) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("chart-up-candle-path", Value::from(value));
+        }
+    }
+
+    fn set_chart_down_candle_path(&self, value: SharedString) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("chart-down-candle-path", Value::from(value));
+        }
+    }
+
     fn set_chart_ready(&self, value: bool) {
         if let Self::DynamicSlint(ui) = self {
             ui.set_optional_property("chart-ready", Value::Bool(value));
@@ -375,6 +436,22 @@ fn int_model_value(values: Vec<i32>) -> Value {
     )))
 }
 
+fn string_model_value(values: &[String]) -> Value {
+    Value::Model(ModelRc::new(VecModel::from(
+        values
+            .iter()
+            .cloned()
+            .map(|value| Value::from(SharedString::from(value)))
+            .collect::<Vec<_>>(),
+    )))
+}
+
+fn bool_model_value(values: &[bool]) -> Value {
+    Value::Model(ModelRc::new(VecModel::from(
+        values.iter().copied().map(Value::Bool).collect::<Vec<_>>(),
+    )))
+}
+
 fn quote_cell_widths(rows: &[QuoteRowView], total_width: i32) -> Vec<i32> {
     if rows.is_empty() {
         return vec![total_width.max(STATUS_STRIP_DEFAULT_CELL_WIDTH)];
@@ -438,6 +515,7 @@ pub(crate) fn apply_runtime_view_to_widget(
     ui: &WidgetUi,
     view: &widget_runtime::WidgetRuntimeView,
     quote_icons: &[Image],
+    quote_icon_ready: &[bool],
     show_coin_logos: bool,
     display_options: widget_runtime::WidgetDisplayOptions,
     widget_scale: f32,
@@ -449,8 +527,16 @@ pub(crate) fn apply_runtime_view_to_widget(
     };
     ui.set_quote_rows(quote_rows_model(&view.quote_rows));
     ui.set_quote_icons(quote_icons_model(quote_icons));
+    ui.set_quote_icon_ready(quote_icon_ready);
     ui.set_show_coin_logos(show_coin_logos);
     ui.set_hide_quote_asset(display_options.hide_quote_asset);
+    ui.set_quote_assets(&view.quote_assets);
+    ui.set_quote_chart_line_paths(&view.quote_chart_line_paths);
+    ui.set_quote_chart_fill_paths(&view.quote_chart_fill_paths);
+    ui.set_quote_chart_up_candle_paths(&view.quote_chart_up_candle_paths);
+    ui.set_quote_chart_down_candle_paths(&view.quote_chart_down_candle_paths);
+    ui.set_quote_chart_ready(&view.quote_chart_ready);
+    ui.set_quote_chart_positive(&view.quote_chart_positive);
     ui.set_quote_cell_widths(quote_cell_widths(
         &view.quote_rows,
         cell_width_basis - STATUS_STRIP_WINDOW_PADDING * 2,
@@ -460,6 +546,8 @@ pub(crate) fn apply_runtime_view_to_widget(
     ui.set_updated_text(view.updated_text.clone().into());
     ui.set_chart_line_path(view.chart_line_path.clone().into());
     ui.set_chart_fill_path(view.chart_fill_path.clone().into());
+    ui.set_chart_up_candle_path(view.chart_up_candle_path.clone().into());
+    ui.set_chart_down_candle_path(view.chart_down_candle_path.clone().into());
     ui.set_chart_ready(view.chart_ready);
     ui.set_chart_end_y_ratio(view.chart_end_y_ratio);
     ui.set_chart_positive(view.chart_positive);

@@ -514,6 +514,7 @@ export component SettingsWindow inherits Window {
     in-out property <bool> widget-layout-locked;
     in-out property <int> opacity-percent;
     in-out property <int> widget-scale-percent;
+    in-out property <int> widget-theme-index;
     in-out property <bool> widget-show-coin-logos;
     in-out property <bool> widget-hide-quote-asset;
     in property <int> widget-scale-min-percent: 10;
@@ -567,6 +568,7 @@ export component SettingsWindow inherits Window {
     in property <[int]> widget-scale-options;
     in property <[int]> widget-scale-min-options;
     in property <[int]> widget-scale-max-options;
+    in property <[string]> widget-theme-options;
     property <bool> has-widgets: root.widget-list-options.length != 0;
     property <length> widget-settings-scrollbar-gutter: 18px;
     in property <[string]> provider-options;
@@ -585,7 +587,9 @@ export component SettingsWindow inherits Window {
     in property <int> widget-symbol-add-y: 315;
     in property <int> widget-symbol-status-y: 353;
     property <int> widget-display-section-y: root.widget-symbol-status-y + 10;
-    property <length> selected-widget-content-height: (root.widget-display-section-y + 293) * 1px;
+    property <bool> widget-theme-control-visible: root.has-widgets && root.widget-theme-options.length > 0;
+    property <int> widget-theme-settings-offset: root.widget-theme-control-visible ? 52 : 0;
+    property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset) * 1px;
     in property <int> widget-symbol-min: 1;
     in property <int> widget-symbol-max: 5;
     in property <int> default-symbol-min: 1;
@@ -685,6 +689,8 @@ export component SettingsWindow inherits Window {
     in property <string> widget-show-coin-logos-help-text;
     in property <string> widget-hide-quote-asset-text;
     in property <string> widget-hide-quote-asset-help-text;
+    in property <string> widget-theme-text;
+    in property <string> widget-theme-help-text;
     in property <string> widget-topmost-text;
     in property <string> widget-topmost-help-text;
     in property <string> advanced-options-text;
@@ -764,7 +770,7 @@ export component SettingsWindow inherits Window {
     callback remove-widget-symbol(int, int);
     callback select-widget(int);
     callback add-widget(int);
-    callback apply-widget-settings(int, string, bool, bool, int, int, bool, bool);
+    callback apply-widget-settings(int, string, bool, bool, int, int, int, bool, bool);
     callback apply-widget-scale(int, int);
     callback toggle-widget-visibility(int);
     callback reset-widget-positions();
@@ -827,6 +833,7 @@ export component SettingsWindow inherits Window {
                 root.widget-layout-locked,
                 root.opacity-percent,
                 root.widget-scale-percent,
+                root.widget-theme-index,
                 root.widget-show-coin-logos,
                 root.widget-hide-quote-asset
             );
@@ -1605,7 +1612,29 @@ export component SettingsWindow inherits Window {
 
                 SettingLabel {
                     x: 17px;
-                    y: (root.widget-display-section-y + 142) * 1px;
+                    y: (root.widget-display-section-y + 38) * 1px;
+                    width: 129px;
+                    label: root.widget-theme-text;
+                    help: root.widget-theme-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                    visible: root.widget-theme-control-visible;
+                }
+
+                ComboBox {
+                    x: parent.width - 249px;
+                    y: (root.widget-display-section-y + 36) * 1px;
+                    width: 232px;
+                    model: root.widget-theme-options;
+                    current-index <=> root.widget-theme-index;
+                    visible: root.widget-theme-control-visible;
+                    enabled: root.widget-theme-control-visible;
+                    selected(_) => { root.apply-current-widget-settings(); }
+                }
+
+                SettingLabel {
+                    x: 17px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 142) * 1px;
                     width: parent.width - 89px;
                     label: root.widget-show-coin-logos-text;
                     help: root.widget-show-coin-logos-help-text;
@@ -1615,7 +1644,7 @@ export component SettingsWindow inherits Window {
 
                 SettingSwitch {
                     x: parent.width - 54px;
-                    y: (root.widget-display-section-y + 148) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 148) * 1px;
                     checked <=> root.widget-show-coin-logos;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
@@ -1625,7 +1654,7 @@ export component SettingsWindow inherits Window {
 
                 TouchArea {
                     x: 17px;
-                    y: (root.widget-display-section-y + 130) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 130) * 1px;
                     width: parent.width - 89px;
                     height: 47px;
                     clicked => {
@@ -1636,7 +1665,7 @@ export component SettingsWindow inherits Window {
 
                 SettingLabel {
                     x: 17px;
-                    y: (root.widget-display-section-y + 192) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 192) * 1px;
                     width: parent.width - 89px;
                     label: root.widget-hide-quote-asset-text;
                     help: root.widget-hide-quote-asset-help-text;
@@ -1646,7 +1675,7 @@ export component SettingsWindow inherits Window {
 
                 SettingSwitch {
                     x: parent.width - 54px;
-                    y: (root.widget-display-section-y + 198) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 198) * 1px;
                     checked <=> root.widget-hide-quote-asset;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
@@ -1656,7 +1685,7 @@ export component SettingsWindow inherits Window {
 
                 TouchArea {
                     x: 17px;
-                    y: (root.widget-display-section-y + 180) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 180) * 1px;
                     width: parent.width - 89px;
                     height: 47px;
                     clicked => {
@@ -1667,7 +1696,7 @@ export component SettingsWindow inherits Window {
 
                 SettingLabel {
                     x: 17px;
-                    y: (root.widget-display-section-y + 38) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 38) * 1px;
                     width: 129px;
                     label: root.widget-scale-text;
                     help: root.widget-scale-help-text;
@@ -1677,7 +1706,7 @@ export component SettingsWindow inherits Window {
 
                 PercentStepper {
                     x: parent.width - 264px;
-                    y: (root.widget-display-section-y + 38) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 38) * 1px;
                     width: 150px;
                     height: 34px;
                     enabled: root.has-widgets;
@@ -1699,7 +1728,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 106px;
-                    y: (root.widget-display-section-y + 49) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 49) * 1px;
                     width: 17px;
                     text: "%";
                     color: root.settings-muted-color;
@@ -1709,7 +1738,7 @@ export component SettingsWindow inherits Window {
 
                 SettingsSmallButton {
                     x: parent.width - 81px;
-                    y: (root.widget-display-section-y + 38) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 38) * 1px;
                     width: 64px;
                     height: 34px;
                     text: root.reset-text;
@@ -1729,7 +1758,7 @@ export component SettingsWindow inherits Window {
 
                 SettingLabel {
                     x: 17px;
-                    y: (root.widget-display-section-y + 90) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 90) * 1px;
                     width: 115px;
                     label: root.opacity-text;
                     help: root.opacity-help-text;
@@ -1739,7 +1768,7 @@ export component SettingsWindow inherits Window {
 
                 OpacitySlider {
                     x: 193px;
-                    y: (root.widget-display-section-y + 97) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 97) * 1px;
                     width: 179px;
                     height: 20px;
                     value <=> root.opacity-percent;
@@ -1759,7 +1788,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: parent.width - 103px;
-                    y: (root.widget-display-section-y + 90) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 90) * 1px;
                     width: 50px;
                     height: 34px;
                     border-radius: 4px;
@@ -1782,7 +1811,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 42px;
-                    y: (root.widget-display-section-y + 101) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 101) * 1px;
                     width: 9px;
                     height: 13px;
                     text: "%";
@@ -1794,7 +1823,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: (root.widget-display-section-y + 239) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 239) * 1px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -1802,7 +1831,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: 17px;
-                    y: (root.widget-display-section-y + 257) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 257) * 1px;
                     width: parent.width - 52px;
                     height: 13px;
                     text: root.advanced-options-text;
@@ -1814,7 +1843,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 34px;
-                    y: (root.widget-display-section-y + 253) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 253) * 1px;
                     width: 17px;
                     height: 17px;
                     text: ">";
@@ -1904,7 +1933,7 @@ export component SettingsWindow inherits Window {
                         background: root.settings-preview-card-background;
                         border-width: 1px;
                         border-color: root.settings-preview-border-color;
-                        visible: plugin.preview_kind == 0;
+                        visible: plugin.preview_image_count <= 0 && plugin.preview_kind == 0;
 
                         Rectangle {
                             x: 1px;
@@ -1966,7 +1995,7 @@ export component SettingsWindow inherits Window {
                         border-width: 1px;
                         border-color: #62e5f0c8;
                         clip: true;
-                        visible: plugin.preview_kind == 1;
+                        visible: plugin.preview_image_count <= 0 && plugin.preview_kind == 1;
 
                         Rectangle { width: parent.width; height: parent.height; border-radius: 7px; background: @linear-gradient(90deg, #ffffff11 0%, #ffffff07 36%, #ffffff02 58%, #00000022 100%); }
                         Rectangle { x: parent.width * 0.52; y: 1px; width: parent.width * 0.48 - 4px; height: parent.height - 3px; background: @linear-gradient(90deg, #00000000 0%, #00000016 70%, #0000002d 100%); }
@@ -2036,7 +2065,7 @@ export component SettingsWindow inherits Window {
                         background: root.settings-preview-card-background;
                         border-width: 1px;
                         border-color: root.settings-preview-border-color;
-                        visible: plugin.preview_kind == 2;
+                        visible: plugin.preview_image_count <= 0 && plugin.preview_kind == 2;
 
                         Rectangle {
                             x: 1px;
@@ -2095,7 +2124,7 @@ export component SettingsWindow inherits Window {
                         border-width: 1px;
                         border-color: #4ddde6cc;
                         clip: true;
-                        visible: plugin.preview_kind == 3;
+                        visible: plugin.preview_image_count <= 0 && plugin.preview_kind == 3;
 
                         Rectangle { width: parent.width; height: parent.height; border-radius: 6px; background: #ffffff07; }
 
@@ -2203,27 +2232,7 @@ export component SettingsWindow inherits Window {
                         border-radius: 40px;
                         background: transparent;
                         clip: true;
-                        visible: plugin.preview_kind == 4;
-
-                        Image {
-                            width: parent.width;
-                            height: parent.height;
-                            source: @image-url("../plugins/com.cryptohud.orbit-pulse/ui/reference.png");
-                            image-fit: fill;
-                        }
-
-                        Rectangle { width: parent.width; height: parent.height; border-radius: 40px; background: transparent; border-width: 1px; border-color: #55e6d0cc; }
-                    }
-
-                    Rectangle {
-                        x: 42px;
-                        y: 11px;
-                        width: 80px;
-                        height: 80px;
-                        border-radius: 40px;
-                        background: transparent;
-                        clip: true;
-                        visible: plugin.preview_kind == 5;
+                        visible: plugin.preview_image_count <= 0 && plugin.preview_kind == 5;
 
                         Image {
                             width: parent.width;
@@ -2245,7 +2254,7 @@ export component SettingsWindow inherits Window {
                         border-width: 1px;
                         border-color: #67e8f9aa;
                         clip: true;
-                        visible: plugin.preview_kind == 6;
+                        visible: plugin.preview_image_count <= 0 && plugin.preview_kind == 6;
 
                         Rectangle { width: parent.width; height: parent.height; background: @linear-gradient(20deg, #0c0f16 0%, #1c242e 100%); }
                         Rectangle { x: 0px; y: 9px; width: parent.width; height: 1px; background: #ffffff16; }

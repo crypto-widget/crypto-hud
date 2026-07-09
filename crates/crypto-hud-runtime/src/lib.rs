@@ -15,8 +15,9 @@ use std::{
 
 pub const HOST_PLUGIN_API_VERSION: &str = "0.1.0";
 pub const MIN_SYMBOL_LIMIT: usize = 1;
-pub const MAX_SYMBOL_LIMIT: usize = 5;
+pub const MAX_SYMBOL_LIMIT: usize = 8;
 pub const MAX_PREVIEW_IMAGES: usize = 5;
+pub const MAX_PLUGIN_THEMES: usize = 8;
 
 const MIN_PLUGIN_WIDTH: i32 = 120;
 const MIN_PLUGIN_HEIGHT: i32 = 80;
@@ -27,6 +28,7 @@ const CHART_VIEWBOX_WIDTH: f64 = 100.0;
 const CHART_VIEWBOX_HEIGHT: f64 = 40.0;
 const CHART_VERTICAL_PADDING: f64 = 6.0;
 const CHART_MAX_RENDER_POINTS: usize = 96;
+const CHART_MAX_CANDLES: usize = 34;
 const STALE_DATA_SECONDS: u64 = 180;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -49,6 +51,8 @@ pub struct PluginManifest {
     pub default_symbols: Vec<String>,
     #[serde(default)]
     pub preview_images: Vec<String>,
+    #[serde(default = "default_plugin_themes")]
+    pub themes: Vec<PluginTheme>,
     #[serde(default)]
     pub data_requirements: Vec<PluginDataRequirement>,
 }
@@ -104,8 +108,37 @@ pub struct PluginDataRequirement {
     pub capability: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginTheme {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub role: PluginThemeRole,
+    #[serde(default, rename = "default")]
+    pub is_default: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PluginThemeRole {
+    #[default]
+    Default,
+    Light,
+    Dark,
+}
+
 fn default_min_symbol_limit() -> usize {
     MIN_SYMBOL_LIMIT
+}
+
+fn default_plugin_themes() -> Vec<PluginTheme> {
+    vec![PluginTheme {
+        id: "default".to_string(),
+        name: "Default".to_string(),
+        role: PluginThemeRole::Default,
+        is_default: true,
+    }]
 }
 
 pub fn parse_manifest(contents: &str) -> Result<PluginManifest> {
@@ -151,6 +184,7 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
         manifest.symbol_limit,
     )?;
     validate_preview_images(&manifest.preview_images)?;
+    validate_themes(&manifest.themes)?;
     validate_size_policy(
         manifest.size_policy,
         manifest.default_size,
@@ -163,6 +197,53 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
                 requirement.capability
             );
         }
+    }
+    Ok(())
+}
+
+fn validate_themes(themes: &[PluginTheme]) -> Result<()> {
+    if themes.is_empty() {
+        bail!("themes must not be empty");
+    }
+    if themes.len() > MAX_PLUGIN_THEMES {
+        bail!("themes must not exceed {MAX_PLUGIN_THEMES} entries");
+    }
+
+    let mut ids = Vec::new();
+    let mut default_count = 0;
+    for theme in themes {
+        validate_theme_id(&theme.id)?;
+        if theme.name.trim().is_empty() {
+            bail!("theme name must be non-empty");
+        }
+        if ids.contains(&theme.id) {
+            bail!("themes contains duplicate id {}", theme.id);
+        }
+        ids.push(theme.id.clone());
+        if theme.is_default {
+            default_count += 1;
+        }
+    }
+    if default_count > 1 {
+        bail!("themes must not mark more than one entry as default");
+    }
+    Ok(())
+}
+
+fn validate_theme_id(id: &str) -> Result<()> {
+    let id = id.trim();
+    if id.is_empty() {
+        bail!("theme id must be non-empty");
+    }
+    if id == "system" {
+        bail!("theme id system is reserved");
+    }
+    if id.chars().any(|character| {
+        !(character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || matches!(character, '.' | '-' | '_'))
+    }) {
+        bail!("theme id must use lowercase ASCII letters, digits, dots, hyphens, or underscores");
     }
     Ok(())
 }
@@ -451,11 +532,29 @@ pub struct WidgetRuntimeView {
     pub widget_id: String,
     pub quote_rows: Vec<QuoteRowView>,
     #[serde(default)]
+    pub quote_assets: Vec<String>,
+    #[serde(default)]
+    pub quote_chart_line_paths: Vec<String>,
+    #[serde(default)]
+    pub quote_chart_fill_paths: Vec<String>,
+    #[serde(default)]
+    pub quote_chart_up_candle_paths: Vec<String>,
+    #[serde(default)]
+    pub quote_chart_down_candle_paths: Vec<String>,
+    #[serde(default)]
+    pub quote_chart_ready: Vec<bool>,
+    #[serde(default)]
+    pub quote_chart_positive: Vec<bool>,
+    #[serde(default)]
     pub source_name_text: String,
     pub source_text: String,
     pub updated_text: String,
     pub chart_line_path: String,
     pub chart_fill_path: String,
+    #[serde(default)]
+    pub chart_up_candle_path: String,
+    #[serde(default)]
+    pub chart_down_candle_path: String,
     pub chart_end_y_ratio: i32,
     pub chart_ready: bool,
     pub chart_positive: bool,
@@ -577,6 +676,7 @@ impl QuoteRowView {
 
 pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetRuntimeView {
     let chart = chart_path_view_for_symbols(params.symbols, params.quote_cache);
+    let quote_charts = chart_path_views_for_symbols(params.symbols, params.quote_cache);
     WidgetRuntimeView {
         widget_id: params.widget_id.to_string(),
         quote_rows: quote_rows_for_symbols_with_options(
@@ -585,6 +685,25 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             params.labels,
             params.display_options,
         ),
+        quote_assets: quote_assets_for_symbols(params.symbols),
+        quote_chart_line_paths: quote_charts
+            .iter()
+            .map(|chart| chart.line_path.clone())
+            .collect(),
+        quote_chart_fill_paths: quote_charts
+            .iter()
+            .map(|chart| chart.fill_path.clone())
+            .collect(),
+        quote_chart_up_candle_paths: quote_charts
+            .iter()
+            .map(|chart| chart.up_candle_path.clone())
+            .collect(),
+        quote_chart_down_candle_paths: quote_charts
+            .iter()
+            .map(|chart| chart.down_candle_path.clone())
+            .collect(),
+        quote_chart_ready: quote_charts.iter().map(|chart| chart.ready).collect(),
+        quote_chart_positive: quote_charts.iter().map(|chart| chart.positive).collect(),
         source_name_text: source_name_text_for_symbols(
             params.symbols,
             params.quote_cache,
@@ -608,6 +727,8 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
         ),
         chart_line_path: chart.line_path,
         chart_fill_path: chart.fill_path,
+        chart_up_candle_path: chart.up_candle_path,
+        chart_down_candle_path: chart.down_candle_path,
         chart_end_y_ratio: chart.end_y_ratio,
         chart_ready: chart.ready,
         chart_positive: chart.positive,
@@ -618,6 +739,8 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
 pub struct ChartPathView {
     pub line_path: String,
     pub fill_path: String,
+    pub up_candle_path: String,
+    pub down_candle_path: String,
     pub end_y_ratio: i32,
     pub ready: bool,
     pub positive: bool,
@@ -638,6 +761,8 @@ impl ChartPathView {
                 CHART_VIEWBOX_HEIGHT / 2.0,
                 CHART_VIEWBOX_WIDTH
             ),
+            up_candle_path: String::new(),
+            down_candle_path: String::new(),
             end_y_ratio: 500,
             ready: false,
             positive: true,
@@ -650,6 +775,21 @@ pub fn chart_path_view_for_symbols(symbols: &[String], quote_cache: &QuoteCache)
         return ChartPathView::empty();
     };
     chart_path_view_from_closes(&state.chart_closes_24h)
+}
+
+pub fn chart_path_views_for_symbols(
+    symbols: &[String],
+    quote_cache: &QuoteCache,
+) -> Vec<ChartPathView> {
+    symbols
+        .iter()
+        .map(|symbol| {
+            quote_cache
+                .get(symbol)
+                .map(|state| chart_path_view_from_closes(&state.chart_closes_24h))
+                .unwrap_or_else(ChartPathView::empty)
+        })
+        .collect()
 }
 
 pub fn chart_path_view_from_closes(closes: &[f64]) -> ChartPathView {
@@ -666,6 +806,7 @@ pub fn chart_path_view_from_closes(closes: &[f64]) -> ChartPathView {
     let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let range = max - min;
     let render_values = chart_render_values(&values);
+    let (up_candle_path, down_candle_path) = chart_candle_paths_from_values(&values, min, max);
     let last_index = render_values.len().saturating_sub(1).max(1) as f64;
     let points = render_values
         .iter()
@@ -701,6 +842,8 @@ pub fn chart_path_view_from_closes(closes: &[f64]) -> ChartPathView {
     ChartPathView {
         line_path: line_path.trim_end().to_string(),
         fill_path,
+        up_candle_path,
+        down_candle_path,
         end_y_ratio: points
             .last()
             .map(|(_, y)| ((*y / CHART_VIEWBOX_HEIGHT) * 1000.0).round() as i32)
@@ -711,14 +854,103 @@ pub fn chart_path_view_from_closes(closes: &[f64]) -> ChartPathView {
     }
 }
 
+fn chart_candle_paths_from_values(values: &[f64], min: f64, max: f64) -> (String, String) {
+    let candle_values = chart_render_values_with_limit(values, CHART_MAX_CANDLES);
+    if candle_values.len() < 2 {
+        return (String::new(), String::new());
+    }
+
+    let range = max - min;
+    let step = CHART_VIEWBOX_WIDTH / (candle_values.len().saturating_sub(1).max(1) as f64);
+    let body_width = (step * 0.46).clamp(1.2, 2.8);
+    let wick_width = 0.34;
+    let mut up_path = String::new();
+    let mut down_path = String::new();
+
+    for index in 1..candle_values.len() {
+        let open = candle_values[index - 1];
+        let close = candle_values[index];
+        let wick_pad = if range.abs() <= f64::EPSILON {
+            0.0
+        } else {
+            range * (0.035 + (index % 3) as f64 * 0.012)
+        };
+        let high = open.max(close) + wick_pad;
+        let low = open.min(close) - wick_pad * 0.82;
+        let x = index as f64 * step;
+        let open_y = chart_value_y(open, min, max);
+        let close_y = chart_value_y(close, min, max);
+        let high_y = chart_value_y(high, min, max);
+        let low_y = chart_value_y(low, min, max);
+        let body_y = open_y.min(close_y);
+        let body_height = (open_y - close_y).abs().max(1.5);
+        let target = if close >= open {
+            &mut up_path
+        } else {
+            &mut down_path
+        };
+
+        append_rect_path(
+            target,
+            x - wick_width / 2.0,
+            high_y.min(low_y),
+            wick_width,
+            (low_y - high_y).abs().max(1.0),
+        );
+        append_rect_path(
+            target,
+            x - body_width / 2.0,
+            body_y,
+            body_width,
+            body_height,
+        );
+    }
+
+    (
+        up_path.trim_end().to_string(),
+        down_path.trim_end().to_string(),
+    )
+}
+
+fn append_rect_path(path: &mut String, x: f64, y: f64, width: f64, height: f64) {
+    let _ = write!(
+        path,
+        "M {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z ",
+        x,
+        y,
+        x + width,
+        y,
+        x + width,
+        y + height,
+        x,
+        y + height
+    );
+}
+
+fn chart_value_y(value: f64, min: f64, max: f64) -> f64 {
+    let range = max - min;
+    if range.abs() <= f64::EPSILON {
+        return CHART_VIEWBOX_HEIGHT / 2.0;
+    }
+
+    let drawable_height = CHART_VIEWBOX_HEIGHT - CHART_VERTICAL_PADDING * 2.0;
+    CHART_VIEWBOX_HEIGHT
+        - CHART_VERTICAL_PADDING
+        - ((value - min) / range).clamp(0.0, 1.0) * drawable_height
+}
+
 fn chart_render_values(values: &[f64]) -> Vec<f64> {
-    if values.len() <= CHART_MAX_RENDER_POINTS {
+    chart_render_values_with_limit(values, CHART_MAX_RENDER_POINTS)
+}
+
+fn chart_render_values_with_limit(values: &[f64], limit: usize) -> Vec<f64> {
+    if values.len() <= limit {
         return values.to_vec();
     }
 
     let last_source_index = values.len() - 1;
-    let last_output_index = CHART_MAX_RENDER_POINTS - 1;
-    (0..CHART_MAX_RENDER_POINTS)
+    let last_output_index = limit - 1;
+    (0..limit)
         .map(|index| {
             let source_index = ((index as f64 / last_output_index as f64)
                 * last_source_index as f64)
@@ -756,6 +988,17 @@ pub fn quote_rows_for_symbols_with_options(
                 .unwrap_or_else(|| {
                     QuoteRowView::loading_with_options(symbol, labels, display_options)
                 })
+        })
+        .collect()
+}
+
+pub fn quote_assets_for_symbols(symbols: &[String]) -> Vec<String> {
+    symbols
+        .iter()
+        .map(|symbol| {
+            parse_market_pair(symbol)
+                .map(|pair| pair.base)
+                .unwrap_or_else(|| format_market_pair_symbol(symbol))
         })
         .collect()
 }
@@ -1035,6 +1278,9 @@ mod tests {
         assert_eq!(manifest.min_symbol_limit, 1);
         assert_eq!(manifest.symbol_limit, 5);
         assert!(manifest.default_symbols.is_empty());
+        assert_eq!(manifest.themes.len(), 1);
+        assert_eq!(manifest.themes[0].id, "default");
+        assert!(manifest.themes[0].is_default);
     }
 
     #[test]
@@ -1203,6 +1449,53 @@ mod tests {
             manifest.preview_images,
             vec!["ui/preview-light.png", "ui/preview-dark.png"]
         );
+    }
+
+    #[test]
+    fn parses_widget_themes() {
+        let json = valid_manifest_json().replace(
+            r#""dataRequirements": ["#,
+            r#""themes": [
+                {
+                    "id": "light",
+                    "name": "Light",
+                    "role": "light"
+                },
+                {
+                    "id": "dark",
+                    "name": "Dark",
+                    "role": "dark",
+                    "default": true
+                }
+            ],
+            "dataRequirements": ["#,
+        );
+
+        let manifest = parse_manifest(&json).unwrap();
+
+        assert_eq!(manifest.themes.len(), 2);
+        assert_eq!(manifest.themes[0].role, PluginThemeRole::Light);
+        assert_eq!(manifest.themes[1].role, PluginThemeRole::Dark);
+        assert!(manifest.themes[1].is_default);
+    }
+
+    #[test]
+    fn rejects_reserved_widget_theme_id() {
+        let json = valid_manifest_json().replace(
+            r#""dataRequirements": ["#,
+            r#""themes": [
+                {
+                    "id": "system",
+                    "name": "System"
+                }
+            ],
+            "dataRequirements": ["#,
+        );
+
+        assert!(parse_manifest(&json)
+            .unwrap_err()
+            .to_string()
+            .contains("reserved"));
     }
 
     #[test]

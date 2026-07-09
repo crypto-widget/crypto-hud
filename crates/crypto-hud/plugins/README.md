@@ -67,7 +67,7 @@ com.example.my-widget/
 - `defaultSize` 必须在 `120x80` 到 `1200x900` 之间。
 - `sizePolicy` 可省略，默认 `{ "kind": "fixed" }`。
 - `minSymbolLimit` 可省略，默认 `1`，必须在 `1` 到 `symbolLimit` 之间。
-- `symbolLimit` 是最大币种数量，必须在 `1` 到 `5` 之间。
+- `symbolLimit` 是最大币种数量，必须在 `1` 到 `8` 之间。
 - `defaultSymbols` 可省略；填写时必须是有效交易对，数量不能超过 `symbolLimit`，
   也不能少于 `minSymbolLimit`。未写数据源的输入会按 Binance 现货和 USDT
   默认报价规范化，例如 `BTC` 等价于 `binance:spot:BTC/USDT`。
@@ -161,8 +161,18 @@ callback toggle-layout-lock();
 
 ## 主题和颜色适配
 
-宿主只下发主题名称，不下发具体颜色。插件必须在自身 Slint 文件里根据
-`theme-name` 定义浅色和深色两套 palette。
+宿主只下发主题名称，不下发具体颜色。插件可以在 `widget.json` 中声明多套主题；
+如果省略 `themes`，则视为只有一套 `default` 主题，设置窗口不会显示主题切换项。
+
+```json
+"themes": [
+  { "id": "light", "name": "Light", "role": "light" },
+  { "id": "dark", "name": "Dark", "role": "dark", "default": true }
+]
+```
+
+用户选择“跟随系统”时，宿主会根据系统浅色/深色寻找对应 `role` 的主题；如果不存在，
+则下发该小组件的默认主题。
 
 ```slint
 in property <string> theme-name: "dark";
@@ -174,13 +184,7 @@ property <color> gain-color: root.light-theme ? #16a34a : #22c55e;
 property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
 ```
 
-`theme-name` 当前只会是：
-
-- `light`
-- `dark`
-
-如果用户设置为跟随系统，宿主会先解析系统主题，再把解析后的 `light` 或 `dark`
-下发给插件。
+`theme-name` 的值来自 `themes[].id`，例如 `light`、`dark` 或自定义 id。
 
 ## 行情颜色方向
 

@@ -23,8 +23,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 semver = "1.0"
 single-instance = "0.3.3"
-slint = { version = "1.17.0", default-features = true }
-slint-interpreter = { version = "1.17.0", default-features = true }
+slint = { version = "1.17.0", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "system-tray"] }
+slint-interpreter = { version = "1.17.0", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "system-tray"] }
 spin_on = "0.1"
 sys-locale = "0.3"
 ureq = { version = "2.12", features = ["socks-proxy"] }

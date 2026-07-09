@@ -35,6 +35,8 @@ pub const DEFAULT_LAYOUT_MARGIN_Y: i32 = 96;
 pub const DEFAULT_LAYOUT_GAP: i32 = 24;
 pub const WIDGET_CONFIG_SHOW_COIN_LOGOS: &str = "show_coin_logos";
 pub const WIDGET_CONFIG_HIDE_QUOTE_ASSET: &str = "hide_quote_asset";
+pub const WIDGET_CONFIG_THEME: &str = "theme";
+pub const WIDGET_THEME_SYSTEM: &str = "system";
 pub const QUOTE_BOARD_WIDTH: i32 = 286;
 pub const QUOTE_BOARD_HEIGHT: i32 = 194;
 pub const MINI_TICKER_WIDTH: i32 = 236;
@@ -702,6 +704,16 @@ pub fn widget_hide_quote_asset(instance: &WidgetInstance) -> bool {
     widget_config_hide_quote_asset(&instance.config)
 }
 
+pub fn widget_theme_preference(instance: &WidgetInstance) -> String {
+    widget_config_string(&instance.config, WIDGET_CONFIG_THEME, WIDGET_THEME_SYSTEM)
+}
+
+pub fn set_widget_theme_preference(instance: &mut WidgetInstance, theme: &str) {
+    let theme = normalized_widget_theme_preference(theme);
+    widget_config_object_mut(instance)
+        .insert(WIDGET_CONFIG_THEME.to_string(), Value::String(theme));
+}
+
 pub fn set_widget_display_config(
     instance: &mut WidgetInstance,
     show_coin_logos: bool,
@@ -732,6 +744,24 @@ fn widget_config_bool(config: &serde_json::Value, key: &str, default: bool) -> b
         .and_then(|config| config.get(key))
         .and_then(Value::as_bool)
         .unwrap_or(default)
+}
+
+fn widget_config_string(config: &serde_json::Value, key: &str, default: &str) -> String {
+    config
+        .as_object()
+        .and_then(|config| config.get(key))
+        .and_then(Value::as_str)
+        .map(normalized_widget_theme_preference)
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn normalized_widget_theme_preference(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        WIDGET_THEME_SYSTEM.to_string()
+    } else {
+        value.chars().take(64).collect()
+    }
 }
 
 fn widget_config_object_mut(instance: &mut WidgetInstance) -> &mut Map<String, Value> {
@@ -2101,11 +2131,14 @@ mod tests {
 
         assert!(widget_show_coin_logos(&widget));
         assert!(!widget_hide_quote_asset(&widget));
+        assert_eq!(widget_theme_preference(&widget), WIDGET_THEME_SYSTEM);
 
         set_widget_display_config(&mut widget, false, true);
+        set_widget_theme_preference(&mut widget, " light ");
 
         assert!(!widget_show_coin_logos(&widget));
         assert!(widget_hide_quote_asset(&widget));
+        assert_eq!(widget_theme_preference(&widget), "light");
         assert_eq!(
             widget.config[WIDGET_CONFIG_SHOW_COIN_LOGOS],
             Value::Bool(false)
@@ -2113,6 +2146,10 @@ mod tests {
         assert_eq!(
             widget.config[WIDGET_CONFIG_HIDE_QUOTE_ASSET],
             Value::Bool(true)
+        );
+        assert_eq!(
+            widget.config[WIDGET_CONFIG_THEME],
+            Value::String("light".to_string())
         );
     }
 

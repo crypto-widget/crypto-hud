@@ -133,6 +133,7 @@ fn install_gui_smoke_settings_interaction_timer(
                 let layout_locked = ui.get_widget_layout_locked();
                 let opacity_percent = ui.get_opacity_percent();
                 let scale_percent = ui.get_widget_scale_percent();
+                let theme_index = ui.get_widget_theme_index();
 
                 ui.invoke_apply_widget_settings(
                     0,
@@ -141,6 +142,7 @@ fn install_gui_smoke_settings_interaction_timer(
                     layout_locked,
                     opacity_percent,
                     scale_percent,
+                    theme_index,
                     false,
                     true,
                 );
@@ -400,6 +402,7 @@ mod tests {
             symbol_limit: 2,
             default_symbols: Vec::new(),
             preview_images: Vec::new(),
+            themes: plugin::single_default_theme(),
             data_requirements: vec![plugin::PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
@@ -712,7 +715,6 @@ mod tests {
             ("com.cryptohud.focus-ticker", 1),
             ("com.cryptohud.market-board", 2),
             ("com.cryptohud.trust-card", 3),
-            ("com.cryptohud.orbit-pulse", 4),
             ("com.cryptohud.market-compass", 5),
             ("com.cryptohud.status-strip", 6),
         ] {

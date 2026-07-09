@@ -10,7 +10,8 @@ use crate::{
 };
 
 use super::{
-    apply_widget_scale_to_instance, normalize_widget_name, widget_default_number,
+    apply_widget_scale_to_instance, normalize_widget_name,
+    settings_models::widget_theme_preference_for_index, widget_default_number,
     widget_scale_percent_for_definitions,
 };
 
@@ -34,6 +35,7 @@ pub(super) struct WidgetSettingsUpdate<'a> {
     pub(super) layout_locked: bool,
     pub(super) opacity_percent: i32,
     pub(super) widget_scale_percent: i32,
+    pub(super) widget_theme_index: i32,
     pub(super) show_coin_logos: bool,
     pub(super) hide_quote_asset: bool,
     pub(super) locale: i18n::Locale,
@@ -51,6 +53,7 @@ pub(super) fn apply_widget_settings_to_store(
         layout_locked,
         opacity_percent,
         widget_scale_percent,
+        widget_theme_index,
         show_coin_logos,
         hide_quote_asset,
         locale,
@@ -76,6 +79,9 @@ pub(super) fn apply_widget_settings_to_store(
         } else {
             widget_scale_percent
         };
+        let theme_preference =
+            widget_theme_preference_for_index(instance, plugin_catalog, widget_theme_index);
+        settings::set_widget_theme_preference(instance, &theme_preference);
         settings::set_widget_display_config(instance, show_coin_logos, hide_quote_asset);
         apply_widget_scale_to_instance(instance, &definitions, scale_percent);
         true

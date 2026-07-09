@@ -24,6 +24,19 @@
     "binance:spot:ETH/USDT",
     "binance:spot:SOL/USDT"
   ],
+  "themes": [
+    {
+      "id": "light",
+      "name": "Light",
+      "role": "light"
+    },
+    {
+      "id": "dark",
+      "name": "Dark",
+      "role": "dark",
+      "default": true
+    }
+  ],
   "dataRequirements": [
     {
       "capability": "market.price"

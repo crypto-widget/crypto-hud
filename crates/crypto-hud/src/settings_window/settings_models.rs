@@ -1,4 +1,6 @@
-use crypto_hud_shell_state::{LayoutStore, WidgetInstance, WidgetKind as WidgetType};
+use crypto_hud_shell_state::{
+    self as settings, LayoutStore, WidgetInstance, WidgetKind as WidgetType,
+};
 use slint::{Image, ModelRc, SharedString, VecModel};
 
 use crate::{i18n, plugin, PluginMarketItem};
@@ -6,8 +8,8 @@ use crate::{i18n, plugin, PluginMarketItem};
 use super::{
     format_symbols_input, widget_display_name, widget_scale_percent, widget_scale_percent_bounds,
     widget_type_description, widget_type_title, PREVIEW_KIND_FOCUS_TICKER, PREVIEW_KIND_GENERIC,
-    PREVIEW_KIND_MARKET_BOARD, PREVIEW_KIND_MARKET_COMPASS, PREVIEW_KIND_ORBIT_PULSE,
-    PREVIEW_KIND_STATUS_STRIP, PREVIEW_KIND_TRUST_CARD, STATUS_STRIP_PLUGIN_ID,
+    PREVIEW_KIND_MARKET_BOARD, PREVIEW_KIND_MARKET_COMPASS, PREVIEW_KIND_STATUS_STRIP,
+    PREVIEW_KIND_TRUST_CARD, STATUS_STRIP_PLUGIN_ID,
 };
 
 pub(super) fn string_model(values: Vec<&'static str>) -> ModelRc<SharedString> {
@@ -197,6 +199,86 @@ pub(super) fn widget_scale_max_options(
         .collect()
 }
 
+pub(super) fn widget_theme_options(
+    widget: &WidgetInstance,
+    plugin_catalog: &plugin::PluginCatalog,
+    locale: i18n::Locale,
+) -> Vec<String> {
+    let Some(plugin) = plugin_catalog.find(&widget.plugin_id) else {
+        return Vec::new();
+    };
+    if plugin.themes.len() <= 1 {
+        return Vec::new();
+    }
+
+    let mut options = vec![i18n::theme_options(locale)[0].to_string()];
+    options.extend(
+        plugin
+            .themes
+            .iter()
+            .map(|theme| widget_theme_label(theme, locale)),
+    );
+    options
+}
+
+pub(super) fn widget_theme_index(
+    widget: &WidgetInstance,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> i32 {
+    let Some(plugin) = plugin_catalog.find(&widget.plugin_id) else {
+        return 0;
+    };
+    if plugin.themes.len() <= 1 {
+        return 0;
+    }
+
+    let preference = settings::widget_theme_preference(widget);
+    if preference == settings::WIDGET_THEME_SYSTEM {
+        return 0;
+    }
+
+    plugin
+        .themes
+        .iter()
+        .position(|theme| theme.id == preference)
+        .map(|index| index as i32 + 1)
+        .unwrap_or(0)
+}
+
+pub(super) fn widget_theme_preference_for_index(
+    widget: &WidgetInstance,
+    plugin_catalog: &plugin::PluginCatalog,
+    index: i32,
+) -> String {
+    if index <= 0 {
+        return settings::WIDGET_THEME_SYSTEM.to_string();
+    }
+    let Some(plugin) = plugin_catalog.find(&widget.plugin_id) else {
+        return settings::WIDGET_THEME_SYSTEM.to_string();
+    };
+    if plugin.themes.len() <= 1 {
+        return settings::WIDGET_THEME_SYSTEM.to_string();
+    }
+
+    plugin
+        .themes
+        .get(index as usize - 1)
+        .map(|theme| theme.id.clone())
+        .unwrap_or_else(|| settings::WIDGET_THEME_SYSTEM.to_string())
+}
+
+fn widget_theme_label(theme: &plugin::PluginTheme, locale: i18n::Locale) -> String {
+    match theme.role {
+        plugin::PluginThemeRole::Light => i18n::theme_options(locale)[1].to_string(),
+        plugin::PluginThemeRole::Dark => i18n::theme_options(locale)[2].to_string(),
+        plugin::PluginThemeRole::Default if theme.id == "default" => match locale {
+            i18n::Locale::En => "Default".to_string(),
+            i18n::Locale::ZhHans => "默认".to_string(),
+        },
+        plugin::PluginThemeRole::Default => theme.name.clone(),
+    }
+}
+
 pub(crate) fn widget_type_usage_text(
     store: &LayoutStore,
     widget_type: WidgetType,
@@ -298,7 +380,6 @@ fn plugin_preview_kind(plugin_id: &str) -> i32 {
         "com.cryptohud.focus-ticker" => PREVIEW_KIND_FOCUS_TICKER,
         "com.cryptohud.market-board" => PREVIEW_KIND_MARKET_BOARD,
         "com.cryptohud.trust-card" => PREVIEW_KIND_TRUST_CARD,
-        "com.cryptohud.orbit-pulse" => PREVIEW_KIND_ORBIT_PULSE,
         "com.cryptohud.market-compass" => PREVIEW_KIND_MARKET_COMPASS,
         STATUS_STRIP_PLUGIN_ID => PREVIEW_KIND_STATUS_STRIP,
         _ => PREVIEW_KIND_GENERIC,

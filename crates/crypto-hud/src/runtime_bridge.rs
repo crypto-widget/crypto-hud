@@ -225,6 +225,7 @@ pub(crate) fn sync_widget_runtimes(
         {
             let layout =
                 layout_for_instance(instance, index, settings.clone(), Some(&plugin_catalog));
+            let theme_name = widget_theme_name(instance, &plugin_catalog);
             apply_instance_to_widget(ApplyInstanceRequest {
                 ui: &runtime.ui,
                 instance,
@@ -240,6 +241,7 @@ pub(crate) fn sync_widget_runtimes(
             runtime.show_coin_logos = settings::widget_show_coin_logos(instance);
             runtime.display_options = widget_display_options(instance);
             runtime.widget_scale = widget_scale_for_instance(instance, &layout, &plugin_catalog);
+            runtime.theme_name = theme_name;
             continue;
         }
 
@@ -286,6 +288,7 @@ pub(crate) fn sync_widget_runtimes(
         apply_widget_visibility(&ui, instance.visible)?;
         let symbols = normalized_symbols_for_instance(instance, Some(&plugin_catalog));
         let layout = layout_for_instance(instance, index, settings.clone(), Some(&plugin_catalog));
+        let theme_name = widget_theme_name(instance, &plugin_catalog);
         runtimes.push(WidgetRuntime {
             id: instance.id.clone(),
             plugin_id: instance.plugin_id.clone(),
@@ -294,6 +297,7 @@ pub(crate) fn sync_widget_runtimes(
             show_coin_logos: settings::widget_show_coin_logos(instance),
             display_options: widget_display_options(instance),
             widget_scale: widget_scale_for_instance(instance, &layout, &plugin_catalog),
+            theme_name,
         });
 
         if index == instances.len().saturating_sub(1) {
@@ -561,15 +565,19 @@ fn refresh_runtime_symbols_from_store(
         let display_options = widget_display_options(instance);
         let layout = layout_for_instance(instance, index, settings.clone(), Some(plugin_catalog));
         let widget_scale = widget_scale_for_instance(instance, &layout, plugin_catalog);
+        let theme_name = widget_theme_name(instance, plugin_catalog);
         if runtime.symbols != symbols
             || runtime.show_coin_logos != show_coin_logos
             || runtime.display_options != display_options
             || (runtime.widget_scale - widget_scale).abs() > f32::EPSILON
+            || runtime.theme_name != theme_name
         {
             runtime.symbols = symbols;
             runtime.show_coin_logos = show_coin_logos;
             runtime.display_options = display_options;
             runtime.widget_scale = widget_scale;
+            runtime.theme_name = theme_name.clone();
+            runtime.ui.set_theme_name(theme_name.into());
             apply_runtime_view_with_icons(
                 &runtime.ui,
                 &widget_runtime_view(
@@ -637,7 +645,7 @@ fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
     ui.set_empty_text(text.empty_pairs.into());
     ui.set_pin_to_top(instance.layout.always_on_top);
     ui.set_layout_locked(instance.layout.locked);
-    ui.set_theme_name(widget_theme_name(settings.theme).into());
+    ui.set_theme_name(widget_theme_name(instance, plugin_catalog).into());
     ui.set_red_up_enabled(settings.red_up_enabled);
     ui.set_content_opacity(instance.layout.opacity_percent);
     ui.set_compact_mode(instance.widget_type() == WidgetType::MiniTicker);
@@ -701,11 +709,39 @@ fn widget_heading(widget_type: WidgetType, locale: i18n::Locale) -> &'static str
     }
 }
 
-fn widget_theme_name(preference: settings::ThemePreference) -> &'static str {
-    match theme::resolve_theme(preference) {
-        theme::ResolvedTheme::Light => "light",
-        theme::ResolvedTheme::Dark => "dark",
+fn widget_theme_name(instance: &WidgetInstance, plugin_catalog: &plugin::PluginCatalog) -> String {
+    let Some(plugin) = plugin_catalog.find(&instance.plugin_id) else {
+        return "default".to_string();
+    };
+    resolve_plugin_theme_name(
+        plugin,
+        &settings::widget_theme_preference(instance),
+        theme::resolve_theme(settings::ThemePreference::System),
+    )
+}
+
+fn resolve_plugin_theme_name(
+    plugin: &plugin::PluginDefinition,
+    preference: &str,
+    system_theme: theme::ResolvedTheme,
+) -> String {
+    if preference == settings::WIDGET_THEME_SYSTEM {
+        let role = match system_theme {
+            theme::ResolvedTheme::Light => plugin::PluginThemeRole::Light,
+            theme::ResolvedTheme::Dark => plugin::PluginThemeRole::Dark,
+        };
+        if let Some(theme) = plugin.themes.iter().find(|theme| theme.role == role) {
+            return theme.id.clone();
+        }
+        return plugin::default_theme_id(plugin).to_string();
     }
+
+    plugin
+        .themes
+        .iter()
+        .find(|theme| theme.id == preference)
+        .map(|theme| theme.id.clone())
+        .unwrap_or_else(|| plugin::default_theme_id(plugin).to_string())
 }
 
 pub(crate) fn apply_settings_to_widgets(
@@ -737,6 +773,7 @@ pub(crate) fn apply_settings_to_widgets(
             runtime.symbols = normalized_symbols_for_instance(instance, Some(plugin_catalog));
             runtime.show_coin_logos = settings::widget_show_coin_logos(instance);
             runtime.display_options = widget_display_options(instance);
+            runtime.theme_name = widget_theme_name(instance, plugin_catalog);
         }
     }
 }
@@ -752,10 +789,13 @@ fn apply_runtime_view_with_icons(
     widget_scale: f32,
 ) {
     let quote_icons = quote_icons_for_display(coin_icons, symbols, proxy_url, show_coin_logos);
+    let quote_icon_ready =
+        quote_icon_ready_for_display(coin_icons, symbols, proxy_url, show_coin_logos);
     apply_runtime_view_to_widget(
         ui,
         view,
         &quote_icons,
+        &quote_icon_ready,
         show_coin_logos,
         display_options,
         widget_scale,
@@ -770,6 +810,19 @@ fn quote_icons_for_display(
 ) -> Vec<slint::Image> {
     if show_coin_logos {
         coin_icons.icons_for_symbols(symbols, proxy_url)
+    } else {
+        Vec::new()
+    }
+}
+
+fn quote_icon_ready_for_display(
+    coin_icons: &CoinIconRegistry,
+    symbols: &[String],
+    proxy_url: Option<&str>,
+    show_coin_logos: bool,
+) -> Vec<bool> {
+    if show_coin_logos {
+        coin_icons.icon_ready_for_symbols(symbols, proxy_url)
     } else {
         Vec::new()
     }
@@ -919,9 +972,45 @@ mod tests {
     }
 
     #[test]
-    fn widget_theme_name_uses_resolved_theme_names() {
-        assert_eq!(widget_theme_name(settings::ThemePreference::Light), "light");
-        assert_eq!(widget_theme_name(settings::ThemePreference::Dark), "dark");
+    fn widget_theme_name_resolves_per_widget_theme_preference() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let plugin = catalog.find(WidgetType::QuoteBoard.plugin_id()).unwrap();
+        let mut instance = runtime_test_widget(vec!["binance:spot:BTC/USDT"]);
+
+        assert_eq!(
+            resolve_plugin_theme_name(
+                plugin,
+                settings::WIDGET_THEME_SYSTEM,
+                theme::ResolvedTheme::Light
+            ),
+            "light"
+        );
+        assert_eq!(
+            resolve_plugin_theme_name(
+                plugin,
+                settings::WIDGET_THEME_SYSTEM,
+                theme::ResolvedTheme::Dark
+            ),
+            "dark"
+        );
+
+        settings::set_widget_theme_preference(&mut instance, "light");
+        assert_eq!(widget_theme_name(&instance, &catalog), "light");
+
+        let mut single_theme_plugin = plugin.clone();
+        single_theme_plugin.themes = plugin::single_default_theme();
+        assert_eq!(
+            resolve_plugin_theme_name(
+                &single_theme_plugin,
+                settings::WIDGET_THEME_SYSTEM,
+                theme::ResolvedTheme::Light
+            ),
+            "default"
+        );
+        assert_eq!(
+            resolve_plugin_theme_name(&single_theme_plugin, "light", theme::ResolvedTheme::Light),
+            "default"
+        );
     }
 
     #[test]

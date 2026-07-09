@@ -8,8 +8,19 @@ export struct QuoteRow {
 export component MarketCompass inherits Window {
     in property <string> widget-id;
     in property <[QuoteRow]> quote-rows;
+    in property <[image]> quote-icons;
+    in property <[bool]> quote-icon-ready;
+    property <image> empty-quote-icon;
+    in property <[string]> quote-assets;
+    in property <[string]> quote-chart-line-paths;
+    in property <[string]> quote-chart-fill-paths;
+    in property <[string]> quote-chart-up-candle-paths;
+    in property <[string]> quote-chart-down-candle-paths;
+    in property <[bool]> quote-chart-ready;
+    in property <[bool]> quote-chart-positive;
     in property <string> pairs-heading-text;
     in property <string> source-text;
+    in property <string> source-name-text;
     in property <string> updated-text;
     in property <string> empty-text;
     in property <bool> pin-to-top;
@@ -18,30 +29,66 @@ export component MarketCompass inherits Window {
     in property <int> widget-height: 480;
     in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
-    in property <int> content-opacity;
+    in property <int> content-opacity: 100;
     in property <string> theme-name: "dark";
+    in property <bool> show-coin-logos: true;
     in property <string> chart-line-path;
     in property <string> chart-fill-path;
+    in property <string> chart-up-candle-path;
+    in property <string> chart-down-candle-path;
     in property <bool> chart-ready;
     in property <bool> chart-positive;
     in-out property <bool> card-left-drag-active: false;
+    in-out property <int> rotation-step: 0;
+
     property <bool> light-theme: root.theme-name == "light";
+    property <float> content-scale: root.widget-scale;
+    function s(value: length) -> length {
+        return value * root.content-scale;
+    }
+    property <int> orbit-count: root.quote-rows.length < 1 ? 0 : (root.quote-rows.length > 8 ? 8 : root.quote-rows.length);
+    property <int> orbit-denominator: root.orbit-count < 1 ? 1 : root.orbit-count;
+    property <int> bounded-rotation-step: root.orbit-count <= 0 ? 0 : (root.rotation-step < root.orbit-count ? root.rotation-step : 0);
+    property <length> orbit-center-x: root.s(240px);
+    property <length> orbit-center-y: root.s(240px);
+    property <length> orbit-radius: root.orbit-count <= 1 ? root.s(179px) : root.s(181px);
+    property <color> gain-color: root.light-theme ? #00845f : #45e98e;
+    property <color> loss-color: root.light-theme ? #c8423f : #ff5f4d;
+    property <color> primary-text-color: root.light-theme ? #0b302e : #f2f5f4;
+    property <color> muted-text-color: root.light-theme ? #5d7d77 : #aeb6bd;
+    property <color> dim-text-color: root.light-theme ? #75918c : #8b949c;
+    property <color> cyan-glow-color: root.light-theme ? #00a6aea6 : #54f4ffd6;
+    property <color> amber-glow-color: root.light-theme ? #e2a949b0 : #ffa734dd;
+    property <color> dial-black: root.light-theme ? #e9eef2ee : #070b0eee;
+    property <color> dial-inner-black: root.light-theme ? #f7fbffee : #090d10f4;
+    property <color> pair-heading-shadow-color: root.light-theme ? #ffffffc8 : #000000a8;
+    property <color> pair-heading-color: root.light-theme ? #245f5a : #c7d8eb;
+    property <color> price-shadow-color: root.light-theme ? #ffffffd8 : #000000d8;
+    property <color> price-glow-color: root.light-theme ? #39c9c348 : #6ff7ff3f;
+    property <color> price-text-color: root.light-theme ? #0b302e : #ffffff;
     property <color> lock-hover-background: root.light-theme ? #f8faf0cc : #0f172acc;
     property <color> lock-hover-border: root.light-theme ? #0f8f8277 : #55e6d077;
     property <color> lock-icon-color: root.light-theme ? #0f172acc : #cbd5e1cc;
-    property <color> gain-color: root.light-theme ? #16a34a : #50df99;
-    property <color> loss-color: root.light-theme ? #dc2626 : #ff6b76;
-    property <color> primary-text-color: root.light-theme ? #0f172a : #f8fafc;
-    property <color> secondary-text-color: root.light-theme ? #334155 : #cbd5e1cc;
-    property <color> chart-color: root.chart-positive
-        ? (root.red-up-enabled ? root.loss-color : root.gain-color)
-        : (root.red-up-enabled ? root.gain-color : root.loss-color);
-    property <color> displayed-change-color: root.quote-rows.length > 0 && root.quote-rows[0].positive
-        ? (root.red-up-enabled ? root.loss-color : root.gain-color)
-        : (root.red-up-enabled ? root.gain-color : root.loss-color);
-    property <color> chart-fill-color: root.light-theme ? #16a34a30 : #14b8a633;
-    property <color> chart-glow-color: root.light-theme ? #16a34a50 : #42e6c460;
-    property <float> content-scale: root.widget-scale;
+
+    function active-index() -> int {
+        if root.orbit-count <= 0 {
+            return 0;
+        }
+        return root.bounded-rotation-step;
+    }
+
+    function status-line() -> string {
+        if root.source-name-text != "" && root.updated-text != "" {
+            return root.source-name-text + " · " + root.updated-text;
+        }
+        if root.source-text != "" && root.updated-text != "" {
+            return root.source-text + " · " + root.updated-text;
+        }
+        if root.source-name-text != "" {
+            return root.source-name-text;
+        }
+        return root.source-text;
+    }
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
@@ -51,6 +98,18 @@ export component MarketCompass inherits Window {
     no-frame: true;
     always-on-top: root.pin-to-top;
     background: transparent;
+
+    Timer {
+        interval: 5s;
+        running: root.orbit-count > 1;
+        triggered() => {
+            if root.rotation-step + 1 >= root.orbit-count {
+                root.rotation-step = 0;
+            } else {
+                root.rotation-step += 1;
+            }
+        }
+    }
 
     drag_area := TouchArea {
         width: root.widget-width * 1px;
@@ -71,218 +130,402 @@ export component MarketCompass inherits Window {
     }
 
     card := Rectangle {
-        x: (root.widget-width * 1px - 480px * root.content-scale) / 2;
-        y: (root.widget-height * 1px - 480px * root.content-scale) / 2;
-        width: 480px;
-        height: 480px;
-        transform-origin: { x: 0px, y: 0px };
-        transform-scale-x: root.content-scale;
-        transform-scale-y: root.content-scale;
+        x: (root.widget-width * 1px - root.s(480px)) / 2;
+        y: (root.widget-height * 1px - root.s(480px)) / 2;
+        width: root.s(480px);
+        height: root.s(480px);
         background: transparent;
         opacity: root.content-opacity / 100;
 
         Image {
             width: parent.width;
             height: parent.height;
+            source: @image-url("opaque-circle.png");
+            image-fit: fill;
+            visible: !root.light-theme;
+        }
+
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("opaque-circle-light.png");
+            image-fit: fill;
+            visible: root.light-theme;
+        }
+
+        Image {
+            width: parent.width;
+            height: parent.height;
             source: @image-url("reference.png");
             image-fit: fill;
-            opacity: root.light-theme ? 0.88 : 1;
+            visible: !root.light-theme;
+        }
+
+        Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("reference-light.png");
+            image-fit: fill;
+            visible: root.light-theme;
         }
 
         Rectangle {
-            width: parent.width;
-            height: parent.height;
-            background: root.light-theme ? #f8faf018 : transparent;
+            x: root.s(86px);
+            y: root.s(86px);
+            width: root.s(308px);
+            height: root.s(308px);
+            border-radius: root.s(154px);
+            background: root.light-theme ? #ffffff18 : #00000018;
+            border-width: root.s(1px);
+            border-color: root.light-theme ? #00a6ae36 : #132838c8;
         }
 
-        chart_band := Rectangle {
-            x: 92px;
-            y: 248px;
-            width: 300px;
-            height: 88px;
-            background: transparent;
-            clip: true;
+        Rectangle {
+            x: root.s(94px);
+            y: root.s(94px);
+            width: root.s(292px);
+            height: root.s(292px);
+            border-radius: root.s(146px);
+            background: root.light-theme ? @radial-gradient(circle, #82e5dc24 0%, #ebfff914 58%, #ffffff00 78%) : @radial-gradient(circle, #0e273322 0%, #02070b10 58%, #00000000 78%);
+            border-width: root.s(1px);
+            border-color: root.light-theme ? #00a6ae24 : #4fd6e42d;
+        }
 
-            Rectangle {
+        Rectangle {
+            x: root.s(94px);
+            y: root.s(94px);
+            width: root.s(292px);
+            height: root.s(292px);
+            border-radius: root.s(146px);
+            background: root.light-theme ? @linear-gradient(180deg, #ffffff58 0%, #ffffff14 24%, #8de3d812 62%, #3b8f8720 100%) : @linear-gradient(180deg, #ffffff18 0%, #ffffff04 23%, #00000000 52%, #0000001c 100%);
+        }
+
+        for quote[index] in root.quote-rows : active_panel := Rectangle {
+            property <bool> selected: index == root.active-index();
+            property <bool> selected-chart-ready: root.quote-chart-ready.length > index ? root.quote-chart-ready[index] : root.chart-ready;
+            property <bool> selected-chart-positive: root.quote-chart-positive.length > index ? root.quote-chart-positive[index] : root.chart-positive;
+            property <string> selected-chart-line-path: root.quote-chart-line-paths.length > index ? root.quote-chart-line-paths[index] : root.chart-line-path;
+            property <string> selected-chart-fill-path: root.quote-chart-fill-paths.length > index ? root.quote-chart-fill-paths[index] : root.chart-fill-path;
+            property <string> selected-chart-up-candle-path: root.quote-chart-up-candle-paths.length > index ? root.quote-chart-up-candle-paths[index] : root.chart-up-candle-path;
+            property <string> selected-chart-down-candle-path: root.quote-chart-down-candle-paths.length > index ? root.quote-chart-down-candle-paths[index] : root.chart-down-candle-path;
+            property <color> selected-chart-color: active_panel.selected-chart-positive
+                ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+                : (root.red-up-enabled ? root.gain-color : root.loss-color);
+            property <color> up-candle-color: root.red-up-enabled ? root.loss-color : root.gain-color;
+            property <color> down-candle-color: root.red-up-enabled ? root.gain-color : root.loss-color;
+            width: parent.width;
+            height: parent.height;
+            visible: active_panel.selected && index < root.orbit-count;
+
+            pair_shadow := Text {
+                x: root.s(124px);
+                y: root.s(124px);
+                width: root.s(232px);
+                height: root.s(28px);
+                text: quote.symbol;
+                color: root.pair-heading-shadow-color;
+                font-size: root.s(25px);
+                font-weight: 820;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: root.s(124px);
+                y: root.s(122px);
+                width: root.s(232px);
+                height: root.s(28px);
+                text: quote.symbol;
+                color: root.pair-heading-color;
+                font-size: root.s(25px);
+                font-weight: 820;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            price_shadow := Text {
+                x: root.s(46px);
+                y: root.s(151px);
+                width: root.s(388px);
+                height: root.s(76px);
+                text: quote.price;
+                color: root.price-shadow-color;
+                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-weight: 900;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            price_glow := Text {
+                x: root.s(46px);
+                y: root.s(147px);
+                width: root.s(388px);
+                height: root.s(76px);
+                text: quote.price;
+                color: root.price-glow-color;
+                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-weight: 900;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: root.s(46px);
+                y: root.s(148px);
+                width: root.s(388px);
+                height: root.s(76px);
+                text: quote.price;
+                color: root.price-text-color;
+                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-weight: 900;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: root.s(142px);
+                y: root.s(214px);
+                width: root.s(196px);
+                height: root.s(34px);
+                text: quote.change;
+                color: quote.positive
+                    ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+                    : (root.red-up-enabled ? root.gain-color : root.loss-color);
+                font-size: root.s(29px);
+                font-weight: 850;
+                horizontal-alignment: center;
+                visible: quote.change != "--";
+                overflow: elide;
+            }
+
+            chart_band := Rectangle {
+                x: root.s(97px);
+                y: root.s(246px);
+                width: root.s(286px);
+                height: root.s(100px);
+                background: transparent;
+                clip: true;
+
+                Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    background: root.light-theme ? @radial-gradient(circle 182px at 225px 32px, #63dccf2a 0%, #51d1c10d 42%, #51d1c100 82%) : @radial-gradient(circle 182px at 225px 32px, #47e7cf24 0%, #20c9970c 42%, #20c99700 82%);
+                    opacity: active_panel.selected-chart-ready ? (root.light-theme ? 0.72 : 0.82) : 0.26;
+                }
+
+                Path {
+                    x: 0px;
+                    y: root.s(9px);
+                    width: parent.width;
+                    height: root.s(78px);
+                    viewbox-width: 100;
+                    viewbox-height: 40;
+                    fit: fill;
+                    commands: active_panel.selected-chart-fill-path;
+                    fill: active_panel.selected-chart-color;
+                    stroke-width: 0px;
+                    opacity: active_panel.selected-chart-ready ? (root.light-theme ? 0.075 : 0.045) : 0.025;
+                }
+
+                Path {
+                    x: 0px;
+                    y: root.s(9px);
+                    width: parent.width;
+                    height: root.s(78px);
+                    viewbox-width: 100;
+                    viewbox-height: 40;
+                    fit: fill;
+                    commands: active_panel.selected-chart-line-path;
+                    fill: transparent;
+                    stroke: active_panel.selected-chart-color;
+                    stroke-width: root.s(2px);
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                    opacity: active_panel.selected-chart-ready ? (root.light-theme ? 0.36 : 0.26) : 0.18;
+                }
+
+                Path {
+                    x: root.s(5px);
+                    y: root.s(7px);
+                    width: parent.width - root.s(10px);
+                    height: root.s(80px);
+                    viewbox-width: 100;
+                    viewbox-height: 40;
+                    fit: fill;
+                    commands: active_panel.selected-chart-down-candle-path;
+                    fill: active_panel.down-candle-color;
+                    stroke-width: 0px;
+                    opacity: active_panel.selected-chart-ready ? 0.96 : 0.28;
+                }
+
+                Path {
+                    x: root.s(5px);
+                    y: root.s(7px);
+                    width: parent.width - root.s(10px);
+                    height: root.s(80px);
+                    viewbox-width: 100;
+                    viewbox-height: 40;
+                    fit: fill;
+                    commands: active_panel.selected-chart-up-candle-path;
+                    fill: active_panel.up-candle-color;
+                    stroke-width: 0px;
+                    opacity: active_panel.selected-chart-ready ? 1 : 0.3;
+                }
+            }
+
+            Text {
+                x: root.s(128px);
+                y: root.s(354px);
+                width: root.s(224px);
+                height: root.s(28px);
+                text: root.status-line();
+                color: root.muted-text-color;
+                font-size: root.s(15px);
+                font-weight: 560;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        for quote[index] in root.quote-rows : coin_node := Rectangle {
+            property <bool> selected: index == root.active-index();
+            property <angle> slot-angle: -90deg + (root.bounded-rotation-step - index) * 1turn / root.orbit-denominator;
+            property <length> node-size: self.selected ? root.s(78px) : root.s(69px);
+            property <length> icon-size: self.selected ? root.s(34px) : root.s(30px);
+            property <length> icon-top: self.selected ? root.s(18px) : root.s(17px);
+            property <string> node-asset: root.quote-assets.length > index ? root.quote-assets[index] : quote.symbol;
+            property <bool> icon-ready: root.show-coin-logos && root.quote-icon-ready.length > index && root.quote-icon-ready[index];
+            x: root.orbit-center-x + root.orbit-radius * Math.cos(coin_node.slot-angle) - coin_node.node-size / 2;
+            y: root.orbit-center-y + root.orbit-radius * Math.sin(coin_node.slot-angle) - coin_node.node-size / 2;
+            width: coin_node.node-size;
+            height: coin_node.node-size;
+            border-radius: coin_node.node-size / 2;
+            visible: index < root.orbit-count;
+            background: transparent;
+
+            animate x { duration: 620ms; easing: ease-in-out; }
+            animate y { duration: 620ms; easing: ease-in-out; }
+            animate width { duration: 260ms; easing: ease-out; }
+            animate height { duration: 260ms; easing: ease-out; }
+
+            Image {
                 width: parent.width;
                 height: parent.height;
-                background: @radial-gradient(circle 180px at 234px 58px, root.chart-glow-color 0%, #14b8a614 36%, #14b8a600 76%);
-                opacity: root.chart-ready ? 0.84 : 0.36;
+                source: @image-url("coin-node.png");
+                image-fit: fill;
+                visible: !coin_node.selected && !root.light-theme;
             }
 
-            Path {
-                x: 0px;
-                y: 30px;
+            Image {
                 width: parent.width;
-                height: 50px;
-                viewbox-width: 100;
-                viewbox-height: 40;
-                fit: fill;
-                commands: root.chart-fill-path;
-                fill: root.chart-fill-color;
-                stroke-width: 0px;
-                opacity: root.chart-ready ? 0.42 : 0.24;
+                height: parent.height;
+                source: @image-url("coin-node-light.png");
+                image-fit: fill;
+                visible: !coin_node.selected && root.light-theme;
             }
 
-            Path {
-                x: 0px;
-                y: 30px;
+            Image {
                 width: parent.width;
-                height: 50px;
-                viewbox-width: 100;
-                viewbox-height: 40;
-                fit: fill;
-                commands: root.chart-line-path;
-                fill: transparent;
-                stroke: root.chart-glow-color;
-                stroke-width: 3.1px;
-                stroke-line-cap: round;
-                stroke-line-join: round;
-                opacity: root.chart-ready ? 0.23 : 0.14;
+                height: parent.height;
+                source: @image-url("coin-node-selected.png");
+                image-fit: fill;
+                visible: coin_node.selected && !root.light-theme;
             }
 
-            Path {
-                x: 0px;
-                y: 30px;
+            Image {
                 width: parent.width;
-                height: 50px;
-                viewbox-width: 100;
-                viewbox-height: 40;
-                fit: fill;
-                commands: root.chart-line-path;
-                fill: transparent;
-                stroke: root.chart-color;
-                stroke-width: 1.5px;
-                stroke-line-cap: round;
-                stroke-line-join: round;
-                opacity: root.chart-ready ? 1 : 0.45;
-            }
-        }
-
-        for quote[index] in root.quote-rows : Rectangle {
-            visible: index == 0;
-            width: parent.width;
-            height: parent.height;
-
-            Text {
-                x: 128px;
-                y: 142px;
-                width: 224px;
-                text: quote.symbol;
-                color: root.primary-text-color;
-                font-size: 23px;
-                font-weight: 800;
-                horizontal-alignment: center;
-                overflow: elide;
+                height: parent.height;
+                source: @image-url("coin-node-light-selected.png");
+                image-fit: fill;
+                visible: coin_node.selected && root.light-theme;
             }
 
-            Rectangle {
-                x: 236px;
-                y: 174px;
-                width: 8px;
-                height: 8px;
-                border-radius: 4px;
-                background: root.chart-color;
-                drop-shadow-offset-y: 0px;
-                drop-shadow-blur: 8px;
-                drop-shadow-color: root.chart-glow-color;
+            Image {
+                x: (parent.width - coin_node.icon-size) / 2;
+                y: coin_node.icon-top;
+                width: coin_node.icon-size;
+                height: coin_node.icon-size;
+                source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
+                image-fit: contain;
+                visible: coin_node.icon-ready && root.quote-icons.length > index;
             }
 
             Text {
-                x: 82px;
-                y: 190px;
-                width: 316px;
-                text: quote.price;
+                x: root.s(7px);
+                y: coin_node.icon-top;
+                width: parent.width - root.s(14px);
+                height: coin_node.icon-size;
+                text: coin_node.node-asset;
                 color: root.primary-text-color;
-                font-size: 58px;
+                font-size: coin_node.selected ? root.s(16px) : root.s(14px);
                 font-weight: 900;
                 horizontal-alignment: center;
+                vertical-alignment: center;
                 overflow: elide;
+                visible: coin_node.selected && !coin_node.icon-ready;
             }
 
             Text {
-                x: 142px;
-                y: 248px;
-                width: 196px;
+                x: root.s(6px);
+                y: coin_node.selected ? root.s(54px) : root.s(46px);
+                width: parent.width - root.s(12px);
+                height: coin_node.selected ? root.s(18px) : root.s(17px);
                 text: quote.change;
-                color: root.displayed-change-color;
-                font-size: 26px;
+                color: quote.positive
+                    ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+                    : (root.red-up-enabled ? root.gain-color : root.loss-color);
+                font-size: coin_node.selected ? root.s(14px) : root.s(13px);
                 font-weight: 900;
                 horizontal-alignment: center;
-                overflow: elide;
-            }
-
-            Text {
-                x: 304px;
-                y: 254px;
-                width: 32px;
-                text: "24h";
-                color: root.displayed-change-color;
-                font-size: 16px;
-                font-weight: 800;
+                vertical-alignment: center;
                 visible: quote.change != "--";
                 overflow: elide;
             }
         }
 
         Text {
-            x: 128px;
-            y: 190px;
-            width: 224px;
+            x: root.s(118px);
+            y: root.s(198px);
+            width: root.s(244px);
+            height: root.s(42px);
             text: root.empty-text;
-            color: root.secondary-text-color;
-            font-size: 22px;
-            font-weight: 700;
+            color: root.muted-text-color;
+            font-size: root.s(22px);
+            font-weight: 800;
             horizontal-alignment: center;
+            vertical-alignment: center;
             visible: root.quote-rows.length == 0;
             overflow: elide;
         }
 
-        Text {
-            x: 132px;
-            y: 394px;
-            width: 216px;
-            text: root.source-text;
-            color: root.secondary-text-color;
-            font-size: 12px;
-            font-weight: 600;
-            horizontal-alignment: center;
-            overflow: elide;
-        }
-
-        Text {
-            x: 132px;
-            y: 412px;
-            width: 216px;
-            text: root.updated-text;
-            color: root.secondary-text-color;
-            font-size: 11px;
-            horizontal-alignment: center;
-            overflow: elide;
-        }
-
         lock_button := Rectangle {
-            x: parent.width - 54px;
-            y: 52px;
-            width: 28px;
-            height: 28px;
-            border-radius: 14px;
+            x: parent.width - root.s(54px);
+            y: root.s(52px);
+            width: root.s(28px);
+            height: root.s(28px);
+            border-radius: root.s(14px);
             background: root.layout-locked || lock_touch.has-hover ? root.lock-hover-background : transparent;
-            border-width: 1px;
+            border-width: root.s(1px);
             border-color: root.layout-locked || lock_touch.has-hover ? root.lock-hover-border : transparent;
             visible: drag_area.has-hover || lock_touch.has-hover;
 
             Path {
-                x: 5px;
-                y: 4px;
-                width: 18px;
-                height: 20px;
+                x: root.s(5px);
+                y: root.s(4px);
+                width: root.s(18px);
+                height: root.s(20px);
                 viewbox-width: 24;
                 viewbox-height: 24;
                 commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
                 fill: root.layout-locked ? root.lock-icon-color : transparent;
                 stroke: root.lock-icon-color;
-                stroke-width: 2px;
+                stroke-width: root.s(2px);
                 stroke-line-cap: round;
                 stroke-line-join: round;
             }
@@ -294,9 +537,5 @@ export component MarketCompass inherits Window {
                 clicked => { root.toggle-layout-lock(); }
             }
         }
-
-
-
-
     }
 }

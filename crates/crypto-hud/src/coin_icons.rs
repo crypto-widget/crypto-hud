@@ -151,7 +151,19 @@ impl CoinIconRegistry {
         self.drain_results();
         symbols
             .iter()
-            .map(|symbol| self.icon_for_symbol(symbol, proxy_url))
+            .map(|symbol| self.icon_for_symbol_with_ready(symbol, proxy_url).0)
+            .collect()
+    }
+
+    pub(crate) fn icon_ready_for_symbols(
+        &self,
+        symbols: &[String],
+        proxy_url: Option<&str>,
+    ) -> Vec<bool> {
+        self.drain_results();
+        symbols
+            .iter()
+            .map(|symbol| self.icon_for_symbol_with_ready(symbol, proxy_url).1)
             .collect()
     }
 
@@ -172,20 +184,23 @@ impl CoinIconRegistry {
         Ok(deleted)
     }
 
-    fn icon_for_symbol(&self, symbol: &str, proxy_url: Option<&str>) -> Image {
+    fn icon_for_symbol_with_ready(&self, symbol: &str, proxy_url: Option<&str>) -> (Image, bool) {
         let Some(key) = icon_key_from_symbol(symbol) else {
-            return Image::default();
+            return (Image::default(), false);
         };
 
         if let Some(cached) = self.images.borrow().get(&key) {
-            return cached.clone().unwrap_or_default();
+            return match cached {
+                Some(image) => (image.clone(), true),
+                None => (Image::default(), false),
+            };
         }
 
         if let Some(image) = load_cached_icon(&self.cache_dir, &key) {
             self.images
                 .borrow_mut()
                 .insert(key.clone(), Some(image.clone()));
-            return image;
+            return (image, true);
         }
 
         if self.pending.borrow_mut().insert(key.clone()) {
@@ -200,7 +215,7 @@ impl CoinIconRegistry {
             }
         }
 
-        Image::default()
+        (Image::default(), false)
     }
 
     fn drain_results(&self) {

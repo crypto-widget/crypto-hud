@@ -74,7 +74,7 @@ Manifest requirements:
 - `renderer.component` must be the exported component name in the entry Slint file.
 - `permissions.network` and `permissions.filesystem` must both be `false`.
 - `defaultSize` must be between `120x80` and `1200x900`.
-- `minSymbolLimit` and `symbolLimit` must be between `1` and `5`, with `minSymbolLimit <= symbolLimit`.
+- `minSymbolLimit` and `symbolLimit` must be between `1` and `8`, with `minSymbolLimit <= symbolLimit`.
 - `defaultSymbols` is optional. If present, its length must satisfy the symbol limits and every entry must be a valid market pair.
 - `previewImages` is optional. It may contain up to 5 images and only supports `png`, `jpg`, and `jpeg`.
 - `dataRequirements` currently supports `market.price` and `market.candles`.
@@ -157,7 +157,16 @@ in property <bool> chart-positive;
 
 ## Theme And Change Colors
 
-The host passes the resolved theme through `theme-name`. Current values are `light` and `dark`. Plugins must define their own light and dark palettes.
+The host passes the selected widget theme through `theme-name`. Declare supported themes in `widget.json`; if omitted, the widget has one `default` theme and the settings window will not show a theme selector.
+
+```json
+"themes": [
+  { "id": "light", "name": "Light", "role": "light" },
+  { "id": "dark", "name": "Dark", "role": "dark", "default": true }
+]
+```
+
+When the user chooses System, the host sends the theme with role `light` or `dark` to match the OS. If that role is not declared, it sends the widget's default theme.
 
 ```slint
 property <bool> light-theme: root.theme-name == "light";
