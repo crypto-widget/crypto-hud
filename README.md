@@ -166,7 +166,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
 powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.1
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.2
 ```
 
 The package script creates a Windows zip, checksum, and release manifest in

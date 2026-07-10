@@ -147,7 +147,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
 powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.1
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.2
 ```
 
 打包脚本会在 `dist/` 中生成 Windows zip、校验和和 release manifest。安装器会先校验包内容，
