@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "dev",
+    [string]$Version = "",
     [switch]$SkipBuild,
     [switch]$Sign,
     [string]$CertificatePath = "",
@@ -11,6 +11,18 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$WorkspaceManifest = Join-Path $RepoRoot "Cargo.toml"
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $workspaceCargo = Get-Content -LiteralPath $WorkspaceManifest -Raw
+    $versionMatch = [regex]::Match(
+        $workspaceCargo,
+        '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"'
+    )
+    if (-not $versionMatch.Success) {
+        throw "Could not read workspace package version from $WorkspaceManifest"
+    }
+    $Version = "v$($versionMatch.Groups[1].Value)"
+}
 $DistDir = Join-Path $RepoRoot "dist"
 $PackageRoot = Join-Path $DistDir "crypto-hud-$Version-windows-x64"
 $Exe = Join-Path $RepoRoot "target\release\crypto-hud.exe"

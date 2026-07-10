@@ -103,6 +103,20 @@ try {
         Assert-Hash -Path (Resolve-PackageFile -RelativePath ([string]$file.path)) -ExpectedHash ([string]$file.sha256)
     }
 
+    $protectedDir = Join-Path $RepoRoot "target\tmp\package-smoke-protected"
+    Assert-UnderRepo -Path $protectedDir
+    New-Item -ItemType Directory -Force -Path $protectedDir | Out-Null
+    $sentinel = Join-Path $protectedDir "keep.txt"
+    Set-Content -LiteralPath $sentinel -Value "keep"
+    powershell -ExecutionPolicy Bypass -File (Join-Path $PackageRoot "uninstall.ps1") -InstallDir $protectedDir -SkipShellIntegration
+    if ($LASTEXITCODE -eq 0) {
+        throw "Uninstall safety check accepted a non-install directory"
+    }
+    if (-not (Test-Path -LiteralPath $sentinel)) {
+        throw "Uninstall safety check removed a protected directory"
+    }
+    Remove-Item -LiteralPath $protectedDir -Recurse -Force
+
     powershell -ExecutionPolicy Bypass -File (Join-Path $PackageRoot "install.ps1") -InstallDir $InstallDir -SkipShellIntegration
     if ($LASTEXITCODE -ne 0) {
         throw "Install smoke failed with code $LASTEXITCODE"

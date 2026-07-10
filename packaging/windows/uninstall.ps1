@@ -17,6 +17,34 @@ $AutoStartRunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $AutoStartApprovalKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 $AutoStartValueNames = @("Crypto HUD", "Crypto Widget Slint")
 
+function Assert-CryptoHudInstallDirectory {
+    param([string]$Path)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $rootPath = [System.IO.Path]::GetPathRoot($fullPath)
+    if ($fullPath.TrimEnd('\', '/') -eq $rootPath.TrimEnd('\', '/')) {
+        throw "Refusing to uninstall from a filesystem root: $fullPath"
+    }
+
+    $expectedExe = Join-Path $fullPath "crypto-hud.exe"
+    $manifestPath = Join-Path $fullPath "release-manifest.json"
+    $validManifest = $false
+    if (Test-Path -LiteralPath $manifestPath) {
+        try {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $validManifest = $manifest.name -eq "crypto-hud" -and $manifest.executable -eq "crypto-hud.exe"
+        } catch {
+            $validManifest = $false
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $expectedExe) -and -not $validManifest) {
+        throw "Refusing to delete a directory that is not a Crypto HUD installation: $fullPath"
+    }
+}
+
+Assert-CryptoHudInstallDirectory -Path $InstallDir
+
 if (-not $SkipShellIntegration) {
     foreach ($valueName in $AutoStartValueNames) {
         Remove-ItemProperty -LiteralPath $AutoStartRunKey -Name $valueName -Force -ErrorAction SilentlyContinue
