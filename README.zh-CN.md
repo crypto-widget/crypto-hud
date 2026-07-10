@@ -119,6 +119,7 @@ mise run format
 mise run run-app
 powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\single-instance-smoke.ps1
 ```
 
 代码拆分为几个小型 Rust crate：

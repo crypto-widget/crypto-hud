@@ -33,8 +33,9 @@ use crypto_hud_market as market;
 use crypto_hud_runtime::QuoteCache;
 use crypto_hud_shell_state as settings;
 use desktop_shell::{
-    install_gui_smoke_timer, install_keepalive_window, install_single_instance_guard, install_tray,
-    parse_launch_options, refresh_tray_text, write_gui_smoke_ready_file,
+    install_gui_smoke_timer, install_instance_activation_timer, install_keepalive_window,
+    install_single_instance_guard, install_tray, parse_launch_options, refresh_tray_text,
+    write_gui_smoke_ready_file,
 };
 use runtime_bridge::{install_runtime_event_timer, sync_widget_runtimes, RuntimeEventTimerDeps};
 #[cfg(test)]
@@ -117,9 +118,7 @@ fn install_gui_smoke_settings_interaction_timer(
     layouts: Rc<RefCell<LayoutStore>>,
     settings_window_requested: bool,
 ) -> Option<Timer> {
-    if env::var_os("CRYPTO_HUD_GUI_SMOKE_SETTINGS_INTERACTION").is_none() {
-        return None;
-    }
+    env::var_os("CRYPTO_HUD_GUI_SMOKE_SETTINGS_INTERACTION")?;
 
     let timer = Timer::default();
     timer.start(
@@ -165,8 +164,9 @@ fn main() -> Result<()> {
         env::set_var("SLINT_BACKEND", "software");
     }
 
-    let single_instance = install_single_instance_guard()?;
+    let (single_instance, instance_activation) = install_single_instance_guard()?;
     if !single_instance.is_single() {
+        instance_activation.request_activation()?;
         return Ok(());
     }
 
@@ -311,6 +311,15 @@ fn main() -> Result<()> {
         tray_hover_state.clone(),
     );
     let widget_shell_window_maintenance_timer = install_widget_shell_window_maintenance_timer();
+    let instance_activation_timer = install_instance_activation_timer(
+        instance_activation,
+        settings_window.as_weak(),
+        widgets.clone(),
+        layouts.clone(),
+        state_path.clone(),
+        settings_mode_active.clone(),
+        plugin_catalog.clone(),
+    );
 
     let market_updates = market::spawn_market_feed(market_feed_config);
     let update_events = if launch_options.gui_smoke_exit_after.is_some() {
@@ -335,6 +344,7 @@ fn main() -> Result<()> {
 
     let event_loop_result = slint::run_event_loop_until_quit().context("Slint event loop failed");
     drop(runtime_event_timer);
+    drop(instance_activation_timer);
     drop(widget_shell_window_maintenance_timer);
     drop(gui_smoke_settings_interaction_timer);
     drop(preview_carousel_timer);
