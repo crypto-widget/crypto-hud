@@ -21,6 +21,7 @@ const COINBASE_EXCHANGE_BASE_URL: &str = "https://api.exchange.coinbase.com";
 const OKX_BASE_URL: &str = "https://www.okx.com";
 const HYPERLIQUID_BASE_URL: &str = "https://api.hyperliquid.xyz";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_CONCURRENT_PAIR_FETCHES: usize = 4;
 const CANDLE_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const CANDLE_LIMIT_24H_5M: usize = 24 * 60 / 5;
 const HYPERLIQUID_CANDLE_INTERVAL: &str = "5m";
@@ -47,7 +48,6 @@ pub struct MarketFeedConfig {
     pub symbols: Vec<String>,
     pub provider: MarketProviderPreference,
     pub refresh_interval_seconds: i32,
-    pub fallback_enabled: bool,
     pub enabled_sources: Vec<MarketDataSource>,
     pub proxy_url: Option<String>,
 }
@@ -74,6 +74,16 @@ struct CandleCacheEntry {
 
 type CandleCache = HashMap<String, CandleCacheEntry>;
 
+struct MarketFetchOutcome {
+    snapshot: MarketSnapshot,
+    warning: Option<String>,
+}
+
+struct MarketBatch {
+    snapshots: Vec<MarketSnapshot>,
+    errors: Vec<String>,
+}
+
 pub fn spawn_market_feed(config: Arc<Mutex<MarketFeedConfig>>) -> Receiver<MarketEvent> {
     let (sender, receiver) = mpsc::channel();
 
@@ -90,7 +100,6 @@ pub fn spawn_market_feed(config: Arc<Mutex<MarketFeedConfig>>) -> Receiver<Marke
                     symbols: Vec::new(),
                     provider: MarketProviderPreference::default(),
                     refresh_interval_seconds: DEFAULT_REFRESH_INTERVAL_SECONDS,
-                    fallback_enabled: true,
                     enabled_sources: default_enabled_market_sources(),
                     proxy_url: None,
                 });
@@ -125,11 +134,16 @@ pub fn spawn_market_feed(config: Arc<Mutex<MarketFeedConfig>>) -> Receiver<Marke
             }
 
             match fetch_symbols(&agent, &symbols, &mut candle_cache) {
-                Ok(snapshots) => {
+                Ok(MarketBatch { snapshots, errors }) => {
                     for snapshot in snapshots {
                         if sender.send(MarketEvent::Snapshot(snapshot)).is_err() {
                             return;
                         }
+                    }
+                    if !errors.is_empty()
+                        && sender.send(MarketEvent::Error(errors.join("; "))).is_err()
+                    {
+                        return;
                     }
                 }
                 Err(error) => {
@@ -226,34 +240,84 @@ fn fetch_symbols(
     agent: &ureq::Agent,
     symbols: &[String],
     candle_cache: &mut CandleCache,
-) -> Result<Vec<MarketSnapshot>> {
+) -> Result<MarketBatch> {
     if symbols.is_empty() {
         bail!("no market pairs configured");
     }
 
     let mut snapshots = Vec::new();
     let mut errors = Vec::new();
+    let mut pairs = Vec::new();
     for symbol in symbols {
-        match parse_market_pair(symbol)
-            .ok_or_else(|| anyhow!("invalid market pair {symbol}"))
-            .and_then(|pair| fetch_pair(agent, &pair, candle_cache))
-        {
-            Ok(snapshot) => snapshots.push(snapshot),
-            Err(error) => errors.push(format!("{symbol}: {error}")),
+        match parse_market_pair(symbol) {
+            Some(pair) => pairs.push((symbol.clone(), pair)),
+            None => errors.push(format!("{symbol}: invalid market pair")),
         }
     }
 
+    candle_cache.retain(|key, _| symbols.contains(key));
+    for chunk in pairs.chunks(MAX_CONCURRENT_PAIR_FETCHES) {
+        let results = thread::scope(|scope| {
+            let handles = chunk
+                .iter()
+                .map(|(symbol, pair)| {
+                    let agent = agent.clone();
+                    let symbol = symbol.clone();
+                    let pair = pair.clone();
+                    let cached_entry = candle_cache.get(&pair.key()).cloned();
+                    scope.spawn(move || {
+                        let key = pair.key();
+                        let mut local_cache = CandleCache::new();
+                        if let Some(entry) = cached_entry {
+                            local_cache.insert(key.clone(), entry);
+                        }
+                        let result = fetch_pair(&agent, &pair, &mut local_cache);
+                        (symbol, result, local_cache.remove(&key))
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            handles
+                .into_iter()
+                .map(|handle| handle.join())
+                .collect::<Vec<_>>()
+        });
+
+        for result in results {
+            let Ok((symbol, result, cached_entry)) = result else {
+                errors.push("market pair worker panicked".to_string());
+                continue;
+            };
+            if let Some(entry) = cached_entry {
+                candle_cache.insert(symbol.clone(), entry);
+            }
+            match result {
+                Ok(outcome) => {
+                    snapshots.push(outcome.snapshot);
+                    if let Some(warning) = outcome.warning {
+                        errors.push(format!("{symbol}: {warning}"));
+                    }
+                }
+                Err(error) => errors.push(format!("{symbol}: {error}")),
+            }
+        }
+    }
+
+    market_batch(snapshots, errors)
+}
+
+fn market_batch(snapshots: Vec<MarketSnapshot>, errors: Vec<String>) -> Result<MarketBatch> {
     if snapshots.is_empty() {
         bail!("{}", errors.join("; "));
     }
-    Ok(snapshots)
+    Ok(MarketBatch { snapshots, errors })
 }
 
 fn fetch_pair(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
-) -> Result<MarketSnapshot> {
+) -> Result<MarketFetchOutcome> {
     match pair.source {
         MarketDataSource::Binance => fetch_binance(agent, pair, candle_cache),
         MarketDataSource::Coinbase => fetch_coinbase(agent, pair, candle_cache),
@@ -266,52 +330,55 @@ fn fetch_binance(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
-) -> Result<MarketSnapshot> {
+) -> Result<MarketFetchOutcome> {
     ensure_spot_pair(pair)?;
     let ticker_symbol = binance_ticker_symbol(pair);
     let url = format!("{BINANCE_BASE_URL}/api/v3/ticker/24hr?symbol={ticker_symbol}");
     let body = get_json(agent, &url)?;
-    let mut snapshot = parse_binance_ticker(pair, &body)?;
-    snapshot.chart_closes_24h =
-        cached_or_fetch_candles(agent, pair, candle_cache, fetch_binance_candles)?;
-    Ok(snapshot)
+    let snapshot = parse_binance_ticker(pair, &body)?;
+    Ok(snapshot_with_candles(
+        snapshot,
+        cached_or_fetch_candles(agent, pair, candle_cache, fetch_binance_candles),
+    ))
 }
 
 fn fetch_coinbase(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
-) -> Result<MarketSnapshot> {
+) -> Result<MarketFetchOutcome> {
     ensure_spot_pair(pair)?;
     let product_id = coinbase_product_id(pair);
     let url = format!("{COINBASE_EXCHANGE_BASE_URL}/products/{product_id}/stats");
     let body = get_json(agent, &url)?;
-    let mut snapshot = parse_coinbase_stats(pair, &body)?;
-    snapshot.chart_closes_24h =
-        cached_or_fetch_candles(agent, pair, candle_cache, fetch_coinbase_candles)?;
-    Ok(snapshot)
+    let snapshot = parse_coinbase_stats(pair, &body)?;
+    Ok(snapshot_with_candles(
+        snapshot,
+        cached_or_fetch_candles(agent, pair, candle_cache, fetch_coinbase_candles),
+    ))
 }
 
 fn fetch_okx(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
-) -> Result<MarketSnapshot> {
+) -> Result<MarketFetchOutcome> {
     ensure_spot_pair(pair)?;
     let instrument_id = okx_instrument_id(pair);
     let url = format!("{OKX_BASE_URL}/api/v5/market/ticker?instId={instrument_id}");
     let body = get_json(agent, &url)?;
-    let mut snapshot = parse_okx_ticker(pair, &body)?;
-    snapshot.chart_closes_24h =
-        cached_or_fetch_candles(agent, pair, candle_cache, fetch_okx_candles)?;
-    Ok(snapshot)
+    let snapshot = parse_okx_ticker(pair, &body)?;
+    Ok(snapshot_with_candles(
+        snapshot,
+        cached_or_fetch_candles(agent, pair, candle_cache, fetch_okx_candles),
+    ))
 }
 
 fn fetch_hyperliquid(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
-) -> Result<MarketSnapshot> {
+) -> Result<MarketFetchOutcome> {
     if pair.market_type != MarketType::Perp {
         bail!("Hyperliquid spot pairs are not supported yet");
     }
@@ -325,10 +392,30 @@ fn fetch_hyperliquid(
         &url,
         serde_json::json!({ "type": "metaAndAssetCtxs" }),
     )?;
-    let mut snapshot = parse_hyperliquid_ticker(pair, &body)?;
-    snapshot.chart_closes_24h =
-        cached_or_fetch_candles(agent, pair, candle_cache, fetch_hyperliquid_candles)?;
-    Ok(snapshot)
+    let snapshot = parse_hyperliquid_ticker(pair, &body)?;
+    Ok(snapshot_with_candles(
+        snapshot,
+        cached_or_fetch_candles(agent, pair, candle_cache, fetch_hyperliquid_candles),
+    ))
+}
+
+fn snapshot_with_candles(
+    mut snapshot: MarketSnapshot,
+    candles: Result<Vec<f64>>,
+) -> MarketFetchOutcome {
+    match candles {
+        Ok(closes) => {
+            snapshot.chart_closes_24h = closes;
+            MarketFetchOutcome {
+                snapshot,
+                warning: None,
+            }
+        }
+        Err(error) => MarketFetchOutcome {
+            snapshot,
+            warning: Some(format!("chart update failed: {error}")),
+        },
+    }
 }
 
 fn ensure_spot_pair(pair: &MarketPair) -> Result<()> {
@@ -884,6 +971,43 @@ mod tests {
 
     fn pair(raw: &str) -> MarketPair {
         parse_market_pair(raw).unwrap()
+    }
+
+    fn snapshot(symbol: &str) -> MarketSnapshot {
+        MarketSnapshot {
+            symbol: symbol.to_string(),
+            price: 100.0,
+            change_percent_24h: 1.0,
+            chart_closes_24h: Vec::new(),
+            source: MarketDataSource::Binance,
+        }
+    }
+
+    #[test]
+    fn partial_market_batch_keeps_snapshots_and_reports_errors() {
+        let batch = market_batch(
+            vec![snapshot("binance:spot:BTC/USDT")],
+            vec!["okx:spot:ETH/USDT: timeout".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(batch.snapshots.len(), 1);
+        assert_eq!(batch.errors, vec!["okx:spot:ETH/USDT: timeout"]);
+    }
+
+    #[test]
+    fn candle_failure_does_not_discard_ticker_snapshot() {
+        let outcome = snapshot_with_candles(
+            snapshot("binance:spot:BTC/USDT"),
+            Err(anyhow!("candles unavailable")),
+        );
+
+        assert_eq!(outcome.snapshot.price, 100.0);
+        assert!(outcome.snapshot.chart_closes_24h.is_empty());
+        assert_eq!(
+            outcome.warning.as_deref(),
+            Some("chart update failed: candles unavailable")
+        );
     }
 
     #[test]

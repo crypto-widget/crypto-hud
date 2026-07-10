@@ -76,9 +76,10 @@ pub struct PluginSize {
     pub height: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PluginSizePolicy {
+    #[default]
     Fixed,
     SymbolBlocks {
         #[serde(rename = "blockSize")]
@@ -95,12 +96,6 @@ pub enum PluginSizePolicy {
         #[serde(default)]
         rows: Option<usize>,
     },
-}
-
-impl Default for PluginSizePolicy {
-    fn default() -> Self {
-        Self::Fixed
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -579,7 +574,6 @@ pub struct RuntimeTextLabels<'a> {
     pub connection_error: &'a str,
     pub updated: &'a str,
     pub stale: &'a str,
-    pub fallback: &'a str,
     pub source_error: &'a str,
     pub live_count_prefix: &'a str,
     pub live_count_suffix: &'a str,
@@ -593,7 +587,6 @@ impl Default for RuntimeTextLabels<'static> {
             connection_error: "Connection failed",
             updated: "Updated",
             stale: "Stale",
-            fallback: "fallback",
             source_error: "source issue",
             live_count_prefix: "",
             live_count_suffix: " live",
@@ -1010,6 +1003,13 @@ pub fn newest_update_for_symbols(symbols: &[String], quote_cache: &QuoteCache) -
         .max()
 }
 
+pub fn oldest_update_for_symbols(symbols: &[String], quote_cache: &QuoteCache) -> Option<Instant> {
+    symbols
+        .iter()
+        .filter_map(|symbol| quote_cache.get(symbol).map(|state| state.updated_at))
+        .min()
+}
+
 pub fn source_for_symbols(
     symbols: &[String],
     quote_cache: &QuoteCache,
@@ -1033,7 +1033,7 @@ pub fn updated_text_for_symbols(
     }
 
     let health = data_health_for_symbols(symbols, quote_cache, now);
-    let Some(updated_at) = newest_update_for_symbols(symbols, quote_cache) else {
+    let Some(updated_at) = oldest_update_for_symbols(symbols, quote_cache) else {
         return if has_market_error {
             labels.connection_error.to_string()
         } else {
@@ -1703,7 +1703,6 @@ mod tests {
                 connection_error: "连接失败",
                 updated: "已更新",
                 stale: "已过期",
-                fallback: "备用源",
                 source_error: "数据源异常",
                 live_count_prefix: "已连 ",
                 live_count_suffix: "",
@@ -1738,6 +1737,49 @@ mod tests {
         let view = build_widget_runtime_view(WidgetRuntimeViewParams {
             widget_id: "quote-board-1",
             symbols: &["binance:spot:BTC/USDT".to_string()],
+            quote_cache: &cache,
+            source_prefix: "live feed",
+            provider_labels: ProviderLabels::default(),
+            labels: RuntimeTextLabels::default(),
+            has_market_error: false,
+            now,
+            display_options: WidgetDisplayOptions::default(),
+        });
+
+        assert_eq!(view.updated_text, "Stale 4m");
+    }
+
+    #[test]
+    fn runtime_view_uses_oldest_pair_update_for_freshness() {
+        let now = Instant::now();
+        let mut cache = QuoteCache::new();
+        cache.insert(
+            "binance:spot:BTC/USDT".to_string(),
+            QuoteState::new(
+                106800.12,
+                1.234,
+                vec![105000.0, 106000.0, 106800.12],
+                MarketDataSource::Binance,
+                now - Duration::from_secs(5),
+            ),
+        );
+        cache.insert(
+            "binance:spot:ETH/USDT".to_string(),
+            QuoteState::new(
+                3200.0,
+                -0.5,
+                vec![3220.0, 3210.0, 3200.0],
+                MarketDataSource::Binance,
+                now - Duration::from_secs(240),
+            ),
+        );
+
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "quote-board-1",
+            symbols: &[
+                "binance:spot:BTC/USDT".to_string(),
+                "binance:spot:ETH/USDT".to_string(),
+            ],
             quote_cache: &cache,
             source_prefix: "live feed",
             provider_labels: ProviderLabels::default(),

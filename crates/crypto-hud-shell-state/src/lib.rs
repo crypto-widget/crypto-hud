@@ -484,8 +484,6 @@ pub struct AppSettings {
     pub refresh_interval_seconds: i32,
     #[serde(default = "default_market_symbols")]
     pub market_default_symbols: Vec<String>,
-    #[serde(default = "default_market_fallback_enabled")]
-    pub market_fallback_enabled: bool,
     #[serde(default)]
     pub auto_start_enabled: bool,
     #[serde(default = "default_show_main_window_on_startup")]
@@ -522,7 +520,6 @@ impl Default for AppSettings {
             market_hyperliquid_enabled: default_market_source_enabled(),
             refresh_interval_seconds: default_refresh_interval_seconds(),
             market_default_symbols: default_market_symbols(),
-            market_fallback_enabled: default_market_fallback_enabled(),
             auto_start_enabled: false,
             show_main_window_on_startup: default_show_main_window_on_startup(),
             shortcut: ShortcutPreference::default(),
@@ -575,7 +572,6 @@ impl AppSettings {
             ),
             refresh_interval_seconds: clamp_refresh_interval(self.refresh_interval_seconds),
             market_default_symbols: normalize_market_symbols(self.market_default_symbols),
-            market_fallback_enabled: self.market_fallback_enabled,
             auto_start_enabled: self.auto_start_enabled,
             show_main_window_on_startup: self.show_main_window_on_startup,
             shortcut: self.shortcut.normalized(),
@@ -619,10 +615,6 @@ pub fn default_refresh_interval_seconds() -> i32 {
 }
 
 pub fn default_market_source_enabled() -> bool {
-    true
-}
-
-pub fn default_market_fallback_enabled() -> bool {
     true
 }
 
@@ -2084,7 +2076,7 @@ mod tests {
     #[test]
     fn legacy_settings_json_defaults_new_fields() {
         let settings = serde_json::from_str::<AppSettings>(
-            r#"{"widgets_always_on_top":false,"opacity_percent":77}"#,
+            r#"{"widgets_always_on_top":false,"opacity_percent":77,"market_fallback_enabled":true}"#,
         )
         .unwrap()
         .normalized();
@@ -2103,7 +2095,6 @@ mod tests {
             DEFAULT_REFRESH_INTERVAL_SECONDS
         );
         assert_eq!(settings.market_default_symbols, default_market_symbols());
-        assert!(settings.market_fallback_enabled);
         assert!(!settings.auto_start_enabled);
         assert!(settings.show_main_window_on_startup);
         assert_eq!(settings.shortcut, ShortcutPreference::AltC);

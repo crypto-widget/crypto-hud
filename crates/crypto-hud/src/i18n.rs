@@ -35,8 +35,6 @@ pub struct UiText {
     pub market_provider_help: &'static str,
     pub refresh_interval_help: &'static str,
     pub default_symbols: &'static str,
-    pub market_fallback: &'static str,
-    pub market_fallback_help: &'static str,
     pub alert_settings: &'static str,
     pub alert_enabled: &'static str,
     pub alert_symbol: &'static str,
@@ -132,7 +130,6 @@ pub struct UiText {
     pub runtime_connection_error: &'static str,
     pub runtime_updated: &'static str,
     pub runtime_stale: &'static str,
-    pub runtime_fallback: &'static str,
     pub runtime_source_error: &'static str,
     pub runtime_live_count_prefix: &'static str,
     pub runtime_live_count_suffix: &'static str,
@@ -170,8 +167,6 @@ const EN_TEXT: UiText = UiText {
     market_provider_help: "Shown in pair search and used by selected pairs.",
     refresh_interval_help: "Seconds between quote refreshes.",
     default_symbols: "Default pairs for new widgets",
-    market_fallback: "Fallback to another source",
-    market_fallback_help: "Switches source when the current feed fails.",
     alert_settings: "Alert Rule",
     alert_enabled: "Enable alert",
     alert_symbol: "Pair",
@@ -268,7 +263,6 @@ const EN_TEXT: UiText = UiText {
     runtime_connection_error: "Connection failed",
     runtime_updated: "Updated",
     runtime_stale: "Stale",
-    runtime_fallback: "Fallback",
     runtime_source_error: "Source issue",
     runtime_live_count_prefix: "",
     runtime_live_count_suffix: " live",
@@ -306,8 +300,6 @@ const ZH_HANS_TEXT: UiText = UiText {
     market_provider_help: "控制搜索目录和已选交易对的数据源。",
     refresh_interval_help: "每次刷新行情之间的秒数。",
     default_symbols: "新建组件默认交易对",
-    market_fallback: "异常时切换备用源",
-    market_fallback_help: "当前数据源异常时自动切换备用源。",
     alert_settings: "告警规则",
     alert_enabled: "启用告警",
     alert_symbol: "交易对",
@@ -403,7 +395,6 @@ const ZH_HANS_TEXT: UiText = UiText {
     runtime_connection_error: "连接失败",
     runtime_updated: "已更新",
     runtime_stale: "已过期",
-    runtime_fallback: "备用源",
     runtime_source_error: "数据源异常",
     runtime_live_count_prefix: "已连 ",
     runtime_live_count_suffix: "",
@@ -516,13 +507,6 @@ pub fn default_widget_name(locale: Locale, widget: WidgetText, number: u64) -> S
     format!("{} {number}", widget_title(locale, widget))
 }
 
-pub fn market_error_notification_body(locale: Locale, error: &str) -> String {
-    match locale {
-        Locale::En => format!("Market data update failed: {error}"),
-        Locale::ZhHans => format!("行情更新失败：{error}"),
-    }
-}
-
 pub fn update_available_notification_title(locale: Locale) -> &'static str {
     match locale {
         Locale::En => "Crypto HUD update available",
@@ -618,10 +602,6 @@ mod tests {
         );
         assert_eq!(widget_usage_text(Locale::En, 2), "Used 2");
         assert_eq!(
-            market_error_notification_body(Locale::En, "timeout"),
-            "Market data update failed: timeout"
-        );
-        assert_eq!(
             update_available_notification_body(
                 Locale::En,
                 "v1.2.3",
@@ -681,10 +661,6 @@ mod tests {
             "只显示 1 个交易对，适合贴在桌面边角持续观察。"
         );
         assert_eq!(widget_usage_text(Locale::ZhHans, 2), "已使用 2 个");
-        assert_eq!(
-            market_error_notification_body(Locale::ZhHans, "timeout"),
-            "行情更新失败：timeout"
-        );
         assert_eq!(
             update_available_notification_body(
                 Locale::ZhHans,

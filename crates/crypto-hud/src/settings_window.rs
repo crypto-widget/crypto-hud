@@ -141,8 +141,7 @@ fn settings_window_geometry_for_work_area(
         .max(1.0);
     let window_scale = (max_logical_width / SETTINGS_WINDOW_DESIGN_WIDTH)
         .min(max_logical_height / SETTINGS_WINDOW_DESIGN_HEIGHT)
-        .min(1.0)
-        .max(SETTINGS_WINDOW_MIN_SCALE);
+        .clamp(SETTINGS_WINDOW_MIN_SCALE, 1.0);
     let logical_width = (SETTINGS_WINDOW_DESIGN_WIDTH * window_scale).round();
     let logical_height = (SETTINGS_WINDOW_DESIGN_HEIGHT * window_scale).round();
     let physical_width = (logical_width * display_scale_factor).round() as i32;
@@ -400,7 +399,7 @@ pub(crate) fn install_preview_carousel_timer(
                 let now = Instant::now();
                 let mut schedules = schedules.borrow_mut();
                 let mut random_seed = random_seed.borrow_mut();
-                sync_preview_carousel_schedules(&mut schedules, row_count, now, &mut *random_seed);
+                sync_preview_carousel_schedules(&mut schedules, row_count, now, &mut random_seed);
 
                 for row in 0..row_count {
                     if now < schedules[row].next_switch_at {
@@ -432,7 +431,7 @@ pub(crate) fn install_preview_carousel_timer(
                     &mut widget_preview_schedules,
                     widget_row_count,
                     now,
-                    &mut *widget_preview_random_seed,
+                    &mut widget_preview_random_seed,
                 );
 
                 for row in 0..widget_row_count {
@@ -766,7 +765,6 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
               default_opacity_percent,
               default_widget_scale_percent,
               refresh_interval_seconds,
-              market_fallback_enabled,
               tray_icon_enabled,
               tray_hover_display_enabled| {
             let previous = commit.current_settings();
@@ -786,7 +784,6 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                     refresh_interval_seconds,
                 ),
                 market_default_symbols: previous.market_default_symbols.clone(),
-                market_fallback_enabled,
                 auto_start_enabled,
                 show_main_window_on_startup,
                 shortcut: ShortcutPreference::from_index(shortcut_index),
@@ -2433,11 +2430,9 @@ fn widget_symbol_chip_layout(labels: &[String]) -> (Vec<i32>, Vec<i32>, Vec<i32>
 
     let can_add_symbol = labels.len() < WIDGET_SYMBOL_MAX_COUNT;
     if can_add_symbol {
-        if row > 0 {
-            row += 1;
-            cursor = 0;
-        } else if cursor > 0
-            && cursor + WIDGET_SYMBOL_ADD_BUTTON_WIDTH > WIDGET_SYMBOL_CHIP_AVAILABLE_WIDTH
+        if row > 0
+            || (cursor > 0
+                && cursor + WIDGET_SYMBOL_ADD_BUTTON_WIDTH > WIDGET_SYMBOL_CHIP_AVAILABLE_WIDTH)
         {
             row += 1;
             cursor = 0;
@@ -2572,8 +2567,6 @@ pub(crate) fn refresh_settings_window(
     ui.set_market_provider_help_text(text.market_provider_help.into());
     ui.set_refresh_interval_help_text(text.refresh_interval_help.into());
     ui.set_default_symbols_text(text.default_symbols.into());
-    ui.set_market_fallback_text(text.market_fallback.into());
-    ui.set_market_fallback_help_text(text.market_fallback_help.into());
     ui.set_alert_settings_text(text.alert_settings.into());
     ui.set_alert_enabled_text(text.alert_enabled.into());
     ui.set_alert_symbol_text(text.alert_symbol.into());
@@ -2786,7 +2779,6 @@ pub(crate) fn refresh_settings_window(
     ui.set_market_okx_enabled(settings.market_okx_enabled);
     ui.set_market_hyperliquid_enabled(settings.market_hyperliquid_enabled);
     ui.set_refresh_interval_seconds(settings.refresh_interval_seconds);
-    ui.set_market_fallback_enabled(settings.market_fallback_enabled);
     ui.set_alert_enabled(primary_alert.map(|rule| rule.enabled).unwrap_or(false));
     let default_symbols = settings.market_default_symbols.clone();
     let widget_symbols = selected_widget
@@ -3305,10 +3297,10 @@ fn symbol_picker_status_text(
         (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans)
             if !query.trim().is_empty() && candidate_count == 0 =>
         {
-            format!("没有匹配交易对")
+            "没有匹配交易对".to_string()
         }
         (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) if candidate_count == 0 => {
-            format!("没有可更换的交易对")
+            "没有可更换的交易对".to_string()
         }
         (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) if fallback_only => {
             format!("候选目录暂不可用，已使用本地候选，找到 {candidate_count} 个")
@@ -3319,10 +3311,10 @@ fn symbol_picker_status_text(
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans)
             if !query.trim().is_empty() && candidate_count == 0 =>
         {
-            format!("没有匹配交易对")
+            "没有匹配交易对".to_string()
         }
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) if candidate_count == 0 => {
-            format!("没有可更换的交易对")
+            "没有可更换的交易对".to_string()
         }
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) if fallback_only => {
             format!("候选目录暂不可用，已使用本地候选，找到 {candidate_count} 个")
@@ -3351,10 +3343,10 @@ fn symbol_picker_status_text(
         (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En)
             if !query.trim().is_empty() && candidate_count == 0 =>
         {
-            format!("No matching pairs")
+            "No matching pairs".to_string()
         }
         (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) if candidate_count == 0 => {
-            format!("No pairs available to replace")
+            "No pairs available to replace".to_string()
         }
         (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) if fallback_only => {
             format!("Catalog is unavailable; using local candidates. Found {candidate_count}")
@@ -3365,10 +3357,10 @@ fn symbol_picker_status_text(
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En)
             if !query.trim().is_empty() && candidate_count == 0 =>
         {
-            format!("No matching pairs")
+            "No matching pairs".to_string()
         }
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) if candidate_count == 0 => {
-            format!("No pairs available to replace")
+            "No pairs available to replace".to_string()
         }
         (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) if fallback_only => {
             format!("Catalog is unavailable; using local candidates. Found {candidate_count}")
@@ -3534,6 +3526,7 @@ mod tests {
                 .join("settings-window.slint"),
         )
         .unwrap()
+        .replace("\r\n", "\n")
     }
 
     #[test]
@@ -3804,13 +3797,16 @@ mod tests {
         let about_link = block_after_anchor(app_info_card, "about_link := Rectangle {", "");
 
         assert!(source.contains("in property <string> system-maintenance-text;"));
-        assert!(source.contains("viewport-height: 854px;"));
+        assert!(source.contains("viewport-height: system_tab.content-height;"));
+        assert!(source.contains(
+            "property <length> network-proxy-card-height: root.network-proxy-enabled ? 182px : 94px;"
+        ));
         assert!(
             maintenance_title_index < app_info_title_index,
             "maintenance actions should appear above app info"
         );
-        assert!(maintenance_card.contains("y: 546px;"));
-        assert!(app_info_card.contains("y: 699px;"));
+        assert!(maintenance_card.contains("y: system_tab.maintenance-card-y;"));
+        assert!(app_info_card.contains("y: system_tab.app-info-card-y;"));
         assert!(app_info_card.contains("text: root.app-version-label-text;"));
         assert!(app_info_card.contains("text: root.about-us-text;"));
         assert!(about_label.contains("y: 93px;"));

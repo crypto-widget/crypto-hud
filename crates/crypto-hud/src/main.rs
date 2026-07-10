@@ -213,7 +213,6 @@ fn main() -> Result<()> {
         symbols: symbols_from_store(&layouts.borrow(), &plugin_catalog),
         provider: app_settings.market_provider,
         refresh_interval_seconds: app_settings.refresh_interval_seconds,
-        fallback_enabled: app_settings.market_fallback_enabled,
         enabled_sources: settings::enabled_market_sources(&app_settings),
         proxy_url: settings::effective_network_proxy_url(&app_settings),
     }));

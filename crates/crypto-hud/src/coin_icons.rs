@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crypto_hud_core::normalize_symbol_token;
@@ -15,6 +15,7 @@ use slint::Image;
 
 const MAX_ICON_BYTES: usize = 512 * 1024;
 const MAX_TOKENLIST_BYTES: usize = 12 * 1024 * 1024;
+const ICON_RETRY_DELAY: Duration = Duration::from_secs(5 * 60);
 const USER_AGENT: &str = concat!("crypto-hud/", env!("CARGO_PKG_VERSION"));
 const TRUSTWALLET_TOKENLIST_CHAINS: &[&str] = &[
     "ethereum",
@@ -32,6 +33,7 @@ pub(crate) struct CoinIconRegistry {
     cache_dir: PathBuf,
     images: RefCell<HashMap<String, Option<Image>>>,
     pending: RefCell<HashSet<String>>,
+    failures: RefCell<HashMap<String, IconFailure>>,
     generation: RefCell<u64>,
     requests: Sender<WorkerCommand>,
     results: RefCell<Receiver<IconResult>>,
@@ -47,7 +49,14 @@ struct IconResult {
     key: String,
     path: Option<PathBuf>,
     error: Option<String>,
+    proxy_url: Option<String>,
     generation: u64,
+}
+
+#[derive(Debug, Clone)]
+struct IconFailure {
+    proxy_url: Option<String>,
+    retry_at: Instant,
 }
 
 enum WorkerCommand {
@@ -100,6 +109,7 @@ impl CoinIconRegistry {
             while let Ok(command) = request_receiver.recv() {
                 match command {
                     WorkerCommand::Fetch(request) => {
+                        let proxy_url = request.proxy_url.clone();
                         let result = download_icon(
                             &worker_cache_dir,
                             &request.key,
@@ -111,12 +121,14 @@ impl CoinIconRegistry {
                                 key: request.key,
                                 path,
                                 error: None,
+                                proxy_url,
                                 generation: request.generation,
                             },
                             Err(error) => IconResult {
                                 key: request.key,
                                 path: None,
                                 error: Some(error),
+                                proxy_url,
                                 generation: request.generation,
                             },
                         };
@@ -137,6 +149,7 @@ impl CoinIconRegistry {
             cache_dir,
             images: RefCell::new(HashMap::new()),
             pending: RefCell::new(HashSet::new()),
+            failures: RefCell::new(HashMap::new()),
             generation: RefCell::new(0),
             requests: request_sender,
             results: RefCell::new(result_receiver),
@@ -174,6 +187,7 @@ impl CoinIconRegistry {
         }
         self.images.borrow_mut().clear();
         self.pending.borrow_mut().clear();
+        self.failures.borrow_mut().clear();
         self.discard_results();
 
         let deleted = remove_cached_icon_files(&self.cache_dir)?;
@@ -189,11 +203,19 @@ impl CoinIconRegistry {
             return (Image::default(), false);
         };
 
-        if let Some(cached) = self.images.borrow().get(&key) {
-            return match cached {
-                Some(image) => (image.clone(), true),
-                None => (Image::default(), false),
-            };
+        if let Some(Some(image)) = self.images.borrow().get(&key) {
+            return (image.clone(), true);
+        }
+        let proxy_url = normalized_proxy_url(proxy_url);
+        if self.images.borrow().get(&key).is_some_and(Option::is_none) {
+            let retry_allowed = self.failures.borrow().get(&key).is_none_or(|failure| {
+                icon_retry_allowed(failure, proxy_url.as_deref(), Instant::now())
+            });
+            if !retry_allowed {
+                return (Image::default(), false);
+            }
+            self.images.borrow_mut().remove(&key);
+            self.failures.borrow_mut().remove(&key);
         }
 
         if let Some(image) = load_cached_icon(&self.cache_dir, &key) {
@@ -206,12 +228,14 @@ impl CoinIconRegistry {
         if self.pending.borrow_mut().insert(key.clone()) {
             let request = IconRequest {
                 key: key.clone(),
-                proxy_url: proxy_url.map(str::to_string),
+                proxy_url: proxy_url.clone(),
                 generation: *self.generation.borrow(),
             };
+            let request_proxy_url = request.proxy_url.clone();
             if self.requests.send(WorkerCommand::Fetch(request)).is_err() {
                 self.pending.borrow_mut().remove(&key);
-                self.images.borrow_mut().insert(key, None);
+                self.images.borrow_mut().insert(key.clone(), None);
+                self.record_failure(key, request_proxy_url);
             }
         }
 
@@ -231,6 +255,7 @@ impl CoinIconRegistry {
             match result.path {
                 Some(path) => match Image::load_from_path(&path) {
                     Ok(image) => {
+                        self.failures.borrow_mut().remove(&result.key);
                         self.images
                             .borrow_mut()
                             .insert(result.key.clone(), Some(image));
@@ -238,6 +263,7 @@ impl CoinIconRegistry {
                     Err(error) => {
                         eprintln!("failed to load cached coin icon {:?}: {error}", path);
                         self.images.borrow_mut().insert(result.key.clone(), None);
+                        self.record_failure(result.key.clone(), result.proxy_url.clone());
                     }
                 },
                 None => {
@@ -245,6 +271,7 @@ impl CoinIconRegistry {
                         eprintln!("failed to resolve coin icon {}: {error}", result.key);
                     }
                     self.images.borrow_mut().insert(result.key.clone(), None);
+                    self.record_failure(result.key.clone(), result.proxy_url.clone());
                 }
             }
         }
@@ -253,6 +280,27 @@ impl CoinIconRegistry {
     fn discard_results(&self) {
         while self.results.borrow_mut().try_recv().is_ok() {}
     }
+
+    fn record_failure(&self, key: String, proxy_url: Option<String>) {
+        self.failures.borrow_mut().insert(
+            key,
+            IconFailure {
+                proxy_url,
+                retry_at: Instant::now() + ICON_RETRY_DELAY,
+            },
+        );
+    }
+}
+
+fn normalized_proxy_url(proxy_url: Option<&str>) -> Option<String> {
+    proxy_url.and_then(|proxy_url| {
+        let proxy_url = proxy_url.trim();
+        (!proxy_url.is_empty()).then(|| proxy_url.to_string())
+    })
+}
+
+fn icon_retry_allowed(failure: &IconFailure, proxy_url: Option<&str>, now: Instant) -> bool {
+    failure.proxy_url.as_deref() != proxy_url || now >= failure.retry_at
 }
 
 fn icon_key_from_symbol(symbol: &str) -> Option<String> {
@@ -596,6 +644,31 @@ mod tests {
         );
         assert_eq!(icon_key_from_symbol("ETH/USDT").as_deref(), Some("eth"));
         assert_eq!(icon_key_from_symbol("1INCH/USDT").as_deref(), Some("1inch"));
+    }
+
+    #[test]
+    fn failed_icons_retry_after_delay_or_proxy_change() {
+        let now = Instant::now();
+        let failure = IconFailure {
+            proxy_url: Some("http://127.0.0.1:7890".to_string()),
+            retry_at: now + ICON_RETRY_DELAY,
+        };
+
+        assert!(!icon_retry_allowed(
+            &failure,
+            Some("http://127.0.0.1:7890"),
+            now
+        ));
+        assert!(icon_retry_allowed(
+            &failure,
+            Some("socks5://127.0.0.1:1080"),
+            now
+        ));
+        assert!(icon_retry_allowed(
+            &failure,
+            Some("http://127.0.0.1:7890"),
+            now + ICON_RETRY_DELAY
+        ));
     }
 
     #[test]

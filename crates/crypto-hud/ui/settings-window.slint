@@ -530,7 +530,6 @@ export component SettingsWindow inherits Window {
     in-out property <bool> market-okx-enabled;
     in-out property <bool> market-hyperliquid-enabled;
     in-out property <int> refresh-interval-seconds;
-    in-out property <bool> market-fallback-enabled;
     in-out property <int> selected-widget-index;
     in-out property <bool> auto-start-enabled;
     in-out property <bool> show-main-window-on-startup;
@@ -621,8 +620,6 @@ export component SettingsWindow inherits Window {
     in property <string> market-provider-help-text;
     in property <string> refresh-interval-help-text;
     in property <string> default-symbols-text;
-    in property <string> market-fallback-text;
-    in property <string> market-fallback-help-text;
     in property <string> alert-settings-text;
     in property <string> alert-enabled-text;
     in property <string> alert-symbol-text;
@@ -755,7 +752,7 @@ export component SettingsWindow inherits Window {
     property <bool> can-remove-default-symbol: root.default-symbol-values.length > root.default-symbol-min;
     property <bool> can-confirm-symbol-picker: root.symbol-picker-open && root.symbol-picker-candidate-options.length > 0;
 
-    callback apply-settings(bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool, bool);
+    callback apply-settings(bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
     callback apply-network-settings(bool, string);
     callback apply-alert-settings(bool, string, int, string);
     callback clear-alert-settings();
@@ -818,7 +815,6 @@ export component SettingsWindow inherits Window {
             root.default-opacity-percent,
             root.default-widget-scale-percent,
             root.refresh-interval-seconds,
-            root.market-fallback-enabled,
             root.tray-icon-enabled,
             root.tray-hover-display-enabled
         );
@@ -2376,7 +2372,7 @@ export component SettingsWindow inherits Window {
                 x: 17px;
                 y: 66px;
                 width: market_tab.width - 34px;
-                height: 190px;
+                height: 135px;
                 border-radius: 6px;
                 background: root.settings-surface-background;
                 border-width: 1px;
@@ -2385,14 +2381,6 @@ export component SettingsWindow inherits Window {
                 Rectangle {
                     x: 0px;
                     y: 90px;
-                    width: parent.width;
-                    height: 1px;
-                    background: root.settings-divider-color;
-                }
-
-                Rectangle {
-                    x: 0px;
-                    y: 135px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -2545,41 +2533,11 @@ export component SettingsWindow inherits Window {
                     overflow: elide;
                 }
 
-                SettingLabel {
-                    x: 17px;
-                    y: 147px;
-                    width: 301px;
-                    label: root.market-fallback-text;
-                    help: root.market-fallback-help-text;
-                    label-color: root.settings-label-color;
-                    muted-color: root.settings-muted-color;
-                }
-
-                SettingSwitch {
-                    x: parent.width - 54px;
-                    y: 153px;
-                    checked <=> root.market-fallback-enabled;
-                    accent-color: root.settings-accent-color;
-                    track-color: root.settings-track-color;
-                    knob-color: root.settings-knob-color;
-                    toggled => { root.apply-current-settings(); }
-                }
-
-                TouchArea {
-                    x: 17px;
-                    y: 135px;
-                    width: parent.width - 88px;
-                    height: 55px;
-                    clicked => {
-                        root.market-fallback-enabled = !root.market-fallback-enabled;
-                        root.apply-current-settings();
-                    }
-                }
             }
 
             Rectangle {
                 x: 17px;
-                y: 270px;
+                y: 215px;
                 width: market_tab.width - 34px;
                 height: 104px;
                 border-radius: 6px;
@@ -2870,6 +2828,12 @@ export component SettingsWindow inherits Window {
             background: root.settings-content-background;
             visible: root.settings-tab-index == 4;
 
+            property <length> network-proxy-card-height: root.network-proxy-enabled ? 182px : 94px;
+            property <length> tray-card-y: 196px + system_tab.network-proxy-card-height + 15px;
+            property <length> maintenance-card-y: system_tab.tray-card-y + 153px;
+            property <length> app-info-card-y: system_tab.maintenance-card-y + 153px;
+            property <length> content-height: system_tab.app-info-card-y + 155px;
+
             PanelTitle {
                 x: 17px;
                 y: 16px;
@@ -2886,7 +2850,7 @@ export component SettingsWindow inherits Window {
                 width: system_tab.width - 34px;
                 height: parent.height - 83px;
                 viewport-width: system_tab.width - 34px;
-                viewport-height: 854px;
+                viewport-height: system_tab.content-height;
 
                 Rectangle {
                     x: 0px;
@@ -3009,7 +2973,7 @@ export component SettingsWindow inherits Window {
                     x: 0px;
                     y: 196px;
                     width: system_tab.width - 34px;
-                    height: 182px;
+                    height: system_tab.network-proxy-card-height;
                     border-radius: 6px;
                     background: root.settings-surface-background;
                     border-width: 1px;
@@ -3025,8 +2989,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingSwitch {
-                        x: 17px;
-                        y: 54px;
+                        x: parent.width - 54px;
+                        y: 56px;
                         checked <=> root.network-proxy-enabled;
                         accent-color: root.settings-accent-color;
                         track-color: root.settings-track-color;
@@ -3034,32 +2998,20 @@ export component SettingsWindow inherits Window {
                         toggled => { root.apply-current-network-settings(); }
                     }
 
-                    Text {
-                        x: 60px;
-                        y: 52px;
-                        width: parent.width - 77px;
-                        text: root.network-proxy-enabled-text;
-                        color: root.settings-label-color;
-                        font-size: 10px;
-                        font-weight: 700;
-                        overflow: elide;
-                    }
-
-                    Text {
-                        x: 60px;
-                        y: 68px;
-                        width: parent.width - 77px;
-                        height: 21px;
-                        text: root.network-proxy-help-text;
-                        color: root.settings-muted-color;
-                        font-size: 8px;
-                        wrap: word-wrap;
+                    SettingLabel {
+                        x: 17px;
+                        y: 54px;
+                        width: parent.width - 88px;
+                        label: root.network-proxy-enabled-text;
+                        help: root.network-proxy-help-text;
+                        label-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
                     }
 
                     TouchArea {
-                        x: 60px;
+                        x: 17px;
                         y: 49px;
-                        width: parent.width - 77px;
+                        width: parent.width - 88px;
                         height: 42px;
                         clicked => {
                             root.network-proxy-enabled = !root.network-proxy-enabled;
@@ -3067,50 +3019,53 @@ export component SettingsWindow inherits Window {
                         }
                     }
 
+                    Rectangle {
+                        x: 0px;
+                        y: 93px;
+                        width: parent.width;
+                        height: 1px;
+                        background: root.settings-divider-color;
+                        visible: root.network-proxy-enabled;
+                    }
+
                     Text {
                         x: 17px;
-                        y: 105px;
+                        y: 108px;
                         width: parent.width - 34px;
                         text: root.network-proxy-url-text;
                         color: root.settings-label-color;
-                        font-size: 9px;
-                        font-weight: 700;
+                        font-size: 11px;
+                        font-weight: 500;
                         overflow: elide;
+                        visible: root.network-proxy-enabled;
                     }
 
                     LineEdit {
                         x: 17px;
-                        y: 120px;
+                        y: 123px;
                         width: parent.width - 34px;
-                        height: 24px;
+                        height: 26px;
                         text <=> root.network-proxy-url-input-text;
                         edited(_) => { root.apply-current-network-settings(); }
+                        visible: root.network-proxy-enabled;
                     }
 
                     Text {
                         x: 17px;
-                        y: 156px;
+                        y: 159px;
                         width: parent.width - 34px;
-                        text: root.network-proxy-http-example-text;
+                        height: 14px;
+                        text: "HTTP / SOCKS5    " + root.network-proxy-http-example-text + "    " + root.network-proxy-socks-example-text;
                         color: root.settings-muted-color;
-                        font-size: 8px;
+                        font-size: 9px;
                         overflow: elide;
-                    }
-
-                    Text {
-                        x: 17px;
-                        y: 171px;
-                        width: parent.width - 34px;
-                        text: root.network-proxy-socks-example-text;
-                        color: root.settings-muted-color;
-                        font-size: 8px;
-                        overflow: elide;
+                        visible: root.network-proxy-enabled;
                     }
                 }
 
                 Rectangle {
                     x: 0px;
-                    y: 393px;
+                    y: system_tab.tray-card-y;
                     width: system_tab.width - 34px;
                     height: 139px;
                     border-radius: 6px;
@@ -3200,7 +3155,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: 546px;
+                    y: system_tab.maintenance-card-y;
                     width: system_tab.width - 34px;
                     height: 139px;
                     border-radius: 6px;
@@ -3266,7 +3221,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: 699px;
+                    y: system_tab.app-info-card-y;
                     width: system_tab.width - 34px;
                     height: 139px;
                     border-radius: 6px;

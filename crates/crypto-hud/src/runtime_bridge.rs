@@ -34,7 +34,7 @@ use crate::{
     window_manager::schedule_widget_shell_window_configuration,
 };
 
-const MARKET_ERROR_NOTIFICATION_COOLDOWN: Duration = Duration::from_secs(300);
+const NOTIFICATION_COOLDOWN: Duration = Duration::from_secs(300);
 const DRAG_LAYOUT_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 
 struct WidgetMoveRequest<'a> {
@@ -58,6 +58,17 @@ struct ApplyInstanceRequest<'a> {
     plugin_catalog: &'a plugin::PluginCatalog,
 }
 
+struct ApplyRuntimeViewRequest<'a> {
+    ui: &'a WidgetUi,
+    view: &'a widget_runtime::WidgetRuntimeView,
+    symbols: &'a [String],
+    coin_icons: &'a CoinIconRegistry,
+    proxy_url: Option<&'a str>,
+    show_coin_logos: bool,
+    display_options: WidgetDisplayOptions,
+    widget_scale: f32,
+}
+
 pub(crate) struct RuntimeEventTimerDeps {
     pub(crate) widgets: Rc<RefCell<Vec<WidgetRuntime>>>,
     pub(crate) layouts: Rc<RefCell<LayoutStore>>,
@@ -79,7 +90,7 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
         update_events,
     } = deps;
     let notification_throttle = Rc::new(RefCell::new(notifications::NotificationThrottle::new(
-        MARKET_ERROR_NOTIFICATION_COOLDOWN,
+        NOTIFICATION_COOLDOWN,
     )));
     let timer = Timer::default();
     {
@@ -126,12 +137,6 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
                     market::MarketEvent::Error(error) => {
                         *market_error_active.borrow_mut() = true;
                         eprintln!("market data update failed: {error}");
-                        let settings = layouts.borrow().settings.clone().normalized();
-                        notify_market_error(
-                            &notification_throttle,
-                            i18n::resolve_locale(settings.language),
-                            &error,
-                        );
                     }
                 }
             }
@@ -161,9 +166,9 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
             let proxy_url = settings::effective_network_proxy_url(&settings);
             let has_market_error = *market_error_active.borrow();
             for widget in widgets.borrow().iter() {
-                apply_runtime_view_with_icons(
-                    &widget.ui,
-                    &widget_runtime_view(
+                apply_runtime_view_with_icons(ApplyRuntimeViewRequest {
+                    ui: &widget.ui,
+                    view: &widget_runtime_view(
                         &widget.id,
                         &widget.symbols,
                         &cache,
@@ -172,13 +177,13 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
                         has_market_error,
                         widget.display_options,
                     ),
-                    &widget.symbols,
-                    &coin_icons,
-                    proxy_url.as_deref(),
-                    widget.show_coin_logos,
-                    widget.display_options,
-                    widget.widget_scale,
-                );
+                    symbols: &widget.symbols,
+                    coin_icons: &coin_icons,
+                    proxy_url: proxy_url.as_deref(),
+                    show_coin_logos: widget.show_coin_logos,
+                    display_options: widget.display_options,
+                    widget_scale: widget.widget_scale,
+                });
             }
         });
     }
@@ -578,9 +583,9 @@ fn refresh_runtime_symbols_from_store(
             runtime.widget_scale = widget_scale;
             runtime.theme_name = theme_name.clone();
             runtime.ui.set_theme_name(theme_name.into());
-            apply_runtime_view_with_icons(
-                &runtime.ui,
-                &widget_runtime_view(
+            apply_runtime_view_with_icons(ApplyRuntimeViewRequest {
+                ui: &runtime.ui,
+                view: &widget_runtime_view(
                     &runtime.id,
                     &runtime.symbols,
                     quote_cache,
@@ -589,13 +594,13 @@ fn refresh_runtime_symbols_from_store(
                     false,
                     runtime.display_options,
                 ),
-                &runtime.symbols,
+                symbols: &runtime.symbols,
                 coin_icons,
-                proxy_url.as_deref(),
-                runtime.show_coin_logos,
-                runtime.display_options,
-                runtime.widget_scale,
-            );
+                proxy_url: proxy_url.as_deref(),
+                show_coin_logos: runtime.show_coin_logos,
+                display_options: runtime.display_options,
+                widget_scale: runtime.widget_scale,
+            });
         }
     }
 }
@@ -623,9 +628,9 @@ fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
     let widget_scale = widget_scale_for_instance(instance, &layout, plugin_catalog);
     ui.set_widget_scale(widget_scale);
     let proxy_url = settings::effective_network_proxy_url(&settings);
-    apply_runtime_view_with_icons(
+    apply_runtime_view_with_icons(ApplyRuntimeViewRequest {
         ui,
-        &widget_runtime_view(
+        view: &widget_runtime_view(
             &instance.id,
             &symbols,
             quote_cache,
@@ -634,13 +639,13 @@ fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
             false,
             widget_display_options(instance),
         ),
-        &symbols,
+        symbols: &symbols,
         coin_icons,
-        proxy_url.as_deref(),
-        settings::widget_show_coin_logos(instance),
-        widget_display_options(instance),
+        proxy_url: proxy_url.as_deref(),
+        show_coin_logos: settings::widget_show_coin_logos(instance),
+        display_options: widget_display_options(instance),
         widget_scale,
-    );
+    });
     ui.set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());
     ui.set_empty_text(text.empty_pairs.into());
     ui.set_pin_to_top(instance.layout.always_on_top);
@@ -778,16 +783,17 @@ pub(crate) fn apply_settings_to_widgets(
     }
 }
 
-fn apply_runtime_view_with_icons(
-    ui: &WidgetUi,
-    view: &widget_runtime::WidgetRuntimeView,
-    symbols: &[String],
-    coin_icons: &CoinIconRegistry,
-    proxy_url: Option<&str>,
-    show_coin_logos: bool,
-    display_options: WidgetDisplayOptions,
-    widget_scale: f32,
-) {
+fn apply_runtime_view_with_icons(request: ApplyRuntimeViewRequest<'_>) {
+    let ApplyRuntimeViewRequest {
+        ui,
+        view,
+        symbols,
+        coin_icons,
+        proxy_url,
+        show_coin_logos,
+        display_options,
+        widget_scale,
+    } = request;
     let quote_icons = quote_icons_for_display(coin_icons, symbols, proxy_url, show_coin_logos);
     let quote_icon_ready =
         quote_icon_ready_for_display(coin_icons, symbols, proxy_url, show_coin_logos);
@@ -865,7 +871,6 @@ fn runtime_text_labels(text: &'static i18n::UiText) -> RuntimeTextLabels<'static
         connection_error: text.runtime_connection_error,
         updated: text.runtime_updated,
         stale: text.runtime_stale,
-        fallback: text.runtime_fallback,
         source_error: text.runtime_source_error,
         live_count_prefix: text.runtime_live_count_prefix,
         live_count_suffix: text.runtime_live_count_suffix,
@@ -893,28 +898,22 @@ fn update_market_feed_config(
     if let Ok(mut config) = market_feed_config.lock() {
         config.provider = settings.market_provider;
         config.refresh_interval_seconds = settings.refresh_interval_seconds;
-        config.fallback_enabled = settings.market_fallback_enabled;
         config.enabled_sources = settings::enabled_market_sources(&settings);
         config.proxy_url = settings::effective_network_proxy_url(&settings);
-        config.symbols = settings::normalized_symbols(symbols);
+        config.symbols = normalized_feed_symbols(symbols);
     }
 }
 
-fn notify_market_error(
-    throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
-    locale: i18n::Locale,
-    error: &str,
-) {
-    let now = Instant::now();
-    if throttle
-        .borrow_mut()
-        .should_notify("market-feed", error, now)
-    {
-        notifications::show(
-            i18n::text(locale).tray_tooltip,
-            &i18n::market_error_notification_body(locale, error),
-        );
-    }
+fn normalized_feed_symbols(symbols: Vec<String>) -> Vec<String> {
+    symbols
+        .iter()
+        .filter_map(|symbol| settings::normalize_market_pair_key(symbol))
+        .fold(Vec::new(), |mut unique, symbol| {
+            if !unique.contains(&symbol) {
+                unique.push(symbol);
+            }
+            unique
+        })
 }
 
 fn notify_alerts(
@@ -969,6 +968,18 @@ mod tests {
             symbols: symbols.into_iter().map(str::to_string).collect(),
             config: settings::default_widget_config(),
         }
+    }
+
+    #[test]
+    fn feed_symbol_normalization_does_not_apply_a_single_widget_limit() {
+        let symbols = (0..25)
+            .map(|index| format!("binance:spot:ASSET{index}/USDT"))
+            .collect::<Vec<_>>();
+
+        let normalized = normalized_feed_symbols(symbols);
+
+        assert_eq!(normalized.len(), 25);
+        assert_eq!(normalized[24], "binance:spot:ASSET24/USDT");
     }
 
     #[test]
