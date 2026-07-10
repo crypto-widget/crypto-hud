@@ -2599,8 +2599,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_network_proxy_settings_text(text.network_proxy_settings.into());
     ui.set_network_proxy_enabled_text(text.network_proxy_enabled.into());
     ui.set_network_proxy_url_text(text.network_proxy_url.into());
-    ui.set_network_proxy_http_example_text(text.network_proxy_http_example.into());
-    ui.set_network_proxy_socks_example_text(text.network_proxy_socks_example.into());
+    ui.set_network_proxy_example_hint_text(text.network_proxy_example_hint.into());
     ui.set_network_proxy_help_text(text.network_proxy_help.into());
     ui.set_app_version_label_text(text.app_version.into());
     ui.set_app_version_value_text(env!("CARGO_PKG_VERSION").into());
@@ -3767,6 +3766,31 @@ mod tests {
                 ),
             "removing pair limit help should tighten the spacing below the pair chips"
         );
+    }
+
+    #[test]
+    fn network_proxy_settings_collapse_until_enabled() {
+        let source = settings_window_ui_source();
+        let system_tab = block_after_anchor(&source, "system_tab := Rectangle {", "");
+        let proxy_start = system_tab
+            .find("title: root.network-proxy-settings-text;")
+            .unwrap();
+        let tray_start = system_tab.find("title: root.system-tray-text;").unwrap();
+        let proxy_section = &system_tab[proxy_start..tray_start];
+
+        assert!(system_tab.contains(
+            "property <length> network-proxy-card-height: root.network-proxy-enabled ? 182px : 94px;"
+        ));
+        assert!(proxy_section.contains("x: parent.width - 54px;"));
+        assert!(proxy_section.contains("text: root.network-proxy-example-hint-text;"));
+        assert!(
+            proxy_section
+                .matches("visible: root.network-proxy-enabled;")
+                .count()
+                >= 4
+        );
+        assert!(!source.contains("network-proxy-http-example-text"));
+        assert!(!source.contains("network-proxy-socks-example-text"));
     }
 
     #[test]

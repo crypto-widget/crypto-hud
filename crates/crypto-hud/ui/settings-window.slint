@@ -643,8 +643,7 @@ export component SettingsWindow inherits Window {
     in property <string> network-proxy-settings-text;
     in property <string> network-proxy-enabled-text;
     in property <string> network-proxy-url-text;
-    in property <string> network-proxy-http-example-text;
-    in property <string> network-proxy-socks-example-text;
+    in property <string> network-proxy-example-hint-text;
     in property <string> network-proxy-help-text;
     in property <string> app-version-label-text;
     in property <string> app-version-value-text;
@@ -3055,9 +3054,9 @@ export component SettingsWindow inherits Window {
                         y: 159px;
                         width: parent.width - 34px;
                         height: 14px;
-                        text: "HTTP / SOCKS5    " + root.network-proxy-http-example-text + "    " + root.network-proxy-socks-example-text;
+                        text: root.network-proxy-example-hint-text;
                         color: root.settings-muted-color;
-                        font-size: 9px;
+                        font-size: 10px;
                         overflow: elide;
                         visible: root.network-proxy-enabled;
                     }
