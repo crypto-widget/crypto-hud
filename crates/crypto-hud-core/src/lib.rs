@@ -210,6 +210,7 @@ pub fn normalize_market_pair_key(raw: &str) -> Option<String> {
 }
 
 pub fn parse_market_pair(raw: &str) -> Option<MarketPair> {
+    let raw = strip_bidi_isolate_marks(raw);
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
@@ -232,6 +233,16 @@ pub fn parse_market_pair(raw: &str) -> Option<MarketPair> {
 
     parse_keyed_market_pair(value, source_hint, type_hint)
         .or_else(|| parse_unkeyed_market_pair(value, source_hint, type_hint))
+}
+
+fn strip_bidi_isolate_marks(raw: &str) -> String {
+    raw.chars()
+        .filter(|character| !is_bidi_isolate_mark(*character))
+        .collect()
+}
+
+fn is_bidi_isolate_mark(character: char) -> bool {
+    matches!(character, '\u{2066}' | '\u{2067}' | '\u{2068}' | '\u{2069}')
 }
 
 pub fn format_market_pair_symbol(raw: &str) -> String {
@@ -454,8 +465,6 @@ pub struct AlertEvaluation {
     pub condition: AlertCondition,
     pub threshold: f64,
     pub current_value: f64,
-    pub title: String,
-    pub body: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -499,38 +508,13 @@ fn evaluate_alert(
         return None;
     }
 
-    let metric = match rule.condition {
-        AlertCondition::PriceAbove | AlertCondition::PriceBelow => "price",
-        AlertCondition::ChangePercentAbove | AlertCondition::ChangePercentBelow => "24h change",
-    };
-    let direction = match rule.condition {
-        AlertCondition::PriceAbove | AlertCondition::ChangePercentAbove => "above",
-        AlertCondition::PriceBelow | AlertCondition::ChangePercentBelow => "below",
-    };
-
     Some(AlertEvaluation {
         rule_id: rule.id.clone(),
         symbol: symbol.clone(),
         condition: rule.condition,
         threshold: rule.threshold,
         current_value,
-        title: format!("{} alert", format_market_pair_symbol(&symbol)),
-        body: format!(
-            "{} {metric} is {direction} {}: {}",
-            format_market_pair_symbol(&symbol),
-            format_alert_value(rule.condition, rule.threshold),
-            format_alert_value(rule.condition, current_value)
-        ),
     })
-}
-
-fn format_alert_value(condition: AlertCondition, value: f64) -> String {
-    match condition {
-        AlertCondition::PriceAbove | AlertCondition::PriceBelow => format_price(value),
-        AlertCondition::ChangePercentAbove | AlertCondition::ChangePercentBelow => {
-            format_pair_change(value)
-        }
-    }
 }
 
 fn default_alert_enabled() -> bool {
@@ -595,6 +579,11 @@ mod tests {
             Some("hyperliquid:perp:BTC/USDC")
         );
         assert_eq!(
+            normalize_market_pair_key("\u{2066}BTC/USDT\u{2069} · \u{2066}Coinbase\u{2069}")
+                .as_deref(),
+            Some("coinbase:spot:BTC/USDT")
+        );
+        assert_eq!(
             format_market_pair_display("binance:spot:ETH/USDT"),
             "ETH/USDT · Binance"
         );
@@ -640,6 +629,8 @@ mod tests {
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].rule_id, "btc-price");
         assert_eq!(alerts[0].symbol, "binance:spot:BTC/USDT");
-        assert!(alerts[0].body.contains("100000"));
+        assert_eq!(alerts[0].condition, AlertCondition::PriceAbove);
+        assert_eq!(alerts[0].threshold, 100000.0);
+        assert_eq!(alerts[0].current_value, 106800.12);
     }
 }

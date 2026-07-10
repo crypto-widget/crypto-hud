@@ -217,12 +217,13 @@ component SettingsSmallButton inherits Rectangle {
         x: 6px;
         y: (parent.height - self.height) / 2;
         width: parent.width - 11px;
-        height: 13px;
+        height: 15px;
         text: root.text;
         color: root.enabled ? root.text-color : root.muted-color;
         font-size: 10px;
         font-weight: 500;
         horizontal-alignment: center;
+        vertical-alignment: center;
         overflow: elide;
     }
 
@@ -266,9 +267,9 @@ component GithubProjectSignature inherits Rectangle {
 
     Text {
         x: root.lockup-x + 29px;
-        y: root.lockup-y + 2px;
+        y: root.lockup-y + 1px;
         width: root.lockup-width - 29px;
-        height: 14px;
+        height: 16px;
         text: root.project-name;
         color: root.active-label-color;
         font-size: 11px;
@@ -278,10 +279,10 @@ component GithubProjectSignature inherits Rectangle {
 
     Text {
         x: root.lockup-x + 29px;
-        y: root.lockup-y + 20px;
+        y: root.lockup-y + 19px;
         width: root.has-status ? 47px : root.lockup-width - 29px;
-        height: 12px;
-        text: "v" + root.version-text;
+        height: 14px;
+        text: root.version-text;
         color: root.muted-color;
         font-size: 9px;
         font-weight: 600;
@@ -300,9 +301,9 @@ component GithubProjectSignature inherits Rectangle {
 
     Text {
         x: root.lockup-x + 93px;
-        y: root.lockup-y + 20px;
+        y: root.lockup-y + 19px;
         width: root.lockup-width - 93px;
-        height: 12px;
+        height: 14px;
         text: root.status-text;
         color: root.muted-color;
         font-size: 9px;
@@ -508,6 +509,7 @@ export component SettingsWindow inherits Window {
     property <length> settings-design-width: 1120px;
     property <length> settings-design-height: 720px;
     property <float> settings-window-scale: min(1.0, min(root.width / root.settings-design-width, root.height / root.settings-design-height));
+    in property <bool> rtl-layout: false;
 
     in-out property <int> settings-tab-index: 0;
     in-out property <bool> widgets-always-on-top;
@@ -570,7 +572,6 @@ export component SettingsWindow inherits Window {
     in property <[string]> widget-theme-options;
     property <bool> has-widgets: root.widget-list-options.length != 0;
     property <length> widget-settings-scrollbar-gutter: 18px;
-    in property <[string]> provider-options;
     in property <[string]> shortcut-options;
     in property <[string]> theme-options;
     in property <[string]> language-options;
@@ -647,6 +648,7 @@ export component SettingsWindow inherits Window {
     in property <string> network-proxy-help-text;
     in property <string> app-version-label-text;
     in property <string> app-version-value-text;
+    in property <string> app-version-signature-text;
     in property <string> about-us-text;
     in property <string> icon-cache-text;
     in property <string> icon-cache-help-text;
@@ -981,6 +983,7 @@ export component SettingsWindow inherits Window {
             }
 
             SettingsNavItem {
+                rtl-layout: root.rtl-layout;
                 x: 6px;
                 y: 19px;
                 text: root.tab-widgets-text;
@@ -995,6 +998,7 @@ export component SettingsWindow inherits Window {
             }
 
             SettingsNavItem {
+                rtl-layout: root.rtl-layout;
                 x: 6px;
                 y: 60px;
                 text: root.tab-plugin-market-text;
@@ -1009,6 +1013,7 @@ export component SettingsWindow inherits Window {
             }
 
             SettingsNavItem {
+                rtl-layout: root.rtl-layout;
                 x: 6px;
                 y: 102px;
                 text: root.tab-market-data-text;
@@ -1023,6 +1028,7 @@ export component SettingsWindow inherits Window {
             }
 
             SettingsNavItem {
+                rtl-layout: root.rtl-layout;
                 x: 6px;
                 y: 143px;
                 text: root.tab-appearance-text;
@@ -1037,6 +1043,7 @@ export component SettingsWindow inherits Window {
             }
 
             SettingsNavItem {
+                rtl-layout: root.rtl-layout;
                 x: 6px;
                 y: 185px;
                 text: root.tab-system-text;
@@ -1064,7 +1071,7 @@ export component SettingsWindow inherits Window {
                 width: parent.width - 17px;
                 height: 36px;
                 project-name: "crypto-hud";
-                version-text: root.app-version-value-text;
+                version-text: root.app-version-signature-text;
                 status-text: root.status-text;
                 label-color: root.settings-heading-color;
                 muted-color: root.settings-muted-color;
@@ -1083,6 +1090,7 @@ export component SettingsWindow inherits Window {
             visible: root.settings-tab-index == 0;
 
             PanelTitle {
+                rtl-layout: root.rtl-layout;
                 x: 17px;
                 y: 16px;
                 width: 459px;
@@ -1111,6 +1119,7 @@ export component SettingsWindow inherits Window {
                     color: root.settings-heading-color;
                     font-size: 16px;
                     font-weight: 500;
+                    horizontal-alignment: root.rtl-layout ? right : left;
                     overflow: elide;
                 }
 
@@ -1184,25 +1193,29 @@ export component SettingsWindow inherits Window {
 
                         Text {
                             x: 136px;
-                            y: 19px;
+                            y: 17px;
                             width: 211px;
-                            height: 13px;
+                            height: 16px;
                             text: widget_label;
                             color: root.widget-visible-options[index] ? root.settings-label-color : root.settings-muted-color;
                             font-size: 11px;
                             font-weight: 500;
+                            horizontal-alignment: root.rtl-layout ? right : left;
+                            vertical-alignment: center;
                             overflow: elide;
                         }
 
                         Text {
                             x: 136px;
-                            y: 40px;
+                            y: 38px;
                             width: 211px;
-                            height: 11px;
+                            height: 14px;
                             text: root.widget-list-detail-options[index];
                             color: root.settings-muted-color;
                             font-size: 9px;
                             font-weight: 500;
+                            horizontal-alignment: root.rtl-layout ? right : left;
+                            vertical-alignment: center;
                             overflow: elide;
                         }
 
@@ -1289,6 +1302,7 @@ export component SettingsWindow inherits Window {
                             color: #ef4444;
                             font-size: 9px;
                             font-weight: 800;
+                            horizontal-alignment: root.rtl-layout ? right : left;
                             overflow: elide;
                         }
 
@@ -1354,6 +1368,7 @@ export component SettingsWindow inherits Window {
                     color: root.settings-heading-color;
                     font-size: 16px;
                     font-weight: 500;
+                    horizontal-alignment: root.rtl-layout ? right : left;
                     overflow: elide;
                 }
 
@@ -1365,6 +1380,7 @@ export component SettingsWindow inherits Window {
                     text: root.selected-widget-description-text;
                     color: root.settings-muted-color;
                     font-size: 10px;
+                    horizontal-alignment: root.rtl-layout ? right : left;
                     overflow: elide;
                 }
 
@@ -1385,6 +1401,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 95px;
                     width: 95px;
@@ -1400,10 +1417,12 @@ export component SettingsWindow inherits Window {
                     width: parent.width - 161px;
                     height: 39px;
                     text <=> root.widget-name-input-text;
+                    horizontal-alignment: root.rtl-layout ? right : left;
                     edited(_) => { root.apply-current-widget-settings(); }
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 155px;
                     width: 186px;
@@ -1435,6 +1454,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 215px;
                     width: 186px;
@@ -1467,25 +1487,29 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: 17px;
-                    y: 285px;
+                    y: 283px;
                     width: 50px;
-                    height: 14px;
+                    height: 16px;
                     text: root.symbols-text;
                     color: root.settings-heading-color;
                     font-size: 11px;
                     font-weight: 500;
+                    horizontal-alignment: root.rtl-layout ? right : left;
+                    vertical-alignment: center;
                     overflow: elide;
                 }
 
                 Text {
                     x: 66px;
-                    y: 288px;
+                    y: 286px;
                     width: parent.width - 83px;
-                    height: 11px;
+                    height: 14px;
                     text: root.widget-symbol-status-text;
                     color: root.settings-muted-color;
                     font-size: 9px;
                     font-weight: 500;
+                    horizontal-alignment: root.rtl-layout ? right : left;
+                    vertical-alignment: center;
                     overflow: elide;
                 }
 
@@ -1595,17 +1619,20 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: 17px;
-                    y: (root.widget-display-section-y + 20) * 1px;
+                    y: (root.widget-display-section-y + 18) * 1px;
                     width: parent.width - 34px;
-                    height: 14px;
+                    height: 16px;
                     text: root.app-settings-text;
                     color: root.settings-heading-color;
                     font-size: 11px;
                     font-weight: 500;
+                    horizontal-alignment: root.rtl-layout ? right : left;
+                    vertical-alignment: center;
                     overflow: elide;
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: (root.widget-display-section-y + 38) * 1px;
                     width: 129px;
@@ -1628,6 +1655,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: (root.widget-display-section-y + root.widget-theme-settings-offset + 142) * 1px;
                     width: parent.width - 89px;
@@ -1659,6 +1687,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: (root.widget-display-section-y + root.widget-theme-settings-offset + 192) * 1px;
                     width: parent.width - 89px;
@@ -1690,6 +1719,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: (root.widget-display-section-y + root.widget-theme-settings-offset + 38) * 1px;
                     width: 129px;
@@ -1752,6 +1782,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: (root.widget-display-section-y + root.widget-theme-settings-offset + 90) * 1px;
                     width: 115px;
@@ -1806,13 +1837,14 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 42px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 101) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 99) * 1px;
                     width: 9px;
-                    height: 13px;
+                    height: 15px;
                     text: "%";
                     color: root.settings-muted-color;
                     font-size: 10px;
                     font-weight: 500;
+                    vertical-alignment: center;
                     overflow: elide;
                 }
 
@@ -1826,13 +1858,15 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: 17px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 257) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 255) * 1px;
                     width: parent.width - 52px;
-                    height: 13px;
+                    height: 16px;
                     text: root.advanced-options-text;
                     color: root.settings-muted-color;
                     font-size: 11px;
                     font-weight: 500;
+                    horizontal-alignment: root.rtl-layout ? right : left;
+                    vertical-alignment: center;
                     overflow: elide;
                 }
 
@@ -1896,6 +1930,7 @@ export component SettingsWindow inherits Window {
             visible: root.settings-tab-index == 1;
 
             PanelTitle {
+                rtl-layout: root.rtl-layout;
                 x: 17px;
                 y: 16px;
                 width: 459px;
@@ -2295,6 +2330,7 @@ export component SettingsWindow inherits Window {
                         color: plugin.available ? root.settings-heading-color : root.settings-muted-color;
                         font-size: 13px;
                         font-weight: 800;
+                        horizontal-alignment: root.rtl-layout ? right : left;
                         overflow: elide;
                     }
 
@@ -2305,6 +2341,7 @@ export component SettingsWindow inherits Window {
                         text: plugin.description;
                         color: root.settings-muted-color;
                         font-size: 9px;
+                        horizontal-alignment: root.rtl-layout ? right : left;
                         overflow: elide;
                     }
 
@@ -2316,6 +2353,7 @@ export component SettingsWindow inherits Window {
                         color: root.settings-preview-source-color;
                         font-size: 9px;
                         font-weight: 700;
+                        horizontal-alignment: root.rtl-layout ? right : left;
                     }
 
                     Text {
@@ -2327,6 +2365,7 @@ export component SettingsWindow inherits Window {
                         color: plugin.available ? root.settings-preview-source-color : #f87171;
                         font-size: 9px;
                         font-weight: 700;
+                        horizontal-alignment: root.rtl-layout ? right : left;
                         overflow: elide;
                     }
 
@@ -2358,6 +2397,7 @@ export component SettingsWindow inherits Window {
             visible: root.settings-tab-index == 2;
 
             PanelTitle {
+                rtl-layout: root.rtl-layout;
                 x: 17px;
                 y: 16px;
                 width: 459px;
@@ -2386,6 +2426,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 18px;
                     width: 301px;
@@ -2492,6 +2533,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 96px;
                     width: 301px;
@@ -2545,6 +2587,7 @@ export component SettingsWindow inherits Window {
                 border-color: root.settings-border-color;
 
                 SettingSectionTitle {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 13px;
                     width: parent.width - 34px;
@@ -2653,6 +2696,7 @@ export component SettingsWindow inherits Window {
             visible: root.settings-tab-index == 3;
 
             PanelTitle {
+                rtl-layout: root.rtl-layout;
                 x: 17px;
                 y: 16px;
                 width: 459px;
@@ -2673,6 +2717,7 @@ export component SettingsWindow inherits Window {
                 border-color: root.settings-border-color;
 
                 SettingSectionTitle {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 13px;
                     width: parent.width - 34px;
@@ -2698,6 +2743,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 54px;
                     width: 301px;
@@ -2717,6 +2763,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 99px;
                     width: 301px;
@@ -2736,6 +2783,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 143px;
                     width: 301px;
@@ -2778,6 +2826,7 @@ export component SettingsWindow inherits Window {
                 border-color: root.settings-border-color;
 
                 SettingSectionTitle {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 13px;
                     width: parent.width - 34px;
@@ -2787,6 +2836,7 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingLabel {
+                    rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 54px;
                     width: 301px;
@@ -2834,6 +2884,7 @@ export component SettingsWindow inherits Window {
             property <length> content-height: system_tab.app-info-card-y + 155px;
 
             PanelTitle {
+                rtl-layout: root.rtl-layout;
                 x: 17px;
                 y: 16px;
                 width: 459px;
@@ -2862,6 +2913,7 @@ export component SettingsWindow inherits Window {
                     border-color: root.settings-border-color;
 
                     SettingSectionTitle {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 13px;
                         width: parent.width - 34px;
@@ -2887,6 +2939,7 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingLabel {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 54px;
                         width: 301px;
@@ -2918,6 +2971,7 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingLabel {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 99px;
                         width: 301px;
@@ -2949,6 +3003,7 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingLabel {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 143px;
                         width: 301px;
@@ -2979,6 +3034,7 @@ export component SettingsWindow inherits Window {
                     border-color: root.settings-border-color;
 
                     SettingSectionTitle {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 13px;
                         width: parent.width - 34px;
@@ -2997,14 +3053,28 @@ export component SettingsWindow inherits Window {
                         toggled => { root.apply-current-network-settings(); }
                     }
 
-                    SettingLabel {
-                        x: 17px;
-                        y: 54px;
-                        width: parent.width - 88px;
-                        label: root.network-proxy-enabled-text;
-                        help: root.network-proxy-help-text;
-                        label-color: root.settings-label-color;
-                        muted-color: root.settings-muted-color;
+                    Text {
+                        x: 60px;
+                        y: 52px;
+                        width: parent.width - 77px;
+                        text: root.network-proxy-enabled-text;
+                        color: root.settings-label-color;
+                        font-size: 10px;
+                        font-weight: 700;
+                        horizontal-alignment: root.rtl-layout ? right : left;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 60px;
+                        y: 68px;
+                        width: parent.width - 77px;
+                        height: 21px;
+                        text: root.network-proxy-help-text;
+                        color: root.settings-muted-color;
+                        font-size: 8px;
+                        horizontal-alignment: root.rtl-layout ? right : left;
+                        wrap: word-wrap;
                     }
 
                     TouchArea {
@@ -3033,8 +3103,9 @@ export component SettingsWindow inherits Window {
                         width: parent.width - 34px;
                         text: root.network-proxy-url-text;
                         color: root.settings-label-color;
-                        font-size: 11px;
-                        font-weight: 500;
+                        font-size: 9px;
+                        font-weight: 700;
+                        horizontal-alignment: root.rtl-layout ? right : left;
                         overflow: elide;
                         visible: root.network-proxy-enabled;
                     }
@@ -3045,6 +3116,7 @@ export component SettingsWindow inherits Window {
                         width: parent.width - 34px;
                         height: 26px;
                         text <=> root.network-proxy-url-input-text;
+                        horizontal-alignment: root.rtl-layout ? right : left;
                         edited(_) => { root.apply-current-network-settings(); }
                         visible: root.network-proxy-enabled;
                     }
@@ -3056,10 +3128,12 @@ export component SettingsWindow inherits Window {
                         height: 14px;
                         text: root.network-proxy-example-hint-text;
                         color: root.settings-muted-color;
-                        font-size: 10px;
+                        font-size: 8px;
+                        horizontal-alignment: root.rtl-layout ? right : left;
                         overflow: elide;
                         visible: root.network-proxy-enabled;
                     }
+
                 }
 
                 Rectangle {
@@ -3073,6 +3147,7 @@ export component SettingsWindow inherits Window {
                     border-color: root.settings-border-color;
 
                     SettingSectionTitle {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 13px;
                         width: parent.width - 34px;
@@ -3090,6 +3165,7 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingLabel {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 54px;
                         width: 301px;
@@ -3121,6 +3197,7 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingLabel {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 99px;
                         width: 301px;
@@ -3163,6 +3240,7 @@ export component SettingsWindow inherits Window {
                     border-color: root.settings-border-color;
 
                     SettingSectionTitle {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 13px;
                         width: parent.width - 34px;
@@ -3180,6 +3258,7 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingLabel {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 54px;
                         width: 301px;
@@ -3199,6 +3278,7 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingLabel {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 99px;
                         width: 301px;
@@ -3229,6 +3309,7 @@ export component SettingsWindow inherits Window {
                     border-color: root.settings-border-color;
 
                     SettingSectionTitle {
+                        rtl-layout: root.rtl-layout;
                         x: 17px;
                         y: 13px;
                         width: parent.width - 34px;
@@ -3247,24 +3328,29 @@ export component SettingsWindow inherits Window {
 
                     Text {
                         x: 17px;
-                        y: 57px;
+                        y: 55px;
                         width: 301px;
+                        height: 15px;
                         text: root.app-version-label-text;
                         color: root.settings-label-color;
                         font-size: 10px;
                         font-weight: 700;
+                        horizontal-alignment: root.rtl-layout ? right : left;
+                        vertical-alignment: center;
                         overflow: elide;
                     }
 
                     Text {
                         x: parent.width - 201px;
-                        y: 57px;
+                        y: 55px;
                         width: 183px;
+                        height: 15px;
                         text: root.app-version-value-text;
                         color: root.settings-muted-color;
                         font-size: 10px;
                         font-weight: 700;
                         horizontal-alignment: right;
+                        vertical-alignment: center;
                         overflow: elide;
                     }
 
@@ -3277,6 +3363,7 @@ export component SettingsWindow inherits Window {
                         color: root.settings-label-color;
                         font-size: 10px;
                         font-weight: 700;
+                        horizontal-alignment: root.rtl-layout ? right : left;
                         vertical-alignment: center;
                         overflow: elide;
                     }
@@ -3396,6 +3483,7 @@ export component SettingsWindow inherits Window {
                 color: root.settings-heading-color;
                 font-size: 13px;
                 font-weight: 850;
+                horizontal-alignment: root.rtl-layout ? right : left;
                 overflow: elide;
             }
 
@@ -3414,6 +3502,7 @@ export component SettingsWindow inherits Window {
                 height: 26px;
                 text <=> root.symbol-picker-search-text;
                 placeholder-text: root.symbol-search-placeholder-text;
+                horizontal-alignment: root.rtl-layout ? right : left;
                 edited(_) => { root.refresh-symbol-picker-candidates(); }
             }
 
@@ -3434,6 +3523,7 @@ export component SettingsWindow inherits Window {
                 text: root.symbol-picker-status-text;
                 color: root.settings-muted-color;
                 font-size: 9px;
+                horizontal-alignment: root.rtl-layout ? right : left;
                 wrap: word-wrap;
             }
 

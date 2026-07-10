@@ -131,7 +131,12 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
 
                         let cache = quote_cache.borrow();
                         if feature_flags::ALERT_RULES_ENABLED {
-                            notify_alerts(&notification_throttle, &settings.alert_rules, &cache);
+                            notify_alerts(
+                                &notification_throttle,
+                                i18n::resolve_locale(settings.language),
+                                &settings.alert_rules,
+                                &cache,
+                            );
                         }
                     }
                     market::MarketEvent::Error(error) => {
@@ -247,6 +252,7 @@ pub(crate) fn sync_widget_runtimes(
             runtime.display_options = widget_display_options(instance);
             runtime.widget_scale = widget_scale_for_instance(instance, &layout, &plugin_catalog);
             runtime.theme_name = theme_name;
+            runtime.locale = i18n::resolve_locale(settings.language);
             continue;
         }
 
@@ -294,6 +300,7 @@ pub(crate) fn sync_widget_runtimes(
         let symbols = normalized_symbols_for_instance(instance, Some(&plugin_catalog));
         let layout = layout_for_instance(instance, index, settings.clone(), Some(&plugin_catalog));
         let theme_name = widget_theme_name(instance, &plugin_catalog);
+        let locale = i18n::resolve_locale(settings.language);
         runtimes.push(WidgetRuntime {
             id: instance.id.clone(),
             plugin_id: instance.plugin_id.clone(),
@@ -303,6 +310,7 @@ pub(crate) fn sync_widget_runtimes(
             display_options: widget_display_options(instance),
             widget_scale: widget_scale_for_instance(instance, &layout, &plugin_catalog),
             theme_name,
+            locale,
         });
 
         if index == instances.len().saturating_sub(1) {
@@ -555,6 +563,7 @@ fn refresh_runtime_symbols_from_store(
 ) {
     let store = layouts.borrow();
     let settings = store.settings.clone().normalized();
+    let locale = i18n::resolve_locale(settings.language);
     let proxy_url = settings::effective_network_proxy_url(&settings);
     for runtime in widgets.borrow_mut().iter_mut() {
         let Some((index, instance)) = store
@@ -576,12 +585,14 @@ fn refresh_runtime_symbols_from_store(
             || runtime.display_options != display_options
             || (runtime.widget_scale - widget_scale).abs() > f32::EPSILON
             || runtime.theme_name != theme_name
+            || runtime.locale != locale
         {
             runtime.symbols = symbols;
             runtime.show_coin_logos = show_coin_logos;
             runtime.display_options = display_options;
             runtime.widget_scale = widget_scale;
             runtime.theme_name = theme_name.clone();
+            runtime.locale = locale;
             runtime.ui.set_theme_name(theme_name.into());
             apply_runtime_view_with_icons(ApplyRuntimeViewRequest {
                 ui: &runtime.ui,
@@ -601,6 +612,13 @@ fn refresh_runtime_symbols_from_store(
                 display_options: runtime.display_options,
                 widget_scale: runtime.widget_scale,
             });
+            runtime
+                .ui
+                .set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());
+            runtime
+                .ui
+                .set_empty_text(i18n::text(locale).empty_pairs.into());
+            runtime.ui.set_rtl_layout(i18n::is_rtl(locale));
         }
     }
 }
@@ -648,6 +666,7 @@ fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
     });
     ui.set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());
     ui.set_empty_text(text.empty_pairs.into());
+    ui.set_rtl_layout(i18n::is_rtl(locale));
     ui.set_pin_to_top(instance.layout.always_on_top);
     ui.set_layout_locked(instance.layout.locked);
     ui.set_theme_name(widget_theme_name(instance, plugin_catalog).into());
@@ -758,6 +777,7 @@ pub(crate) fn apply_settings_to_widgets(
 ) {
     let store = layouts.borrow();
     let settings = store.settings.clone().normalized();
+    let locale = i18n::resolve_locale(settings.language);
     for runtime in widgets.borrow_mut().iter_mut() {
         if let Some((index, instance)) = store
             .widgets
@@ -779,6 +799,7 @@ pub(crate) fn apply_settings_to_widgets(
             runtime.show_coin_logos = settings::widget_show_coin_logos(instance);
             runtime.display_options = widget_display_options(instance);
             runtime.theme_name = widget_theme_name(instance, plugin_catalog);
+            runtime.locale = locale;
         }
     }
 }
@@ -851,7 +872,7 @@ fn widget_runtime_view(
         quote_cache,
         source_prefix: text.source_prefix,
         provider_labels: provider_labels(locale),
-        labels: runtime_text_labels(text),
+        labels: runtime_text_labels(text, locale),
         has_market_error,
         now,
         display_options,
@@ -864,7 +885,10 @@ fn widget_display_options(instance: &WidgetInstance) -> WidgetDisplayOptions {
     }
 }
 
-fn runtime_text_labels(text: &'static i18n::UiText) -> RuntimeTextLabels<'static> {
+fn runtime_text_labels(
+    text: &'static i18n::UiText,
+    locale: i18n::Locale,
+) -> RuntimeTextLabels<'static> {
     RuntimeTextLabels {
         no_pairs: text.runtime_no_pairs,
         connecting: text.runtime_connecting,
@@ -874,6 +898,9 @@ fn runtime_text_labels(text: &'static i18n::UiText) -> RuntimeTextLabels<'static
         source_error: text.runtime_source_error,
         live_count_prefix: text.runtime_live_count_prefix,
         live_count_suffix: text.runtime_live_count_suffix,
+        elapsed_second_unit: text.runtime_elapsed_second_unit,
+        elapsed_minute_unit: text.runtime_elapsed_minute_unit,
+        isolate_numeric_values: i18n::is_rtl(locale),
     }
 }
 
@@ -883,10 +910,7 @@ fn provider_labels(locale: i18n::Locale) -> ProviderLabels<'static> {
         coinbase: "Coinbase",
         okx: "OKX",
         hyperliquid: "Hyperliquid",
-        mixed: match locale {
-            i18n::Locale::ZhHans => "多个源",
-            i18n::Locale::En => "Mixed",
-        },
+        mixed: i18n::provider_mixed_label(locale),
     }
 }
 
@@ -916,16 +940,50 @@ fn normalized_feed_symbols(symbols: Vec<String>) -> Vec<String> {
         })
 }
 
+fn notify_market_error(
+    throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
+    locale: i18n::Locale,
+    error: &str,
+) {
+    if let Some(body) =
+        market_error_notification_body_for_throttle(throttle, locale, error, Instant::now())
+    {
+        notifications::show(i18n::text(locale).tray_tooltip, &body);
+    }
+}
+
+fn market_error_notification_body_for_throttle(
+    throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
+    locale: i18n::Locale,
+    error: &str,
+    now: Instant,
+) -> Option<String> {
+    let body = i18n::market_error_notification_body(locale, error);
+    throttle
+        .borrow_mut()
+        .should_notify("market-feed", &body, now)
+        .then_some(body)
+}
+
 fn notify_alerts(
     throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
+    locale: i18n::Locale,
     rules: &[settings::AlertRule],
     quote_cache: &QuoteCache,
 ) {
     let now = Instant::now();
     for alert in widget_runtime::evaluate_alerts_from_cache(rules, quote_cache) {
+        let title = i18n::alert_notification_title(locale, &alert.symbol);
+        let body = i18n::alert_notification_body(
+            locale,
+            &alert.symbol,
+            alert.condition,
+            alert.threshold,
+            alert.current_value,
+        );
         let key = format!("alert:{}", alert.rule_id);
-        if throttle.borrow_mut().should_notify(&key, &alert.body, now) {
-            notifications::show(&alert.title, &alert.body);
+        if throttle.borrow_mut().should_notify(&key, &body, now) {
+            notifications::show(&title, &body);
         }
     }
 }
@@ -980,6 +1038,133 @@ mod tests {
 
         assert_eq!(normalized.len(), 25);
         assert_eq!(normalized[24], "binance:spot:ASSET24/USDT");
+    }
+
+    #[test]
+    fn runtime_text_bridge_uses_selected_locale_labels() {
+        let zh_text = i18n::text(i18n::Locale::ZhHans);
+        let zh_labels = runtime_text_labels(zh_text, i18n::Locale::ZhHans);
+        assert_eq!(zh_labels.no_pairs, zh_text.runtime_no_pairs);
+        assert_eq!(zh_labels.connecting, zh_text.runtime_connecting);
+        assert_eq!(zh_labels.connection_error, zh_text.runtime_connection_error);
+        assert_eq!(zh_labels.updated, zh_text.runtime_updated);
+        assert_eq!(zh_labels.stale, zh_text.runtime_stale);
+        assert_eq!(zh_labels.source_error, zh_text.runtime_source_error);
+        assert_eq!(
+            zh_labels.live_count_prefix,
+            zh_text.runtime_live_count_prefix
+        );
+        assert_eq!(
+            zh_labels.live_count_suffix,
+            zh_text.runtime_live_count_suffix
+        );
+        assert_eq!(
+            zh_labels.elapsed_second_unit,
+            zh_text.runtime_elapsed_second_unit
+        );
+        assert_eq!(
+            zh_labels.elapsed_minute_unit,
+            zh_text.runtime_elapsed_minute_unit
+        );
+        assert!(!zh_labels.isolate_numeric_values);
+
+        let ar_text = i18n::text(i18n::Locale::Ar);
+        let ar_labels = runtime_text_labels(ar_text, i18n::Locale::Ar);
+        assert_eq!(ar_labels.source_error, ar_text.runtime_source_error);
+        assert_eq!(
+            ar_labels.live_count_suffix,
+            ar_text.runtime_live_count_suffix
+        );
+        assert!(ar_labels.isolate_numeric_values);
+        assert_eq!(provider_labels(i18n::Locale::Ar).mixed, "مختلط");
+    }
+
+    #[test]
+    fn runtime_refresh_tracks_locale_sensitive_widget_labels() {
+        let source = include_str!("runtime_bridge.rs");
+        let refresh_fn = source
+            .split("fn refresh_runtime_symbols_from_store(")
+            .nth(1)
+            .unwrap()
+            .split("fn apply_instance_to_widget")
+            .next()
+            .unwrap();
+
+        for required in [
+            "let locale = i18n::resolve_locale(settings.language);",
+            "|| runtime.locale != locale",
+            "runtime.locale = locale;",
+            ".set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());",
+            ".set_empty_text(i18n::text(locale).empty_pairs.into());",
+            "runtime.ui.set_rtl_layout(i18n::is_rtl(locale));",
+        ] {
+            assert!(
+                refresh_fn.contains(required),
+                "runtime symbol refresh should update locale-sensitive widget labels: {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn initial_widget_apply_sets_locale_sensitive_widget_labels() {
+        let source = include_str!("runtime_bridge.rs");
+        let apply_fn = source
+            .split("fn apply_instance_to_widget(")
+            .nth(1)
+            .unwrap()
+            .split("fn widget_scale_for_instance")
+            .next()
+            .unwrap();
+
+        for required in [
+            "let locale = i18n::resolve_locale(settings.language);",
+            "let text = i18n::text(locale);",
+            "ui.set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());",
+            "ui.set_empty_text(text.empty_pairs.into());",
+            "ui.set_rtl_layout(i18n::is_rtl(locale));",
+        ] {
+            assert!(
+                apply_fn.contains(required),
+                "initial widget apply should set locale-sensitive widget label: {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn market_error_notification_throttle_uses_localized_body() {
+        let throttle = Rc::new(RefCell::new(notifications::NotificationThrottle::new(
+            Duration::from_secs(60),
+        )));
+        let now = Instant::now();
+        let error = "HTTP 429 api.binance.com";
+
+        let english_body =
+            market_error_notification_body_for_throttle(&throttle, i18n::Locale::En, error, now)
+                .expect("first market error should notify");
+        assert_eq!(
+            english_body,
+            "Market data update failed: HTTP 429 api.binance.com"
+        );
+
+        let zh_body = market_error_notification_body_for_throttle(
+            &throttle,
+            i18n::Locale::ZhHans,
+            error,
+            now + Duration::from_secs(1),
+        )
+        .expect("same market error should notify after language changes");
+        assert_eq!(zh_body, "行情更新失败：HTTP 429 api.binance.com");
+
+        assert!(
+            market_error_notification_body_for_throttle(
+                &throttle,
+                i18n::Locale::ZhHans,
+                error,
+                now + Duration::from_secs(2),
+            )
+            .is_none(),
+            "same localized market error should still be throttled"
+        );
     }
 
     #[test]

@@ -21,10 +21,14 @@ pub const MANIFEST_MAX_BYTES: u64 = 64 * 1024;
 pub const SLINT_FILE_MAX_BYTES: u64 = 256 * 1024;
 pub const ASSET_MAX_BYTES: u64 = 1024 * 1024;
 pub const PLUGIN_DIR_MAX_BYTES: u64 = 5 * 1024 * 1024;
+pub(crate) const SLINT_RENDERER_UNCOMPILED_REASON: &str = "Slint renderer has not been compiled";
 const USER_PLUGIN_DEVELOPMENT_GUIDE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../CUSTOM_UI_PLUGIN_DEVELOPMENT.md"
 ));
+#[cfg(test)]
+const REPO_PLUGIN_DEVELOPMENT_GUIDE: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/plugins/README.md"));
 const HIDDEN_MARKET_PLUGIN_IDS: &[&str] = &[
     BUILTIN_MINI_TICKER_PLUGIN_ID,
     "com.cryptohud.market-board",
@@ -506,7 +510,7 @@ pub fn manifest_to_definition(
         preview_images,
         themes: manifest.themes,
         data_requirements: manifest.data_requirements,
-        status: PluginStatus::Unavailable("Slint renderer has not been compiled".to_string()),
+        status: PluginStatus::Unavailable(SLINT_RENDERER_UNCOMPILED_REASON.to_string()),
     })
 }
 
@@ -761,8 +765,10 @@ export component ExamplePriceCard inherits Window {
     in property <[QuoteRow]> quote-rows;
     in property <string> pairs-heading-text;
     in property <string> source-text;
+    in property <string> source-name-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width;
@@ -797,6 +803,56 @@ export component ExamplePriceCard inherits Window {
             USER_PLUGIN_DEVELOPMENT_GUIDE
         );
         let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn user_plugin_development_guide_documents_i18n_and_rtl_contract() {
+        assert!(
+            USER_PLUGIN_DEVELOPMENT_GUIDE.contains("## Localization And RTL"),
+            "plugin guide should document the localization and RTL contract"
+        );
+        assert!(
+            USER_PLUGIN_DEVELOPMENT_GUIDE.contains("in property <bool> rtl-layout: false;"),
+            "plugin guide should show the host-supplied RTL property"
+        );
+        assert!(
+            USER_PLUGIN_DEVELOPMENT_GUIDE.contains("in property <string> source-name-text;"),
+            "plugin guide should document the short localized source-name property"
+        );
+        assert!(
+            USER_PLUGIN_DEVELOPMENT_GUIDE
+                .contains("Visible UI copy should come from host-provided properties"),
+            "plugin guide should discourage hardcoded visible English text"
+        );
+        assert!(
+            USER_PLUGIN_DEVELOPMENT_GUIDE
+                .contains("Do not compare against localized strings such as `Connecting`"),
+            "plugin guide should steer plugins away from localized string comparisons"
+        );
+    }
+
+    #[test]
+    fn repo_plugin_development_guide_documents_i18n_and_rtl_contract() {
+        assert!(
+            REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("## 本地化和 RTL"),
+            "repo plugin guide should document localization and RTL expectations"
+        );
+        assert!(
+            REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("in property <bool> rtl-layout: false;"),
+            "repo plugin guide should require the host-supplied RTL property"
+        );
+        assert!(
+            REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("in property <string> source-name-text;"),
+            "repo plugin guide should document the short localized source-name property"
+        );
+        assert!(
+            REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("可见 UI 文案应来自宿主下发的本地化属性"),
+            "repo plugin guide should discourage hardcoded visible English text"
+        );
+        assert!(
+            REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("不要比较 `Connecting`"),
+            "repo plugin guide should steer plugins away from localized string comparisons"
+        );
     }
 
     #[test]
@@ -934,6 +990,26 @@ export component ExamplePriceCard inherits Window {
                 PluginSource::Builtin,
                 "{plugin_id} should be treated as built-in"
             );
+        }
+    }
+
+    #[test]
+    fn bundled_builtin_slint_plugins_have_localized_market_copy() {
+        for plugin_id in BUNDLED_BUILTIN_SLINT_PLUGIN_IDS
+            .iter()
+            .copied()
+            .chain(["com.cryptohud.market-board"])
+        {
+            for locale in crate::i18n::Locale::ALL {
+                assert!(
+                    crate::i18n::builtin_plugin_title(locale, plugin_id).is_some(),
+                    "{plugin_id} should have a built-in plugin title for {locale:?}"
+                );
+                assert!(
+                    crate::i18n::builtin_plugin_description(locale, plugin_id).is_some(),
+                    "{plugin_id} should have a built-in plugin description for {locale:?}"
+                );
+            }
         }
     }
 
@@ -1189,6 +1265,40 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
+    fn repo_plugins_accept_host_supplied_rtl_layout() {
+        for plugin_id in HOST_SCALE_REPO_PLUGIN_IDS {
+            let source = repo_plugin_ui_source(plugin_id);
+
+            assert!(
+                source.contains("in property <bool> rtl-layout: false;"),
+                "{plugin_id} should accept the host supplied RTL layout flag"
+            );
+        }
+    }
+
+    #[test]
+    fn repo_plugin_visible_text_literals_are_limited_to_non_localized_tokens() {
+        let allowed = [" · "];
+
+        for plugin_id in HOST_SCALE_REPO_PLUGIN_IDS {
+            let source = repo_plugin_ui_source(plugin_id);
+            for (line_index, line) in source.lines().enumerate() {
+                if !is_user_facing_text_line(line) {
+                    continue;
+                }
+                for literal in quoted_literals(line) {
+                    assert!(
+                        allowed.contains(&literal.as_str()),
+                        "unexpected visible text literal in {plugin_id}/ui/main.slint line {}: {:?}",
+                        line_index + 1,
+                        literal
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn available_repo_plugins_use_direct_scaled_layout() {
         for plugin_id in DIRECT_SCALE_REPO_PLUGIN_IDS {
             let source = repo_plugin_ui_source(plugin_id);
@@ -1216,6 +1326,23 @@ export component ExamplePriceCard inherits Window {
         );
         assert!(source.contains("commands: root.chart-line-path;"));
         assert!(source.contains("commands: root.chart-fill-path;"));
+    }
+
+    #[test]
+    fn market_compass_loading_price_size_uses_state_not_localized_text() {
+        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
+
+        assert!(
+            !source.contains("quote.price == \"Connecting\"")
+                && !source.contains("quote.price == \"连接中\""),
+            "market compass loading layout should not compare localized runtime text"
+        );
+        assert!(
+            source.contains(
+                "font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);"
+            ),
+            "market compass price size should follow chart readiness instead of localized labels"
+        );
     }
 
     #[test]
@@ -1329,8 +1456,11 @@ export component ExamplePriceCard inherits Window {
             "market compass price layers should stay readable through theme-specific text colors"
         );
         assert!(
-            source.contains("font-size: quote.price == \"Connecting\" || quote.price == \"连接中\" ? root.s(36px) : root.s(60px);"),
-            "market compass main price should be large enough to read at widget size"
+            source
+                .matches("font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);")
+                .count()
+                == 3,
+            "market compass price layers should use readable size for live prices and compact size for loading text"
         );
     }
 
@@ -1519,6 +1649,39 @@ export component ExamplePriceCard inherits Window {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("plugins")
             .join(plugin_id)
+    }
+
+    fn is_user_facing_text_line(line: &str) -> bool {
+        line.contains("text:")
+            || line.contains("placeholder-text:")
+            || line.contains("title:")
+            || line.contains("tooltip:")
+    }
+
+    fn quoted_literals(line: &str) -> Vec<String> {
+        let mut literals = Vec::new();
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch != '"' {
+                continue;
+            }
+            let mut literal = String::new();
+            let mut escaped = false;
+            for value in chars.by_ref() {
+                if escaped {
+                    literal.push(value);
+                    escaped = false;
+                } else if value == '\\' {
+                    escaped = true;
+                } else if value == '"' {
+                    break;
+                } else {
+                    literal.push(value);
+                }
+            }
+            literals.push(literal);
+        }
+        literals
     }
 
     fn temp_plugin_root(label: &str) -> PathBuf {

@@ -59,6 +59,7 @@ com.example.my-widget/
 宿主会强制校验：
 
 - `schemaVersion` 必须为 `3`。
+- `name` 是作者提供的展示名，Crypto HUD 会按原样显示，不做本地化。
 - `version` 必须是合法 SemVer。
 - `hostApiVersion` 必须匹配当前宿主 API。
 - `renderer.kind` 必须为 `slint`。
@@ -136,6 +137,20 @@ in property <bool> red-up-enabled;
 in property <int> content-opacity;
 ```
 
+仓库内置插件还应暴露以下宿主兼容属性。宿主会在属性存在时自动下发对应值，
+用来保持插件市场预览、桌面小组件、多语言和 RTL 布局一致：
+
+```slint
+in property <string> source-name-text;
+in property <bool> rtl-layout: false;
+in property <float> widget-scale: 1.0;
+in property <[image]> quote-icons;
+in property <string> chart-line-path;
+in property <string> chart-fill-path;
+in property <bool> chart-ready;
+in property <bool> chart-positive;
+```
+
 插件 Slint 文件中需要定义 `QuoteRow`：
 
 ```slint
@@ -158,6 +173,28 @@ callback toggle-layout-lock();
 
 - `drag-move(dx, dy)`：移动桌面小组件窗口。
 - `toggle-layout-lock()`：切换布局锁定状态。
+
+## 本地化和 RTL
+
+可见 UI 文案应来自宿主下发的本地化属性，避免在 Slint 文件里硬编码英文文本。
+常用属性包括 `pairs-heading-text`、`source-text`、`source-name-text`、`updated-text`
+和 `empty-text`。行情符号、价格、百分比、交易所名和协议 token 可以保持原文，
+因为这些内容本身就是市场数据或技术标识。
+
+渲染本地化标签的插件必须声明 `rtl-layout`，并在阿拉伯语等 RTL locale 下调整
+文本对齐：
+
+```slint
+Text {
+    text: root.source-text;
+    horizontal-alignment: root.rtl-layout ? right : left;
+    overflow: elide;
+}
+```
+
+行情符号、价格和百分比通常不做整体镜像，便于用户快速扫盘。不要用本地化文案
+判断布局或数据状态，例如不要比较 `Connecting`；应使用 `chart-ready`、数据数量
+或宿主下发的结构化状态。
 
 ## 主题和颜色适配
 
@@ -284,6 +321,7 @@ card := Rectangle {
 - 单币种图表插件通常使用第一条 `quote-rows` 和可选 chart path 属性。
 - chart 数据未准备好时，应显示静态兜底或轻量占位。
 - 涨跌颜色需要尊重 `red-up-enabled`。
+- 可见状态和空态文案使用宿主下发的本地化属性，不在插件里写英文兜底。
 
 ## 新增插件流程
 
@@ -294,6 +332,7 @@ card := Rectangle {
 5. 如果设置页市场需要专属缩略图，在 `settings_window.rs` 增加 preview kind 映射，
    并在 `price-card.slint` 增加对应缩略绘制。
 6. 涨跌文字和 K 线颜色必须尊重 `red-up-enabled`。
+7. 本地化标签必须使用宿主下发的文本属性，并用 `rtl-layout` 检查阿拉伯语布局。
 
 ## 验证清单
 
@@ -312,3 +351,4 @@ mise run check
 - 拖拽缩放小组件，确认窗口、内容、K 线和命中区域同步缩放。
 - 切换布局锁定，确认拖拽和缩放手柄状态正确。
 - 打开设置页市场，确认插件左侧预览形态和真实插件一致。
+- 切换到阿拉伯语，确认标签对齐、空态和源信息没有混排错位。

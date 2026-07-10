@@ -23,6 +23,7 @@ export component MarketCompass inherits Window {
     in property <string> source-name-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 480;
@@ -252,7 +253,7 @@ export component MarketCompass inherits Window {
                 height: root.s(76px);
                 text: quote.price;
                 color: root.price-shadow-color;
-                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
                 font-weight: 900;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -266,7 +267,7 @@ export component MarketCompass inherits Window {
                 height: root.s(76px);
                 text: quote.price;
                 color: root.price-glow-color;
-                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
                 font-weight: 900;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -280,7 +281,7 @@ export component MarketCompass inherits Window {
                 height: root.s(76px);
                 text: quote.price;
                 color: root.price-text-color;
-                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
                 font-weight: 900;
                 horizontal-alignment: center;
                 vertical-alignment: center;

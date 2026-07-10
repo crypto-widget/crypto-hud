@@ -240,72 +240,230 @@ const SYMBOL_METADATA: &[SymbolMetadata] = &[
     SymbolMetadata {
         symbol: "BTC",
         name: "Bitcoin",
-        aliases: &["比特币", "btc usdt"],
+        aliases: &[
+            "比特币",
+            "比特幣",
+            "btc usdt",
+            "биткоин",
+            "ビットコイン",
+            "비트코인",
+            "بيتكوين",
+            "bitcóin",
+            "bitkoin",
+        ],
     },
     SymbolMetadata {
         symbol: "ETH",
         name: "Ethereum",
-        aliases: &["以太坊", "ether", "eth usdt"],
+        aliases: &[
+            "以太坊",
+            "以太幣",
+            "以太币",
+            "ether",
+            "eth usdt",
+            "эфириум",
+            "イーサリアム",
+            "이더리움",
+            "إيثريوم",
+            "etéreo",
+            "éter",
+        ],
     },
     SymbolMetadata {
         symbol: "SOL",
         name: "Solana",
-        aliases: &["索拉纳"],
+        aliases: &[
+            "索拉纳",
+            "索拉納",
+            "солана",
+            "ソラナ",
+            "솔라나",
+            "سولانا",
+            "solana coin",
+            "moneda solana",
+            "moeda solana",
+            "koin solana",
+            "đồng solana",
+        ],
     },
     SymbolMetadata {
         symbol: "BNB",
         name: "BNB",
-        aliases: &["binance coin", "币安币"],
+        aliases: &[
+            "binance coin",
+            "币安币",
+            "幣安幣",
+            "биэнби",
+            "ビーエヌビー",
+            "비앤비",
+            "بي إن بي",
+            "moneda binance",
+            "moeda binance",
+            "koin binance",
+            "đồng binance",
+            "binance coini",
+        ],
     },
     SymbolMetadata {
         symbol: "XRP",
         name: "XRP",
-        aliases: &["ripple", "瑞波"],
+        aliases: &[
+            "ripple",
+            "瑞波",
+            "リップル",
+            "리플",
+            "рипл",
+            "ريبل",
+            "moneda ripple",
+            "moeda ripple",
+            "koin ripple",
+            "đồng ripple",
+        ],
     },
     SymbolMetadata {
         symbol: "DOGE",
         name: "Dogecoin",
-        aliases: &["doge coin", "狗狗币"],
+        aliases: &[
+            "doge coin",
+            "狗狗币",
+            "狗狗幣",
+            "догикоин",
+            "ドージコイン",
+            "도지코인",
+            "دوجكوين",
+            "moneda doge",
+            "moeda doge",
+            "koin doge",
+            "đồng doge",
+            "doge coini",
+        ],
     },
     SymbolMetadata {
         symbol: "ADA",
         name: "Cardano",
-        aliases: &["卡尔达诺"],
+        aliases: &[
+            "卡尔达诺",
+            "卡爾達諾",
+            "кардано",
+            "カルダノ",
+            "카르다노",
+            "كاردانو",
+            "moneda cardano",
+            "moeda cardano",
+            "koin cardano",
+            "đồng cardano",
+        ],
     },
     SymbolMetadata {
         symbol: "TRX",
         name: "TRON",
-        aliases: &["波场"],
+        aliases: &[
+            "波场",
+            "波場",
+            "трон",
+            "トロン",
+            "트론",
+            "ترون",
+            "tron coin",
+            "moneda tron",
+            "moeda tron",
+            "koin tron",
+            "đồng tron",
+        ],
     },
     SymbolMetadata {
         symbol: "TON",
         name: "Toncoin",
-        aliases: &["the open network"],
+        aliases: &[
+            "the open network",
+            "тонкоин",
+            "トンコイン",
+            "톤코인",
+            "تونكوين",
+            "moneda ton",
+            "moeda ton",
+            "koin ton",
+            "đồng ton",
+        ],
     },
     SymbolMetadata {
         symbol: "LINK",
         name: "Chainlink",
-        aliases: &["chain link"],
+        aliases: &[
+            "chain link",
+            "链环",
+            "鏈環",
+            "чейнлинк",
+            "チェーンリンク",
+            "체인링크",
+            "تشينلينك",
+            "moneda chainlink",
+            "moeda chainlink",
+            "koin chainlink",
+            "đồng chainlink",
+        ],
     },
     SymbolMetadata {
         symbol: "AVAX",
         name: "Avalanche",
-        aliases: &["雪崩"],
+        aliases: &[
+            "雪崩",
+            "лавина",
+            "アバランチ",
+            "아발란체",
+            "أفالانش",
+            "moneda avalanche",
+            "moeda avalanche",
+            "koin avalanche",
+            "đồng avalanche",
+        ],
     },
     SymbolMetadata {
         symbol: "DOT",
         name: "Polkadot",
-        aliases: &["波卡"],
+        aliases: &[
+            "波卡",
+            "полкадот",
+            "ポルカドット",
+            "폴카닷",
+            "بولكادوت",
+            "moneda polkadot",
+            "moeda polkadot",
+            "koin polkadot",
+            "đồng polkadot",
+        ],
     },
     SymbolMetadata {
         symbol: "LTC",
         name: "Litecoin",
-        aliases: &["莱特币"],
+        aliases: &[
+            "莱特币",
+            "萊特幣",
+            "лайткоин",
+            "ライトコイン",
+            "라이트코인",
+            "لايتكوين",
+            "moneda litecoin",
+            "moeda litecoin",
+            "koin litecoin",
+            "đồng litecoin",
+        ],
     },
     SymbolMetadata {
         symbol: "BCH",
         name: "Bitcoin Cash",
-        aliases: &["比特币现金"],
+        aliases: &[
+            "比特币现金",
+            "比特幣現金",
+            "биткоин кэш",
+            "ビットコインキャッシュ",
+            "비트코인 캐시",
+            "بيتكوين كاش",
+            "moneda bitcoin cash",
+            "moeda bitcoin cash",
+            "koin bitcoin cash",
+            "đồng bitcoin cash",
+        ],
     },
     SymbolMetadata {
         symbol: "SUI",
@@ -350,12 +508,29 @@ const SYMBOL_METADATA: &[SymbolMetadata] = &[
     SymbolMetadata {
         symbol: "PEPE",
         name: "Pepe",
-        aliases: &["pepe coin"],
+        aliases: &[
+            "pepe coin",
+            "moneda pepe",
+            "moeda pepe",
+            "koin pepe",
+            "đồng pepe",
+        ],
     },
     SymbolMetadata {
         symbol: "SHIB",
         name: "Shiba Inu",
-        aliases: &["柴犬币"],
+        aliases: &[
+            "柴犬币",
+            "柴犬幣",
+            "сиба-ину",
+            "シバイヌ",
+            "시바이누",
+            "شيبا إينو",
+            "moneda shiba",
+            "moeda shiba",
+            "koin shiba",
+            "đồng shiba",
+        ],
     },
 ];
 const STATUS_STRIP_PREVIOUS_BLOCK_WIDTH: i32 = 150;
@@ -804,10 +979,11 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                     autostart::apply_auto_start(settings.auto_start_enabled, widget_count)
                 {
                     settings.auto_start_enabled = previous.auto_start_enabled;
-                    status = format!(
-                        "{}: {error}",
-                        i18n::text(i18n::resolve_locale(settings.language))
-                            .status_auto_start_failed
+                    let locale = i18n::resolve_locale(settings.language);
+                    status = i18n::status_failure_message(
+                        locale,
+                        i18n::text(locale).status_auto_start_failed,
+                        error,
                     );
                 }
             }
@@ -815,9 +991,11 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             if previous.shortcut != settings.shortcut {
                 if let Err(error) = shortcut_manager.borrow_mut().apply(settings.shortcut) {
                     settings.shortcut = previous.shortcut;
-                    status = format!(
-                        "{}: {error}",
-                        i18n::text(i18n::resolve_locale(settings.language)).status_shortcut_failed
+                    let locale = i18n::resolve_locale(settings.language);
+                    status = i18n::status_failure_message(
+                        locale,
+                        i18n::text(locale).status_shortcut_failed,
+                        error,
                     );
                 }
             }
@@ -865,9 +1043,8 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             ) {
                 Ok(network_proxy_url) => network_proxy_url,
                 Err(error) => {
-                    let text = i18n::text(i18n::resolve_locale(previous.language));
-                    *commit.settings_status.borrow_mut() =
-                        format!("{}: {error}", text.status_network_proxy_invalid);
+                    let locale = i18n::resolve_locale(previous.language);
+                    *commit.settings_status.borrow_mut() = error.status_message(locale);
                     if let Some(ui) = weak.upgrade() {
                         let status = commit.settings_status.borrow().clone();
                         ui.set_status_text(status.as_str().into());
@@ -1591,12 +1768,11 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                     commit.apply_settings_to_widgets();
                     status_icon_cache_cleared(deleted, locale)
                 }
-                Err(error) => {
-                    format!(
-                        "{}: {error}",
-                        i18n::text(locale).status_icon_cache_clear_failed
-                    )
-                }
+                Err(error) => i18n::status_failure_message(
+                    locale,
+                    i18n::text(locale).status_icon_cache_clear_failed,
+                    error,
+                ),
             };
             *commit.settings_status.borrow_mut() = status;
             commit.refresh_settings_window(&weak);
@@ -1611,9 +1787,10 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             let custom_components_dir =
                 plugin::user_plugin_root(&settings::state_dir_for_path(&commit.state_path));
             if let Err(error) = open_custom_components_folder(&custom_components_dir) {
-                let status = format!(
-                    "{}: {error:#}",
-                    i18n::text(locale).status_custom_components_folder_open_failed
+                let status = i18n::status_failure_message(
+                    locale,
+                    i18n::text(locale).status_custom_components_folder_open_failed,
+                    error,
                 );
                 *commit.settings_status.borrow_mut() = status;
                 commit.refresh_settings_window(&weak);
@@ -1675,10 +1852,7 @@ fn status_saved(_: AppSettings) -> String {
 }
 
 fn status_icon_cache_cleared(deleted: usize, locale: i18n::Locale) -> String {
-    match locale {
-        i18n::Locale::En => format!("Icon cache cleared ({deleted} files removed)"),
-        i18n::Locale::ZhHans => format!("图标缓存已清空（已移除 {deleted} 个文件）"),
-    }
+    i18n::icon_cache_cleared(locale, deleted)
 }
 
 fn open_custom_components_folder(path: &Path) -> Result<()> {
@@ -1689,15 +1863,39 @@ fn open_custom_components_folder(path: &Path) -> Result<()> {
 fn normalized_network_proxy_input(
     enabled: bool,
     proxy_url: &str,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<String, NetworkProxyInputError> {
     let proxy_url = settings::normalize_network_proxy_url(proxy_url.to_string());
     if enabled {
         if proxy_url.is_empty() {
-            return Err("empty proxy address".to_string());
+            return Err(NetworkProxyInputError::EmptyAddress);
         }
-        ureq::Proxy::new(&proxy_url).map_err(|error| error.to_string())?;
+        ureq::Proxy::new(&proxy_url)
+            .map_err(|error| NetworkProxyInputError::InvalidProxy(error.to_string()))?;
     }
     Ok(proxy_url)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NetworkProxyInputError {
+    EmptyAddress,
+    InvalidProxy(String),
+}
+
+impl NetworkProxyInputError {
+    fn status_message(&self, locale: i18n::Locale) -> String {
+        match self {
+            Self::EmptyAddress => i18n::localized_status_failure_message(
+                locale,
+                i18n::text(locale).status_network_proxy_invalid,
+                i18n::network_proxy_empty_address_detail(locale),
+            ),
+            Self::InvalidProxy(error) => i18n::status_failure_message(
+                locale,
+                i18n::text(locale).status_network_proxy_invalid,
+                error,
+            ),
+        }
+    }
 }
 
 fn apply_settings_to_store(
@@ -2049,6 +2247,7 @@ fn refresh_symbol_selector_models_from_ui(
         state,
         &enabled_market_sources_from_ui(ui),
         alert_symbol.as_deref(),
+        locale,
     );
     refresh_symbol_picker_models_from_ui(ui, state, locale);
 }
@@ -2131,7 +2330,7 @@ fn refresh_symbol_picker_models_from_ui(
     };
     let display_options = options
         .iter()
-        .map(|symbol| format_symbol_option(symbol))
+        .map(|symbol| format_symbol_option(symbol, locale))
         .collect::<Vec<_>>();
 
     ui.set_symbol_picker_candidate_options(owned_string_model(display_options));
@@ -2157,6 +2356,7 @@ fn refresh_alert_symbol_options(
     state: &SymbolCatalogState,
     enabled_sources: &[settings::MarketDataSource],
     alert_symbol: Option<&str>,
+    locale: i18n::Locale,
 ) {
     let alert_values = if feature_flags::ALERT_RULES_ENABLED {
         symbol_pick_options(
@@ -2169,7 +2369,7 @@ fn refresh_alert_symbol_options(
     };
     let alert_options = alert_values
         .iter()
-        .map(|symbol| format_symbol_option(symbol))
+        .map(|symbol| format_symbol_option(symbol, locale))
         .collect::<Vec<_>>();
     let normalized_alert_symbol = alert_symbol.and_then(settings::normalize_market_pair_key);
     let alert_index = normalized_alert_symbol
@@ -2311,7 +2511,7 @@ fn symbol_matches_query(symbol: &str, query: &str) -> bool {
     }
     let normalized_query = settings::normalize_symbol_token(query);
     let base = settings::normalize_symbol_token(symbol).unwrap_or_default();
-    let query_lower = query.to_ascii_lowercase();
+    let query_lower = symbol_search_text(query);
     let haystack = symbol_search_haystack(symbol);
     normalized_query.as_deref().is_some_and(|query| {
         base.contains(query) || settings::format_market_pair_symbol(symbol).contains(query)
@@ -2320,13 +2520,13 @@ fn symbol_matches_query(symbol: &str, query: &str) -> bool {
 
 fn symbol_query_rank(symbol: &str, query: &str) -> usize {
     let normalized_query = settings::normalize_symbol_token(query).unwrap_or_default();
-    let query_lower = query.trim().to_ascii_lowercase();
+    let query_lower = symbol_search_text(query.trim());
     let base = settings::normalize_symbol_token(symbol).unwrap_or_default();
-    let base_lower = base.to_ascii_lowercase();
-    let pair_lower = settings::format_market_pair_symbol(symbol).to_ascii_lowercase();
-    let key_lower = symbol.to_ascii_lowercase();
+    let base_lower = symbol_search_text(&base);
+    let pair_lower = symbol_search_text(&settings::format_market_pair_symbol(symbol));
+    let key_lower = symbol_search_text(symbol);
     let name_lower = symbol_name(&base)
-        .map(str::to_ascii_lowercase)
+        .map(symbol_search_text)
         .unwrap_or_default();
     let haystack = symbol_search_haystack(symbol);
 
@@ -2355,23 +2555,65 @@ fn symbol_search_haystack(symbol: &str) -> String {
     let pair = settings::format_market_pair_symbol(symbol);
     let source = settings::format_market_pair_source(symbol);
     let mut values = vec![
-        base.to_ascii_lowercase(),
-        pair.to_ascii_lowercase(),
-        pair.replace('/', "").to_ascii_lowercase(),
-        pair.replace('/', "-").to_ascii_lowercase(),
-        source.to_ascii_lowercase(),
-        symbol.to_ascii_lowercase(),
+        symbol_search_text(&base),
+        symbol_search_text(&pair),
+        symbol_search_text(&pair.replace('/', "")),
+        symbol_search_text(&pair.replace('/', "-")),
+        symbol_search_text(&source),
+        symbol_search_text(symbol),
     ];
     if let Some(metadata) = symbol_metadata(&base) {
-        values.push(metadata.name.to_ascii_lowercase());
+        values.push(symbol_search_text(metadata.name));
         values.extend(
             metadata
                 .aliases
                 .iter()
-                .map(|alias| alias.to_ascii_lowercase()),
+                .map(|alias| symbol_search_text(alias)),
         );
     }
     values.join(" ")
+}
+
+fn symbol_search_text(value: &str) -> String {
+    let mut folded = String::new();
+    for ch in value.to_lowercase().chars() {
+        if is_combining_mark(ch) {
+            continue;
+        }
+        folded.push(match ch {
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' | 'ǎ' | 'ạ' | 'ả' | 'ấ' | 'ầ'
+            | 'ẩ' | 'ẫ' | 'ậ' | 'ắ' | 'ằ' | 'ẳ' | 'ẵ' | 'ặ' => 'a',
+            'ç' | 'ć' | 'č' => 'c',
+            'ď' | 'đ' => 'd',
+            'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ě' | 'ẹ' | 'ẻ' | 'ẽ' | 'ế' | 'ề' | 'ể' | 'ễ' | 'ệ' => {
+                'e'
+            }
+            'ğ' | 'ǧ' => 'g',
+            'ì' | 'í' | 'î' | 'ï' | 'ī' | 'ı' | 'ị' | 'ỉ' | 'ĩ' => 'i',
+            'ñ' | 'ń' => 'n',
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ō' | 'ǒ' | 'ọ' | 'ỏ' | 'ố' | 'ồ' | 'ổ' | 'ỗ' | 'ộ'
+            | 'ớ' | 'ờ' | 'ở' | 'ỡ' | 'ợ' => 'o',
+            'ş' | 'ś' | 'š' => 's',
+            'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ụ' | 'ủ' | 'ũ' | 'ứ' | 'ừ' | 'ử' | 'ữ' | 'ự' => {
+                'u'
+            }
+            'ý' | 'ỳ' | 'ỵ' | 'ỷ' | 'ỹ' | 'ÿ' => 'y',
+            'ź' | 'ž' => 'z',
+            _ => ch,
+        });
+    }
+    folded
+}
+
+fn is_combining_mark(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{0300}'..='\u{036f}'
+            | '\u{1ab0}'..='\u{1aff}'
+            | '\u{1dc0}'..='\u{1dff}'
+            | '\u{20d0}'..='\u{20ff}'
+            | '\u{fe20}'..='\u{fe2f}'
+    )
 }
 
 fn symbol_metadata(symbol: &str) -> Option<&'static SymbolMetadata> {
@@ -2384,20 +2626,31 @@ fn symbol_name(symbol: &str) -> Option<&'static str> {
     symbol_metadata(symbol).map(|metadata| metadata.name)
 }
 
-fn format_symbol_option(symbol: &str) -> String {
+fn format_symbol_option(symbol: &str, locale: i18n::Locale) -> String {
     let base = settings::normalize_symbol_token(symbol).unwrap_or_default();
-    let pair = settings::format_market_pair_symbol(symbol);
+    let pair = i18n::ltr_isolate_for_locale(locale, &settings::format_market_pair_symbol(symbol));
     let source = settings::format_market_pair_source(symbol);
+    let source = if source.is_empty() {
+        source
+    } else {
+        i18n::ltr_isolate_for_locale(locale, &source)
+    };
     match symbol_name(&base) {
-        Some(name) if !source.is_empty() => format!("{pair} · {source} · {name}"),
-        Some(name) => format!("{pair} · {name}"),
+        Some(name) if !source.is_empty() => {
+            let name = i18n::ltr_isolate_for_locale(locale, name);
+            format!("{pair} · {source} · {name}")
+        }
+        Some(name) => {
+            let name = i18n::ltr_isolate_for_locale(locale, name);
+            format!("{pair} · {name}")
+        }
         None if !source.is_empty() => format!("{pair} · {source}"),
         None => pair,
     }
 }
 
-fn format_symbol_chip_label(symbol: &str) -> String {
-    settings::format_market_pair_symbol(symbol)
+fn format_symbol_chip_label(symbol: &str, locale: i18n::Locale) -> String {
+    i18n::ltr_isolate_for_locale(locale, &settings::format_market_pair_symbol(symbol))
 }
 
 const WIDGET_SYMBOL_CHIP_START_X: i32 = 17;
@@ -2460,7 +2713,9 @@ fn symbol_chip_width(label: &str) -> i32 {
 }
 
 fn symbol_chip_char_width(ch: char) -> i32 {
-    if ch.is_ascii_alphanumeric() {
+    if i18n::is_bidi_isolate_mark(ch) {
+        0
+    } else if ch.is_ascii_alphanumeric() {
         7
     } else if ch.is_ascii_whitespace() {
         4
@@ -2537,6 +2792,10 @@ pub(crate) fn refresh_settings_window(
     let primary_alert = feature_flags::ALERT_RULES_ENABLED
         .then(|| settings.alert_rules.first())
         .flatten();
+    let symbol_picker_was_open = ui.get_symbol_picker_open();
+    let symbol_picker_mode = ui.get_symbol_picker_mode();
+    let symbol_picker_replace_index = ui.get_symbol_picker_replace_index();
+    let symbol_picker_search_text = ui.get_symbol_picker_search_text().to_string();
     let fallback_symbols = collect_symbol_fallback_symbols(&store, plugin_catalog);
     if let Ok(mut state) = shared_symbol_catalog_state().lock() {
         state.fallback_symbols = sorted_symbol_values(
@@ -2549,6 +2808,7 @@ pub(crate) fn refresh_settings_window(
         );
     }
     let symbol_catalog_state = symbol_catalog_snapshot();
+    ui.set_rtl_layout(i18n::is_rtl(locale));
     ui.set_window_title_text(text.settings_title.into());
     ui.set_tab_widgets_text(text.tab_widgets.into());
     ui.set_tab_plugin_market_text(text.tab_plugin_market.into());
@@ -2602,7 +2862,8 @@ pub(crate) fn refresh_settings_window(
     ui.set_network_proxy_example_hint_text(text.network_proxy_example_hint.into());
     ui.set_network_proxy_help_text(text.network_proxy_help.into());
     ui.set_app_version_label_text(text.app_version.into());
-    ui.set_app_version_value_text(env!("CARGO_PKG_VERSION").into());
+    ui.set_app_version_value_text(app_version_value_text(locale).into());
+    ui.set_app_version_signature_text(app_version_signature_text(locale).into());
     ui.set_about_us_text(text.about_us.into());
     ui.set_icon_cache_text(text.icon_cache.into());
     ui.set_icon_cache_help_text(text.icon_cache_help.into());
@@ -2678,7 +2939,6 @@ pub(crate) fn refresh_settings_window(
     ui.set_appearance_settings_text(text.appearance_settings.into());
     ui.set_system_settings_text(text.system_settings.into());
     ui.set_settings_path_label_text(text.settings_path_label.into());
-    ui.set_provider_options(string_model(i18n::provider_options(locale)));
     ui.set_shortcut_options(string_model(i18n::shortcut_options(locale)));
     ui.set_theme_options(string_model(i18n::theme_options(locale)));
     ui.set_language_options(string_model(i18n::language_options(locale)));
@@ -2790,22 +3050,22 @@ pub(crate) fn refresh_settings_window(
     ui.set_default_symbol_values(owned_string_model(
         default_symbols
             .iter()
-            .map(|symbol| format_symbol_option(symbol))
+            .map(|symbol| format_symbol_option(symbol, locale))
             .collect(),
     ));
     ui.set_default_symbol_chip_values(owned_string_model(
         default_symbols
             .iter()
-            .map(|symbol| format_symbol_chip_label(symbol))
+            .map(|symbol| format_symbol_chip_label(symbol, locale))
             .collect(),
     ));
     let widget_symbol_values = widget_symbols
         .iter()
-        .map(|symbol| format_symbol_option(symbol))
+        .map(|symbol| format_symbol_option(symbol, locale))
         .collect::<Vec<_>>();
     let widget_symbol_chip_values = widget_symbols
         .iter()
-        .map(|symbol| format_symbol_chip_label(symbol))
+        .map(|symbol| format_symbol_chip_label(symbol, locale))
         .collect::<Vec<_>>();
     let (chip_x, chip_y, chip_width, add_x, add_y, status_y) =
         widget_symbol_chip_layout(&widget_symbol_chip_values);
@@ -2817,19 +3077,29 @@ pub(crate) fn refresh_settings_window(
     ui.set_widget_symbol_add_x(add_x);
     ui.set_widget_symbol_add_y(add_y);
     ui.set_widget_symbol_status_y(status_y);
-    ui.set_symbol_picker_open(false);
-    ui.set_symbol_picker_mode(SYMBOL_PICKER_MODE_WIDGET);
-    ui.set_symbol_picker_replace_index(-1);
-    ui.set_symbol_picker_search_text("".into());
-    ui.set_symbol_picker_candidate_options(owned_string_model(Vec::new()));
-    ui.set_symbol_picker_candidate_values(owned_string_model(Vec::new()));
-    ui.set_symbol_picker_candidate_index(0);
-    ui.set_symbol_picker_title_text(
-        symbol_picker_title_text(SYMBOL_PICKER_MODE_WIDGET, locale).into(),
-    );
-    ui.set_symbol_picker_status_text("".into());
-    ui.set_symbol_picker_confirm_text(symbol_picker_confirm_text(locale).into());
-    ui.set_symbol_picker_cancel_text(symbol_picker_cancel_text(locale).into());
+    if symbol_picker_was_open {
+        ui.set_symbol_picker_open(true);
+        ui.set_symbol_picker_mode(symbol_picker_mode);
+        ui.set_symbol_picker_replace_index(symbol_picker_replace_index);
+        ui.set_symbol_picker_search_text(symbol_picker_search_text.into());
+        ui.set_symbol_picker_confirm_text(symbol_picker_confirm_text(locale).into());
+        ui.set_symbol_picker_cancel_text(symbol_picker_cancel_text(locale).into());
+        refresh_symbol_picker_models_from_ui(ui, &symbol_catalog_state, locale);
+    } else {
+        ui.set_symbol_picker_open(false);
+        ui.set_symbol_picker_mode(SYMBOL_PICKER_MODE_WIDGET);
+        ui.set_symbol_picker_replace_index(-1);
+        ui.set_symbol_picker_search_text("".into());
+        ui.set_symbol_picker_candidate_options(owned_string_model(Vec::new()));
+        ui.set_symbol_picker_candidate_values(owned_string_model(Vec::new()));
+        ui.set_symbol_picker_candidate_index(0);
+        ui.set_symbol_picker_title_text(
+            symbol_picker_title_text(SYMBOL_PICKER_MODE_WIDGET, locale).into(),
+        );
+        ui.set_symbol_picker_status_text("".into());
+        ui.set_symbol_picker_confirm_text(symbol_picker_confirm_text(locale).into());
+        ui.set_symbol_picker_cancel_text(symbol_picker_cancel_text(locale).into());
+    }
     ui.set_default_symbol_status_text(
         default_symbol_status_text(
             default_symbols.len(),
@@ -2856,6 +3126,7 @@ pub(crate) fn refresh_settings_window(
         &symbol_catalog_state,
         &settings::enabled_market_sources(&settings),
         Some(alert_symbol.as_str()),
+        locale,
     );
     ui.set_alert_condition_index(
         primary_alert
@@ -2877,7 +3148,9 @@ pub(crate) fn refresh_settings_window(
     ui.set_tray_hover_display_enabled(settings.tray_hover_display_enabled);
     ui.set_network_proxy_enabled(settings.network_proxy_enabled);
     ui.set_network_proxy_url_input_text(settings.network_proxy_url.clone().into());
-    ui.set_settings_path_text(state_path.display().to_string().into());
+    ui.set_settings_path_text(
+        i18n::ltr_isolate_for_locale(locale, &state_path.display().to_string()).into(),
+    );
     let status = status_override
         .filter(|status| !status.trim().is_empty())
         .unwrap_or(if symbol_catalog_state.fallback_only {
@@ -2941,8 +3214,14 @@ fn localized_default_widget_name(
 }
 
 fn parse_default_widget_name(raw: &str, widget_type: WidgetType) -> Option<u64> {
-    let prefix = i18n::widget_title(i18n::Locale::En, widget_text(widget_type));
-    raw.trim().strip_prefix(&format!("{prefix} "))?.parse().ok()
+    let normalized = i18n::strip_bidi_isolate_marks(raw.trim());
+    for locale in i18n::Locale::ALL {
+        let prefix = i18n::widget_title(locale, widget_text(widget_type));
+        if let Some(number) = normalized.strip_prefix(&format!("{prefix} ")) {
+            return number.parse().ok();
+        }
+    }
+    None
 }
 
 pub(crate) fn normalize_widget_name(
@@ -3218,68 +3497,43 @@ fn widget_definitions_from_optional_catalog(
 }
 
 pub(crate) fn symbols_help_text(min: usize, max: usize, locale: i18n::Locale) -> String {
-    match locale {
-        i18n::Locale::ZhHans if min == max => {
-            format!("必须选择 {max} 个交易对")
-        }
-        i18n::Locale::ZhHans => format!("最多选择 {max} 个交易对"),
-        i18n::Locale::En if min == max => {
-            format!("Exactly {max} pairs")
-        }
-        i18n::Locale::En => format!("Up to {max} pairs"),
-    }
+    i18n::symbols_help_text(locale, min, max)
 }
 
 fn symbol_search_placeholder(locale: i18n::Locale) -> &'static str {
-    match locale {
-        i18n::Locale::ZhHans => "搜索代码、名称或 BTCUSDT",
-        i18n::Locale::En => "Search pair, name, or BTCUSDT",
-    }
+    i18n::symbol_search_placeholder(locale)
+}
+
+fn app_version_value_text(locale: i18n::Locale) -> String {
+    i18n::ltr_isolate_for_locale(locale, env!("CARGO_PKG_VERSION"))
+}
+
+fn app_version_signature_text(locale: i18n::Locale) -> String {
+    i18n::ltr_isolate_for_locale(locale, &format!("v{}", env!("CARGO_PKG_VERSION")))
 }
 
 fn symbol_picker_title_text(mode: i32, locale: i18n::Locale) -> &'static str {
-    match (mode, locale) {
-        (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::ZhHans) => "添加新建默认交易对",
-        (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::En) => "Add new-widget default pair",
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) => "更换新建默认交易对",
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) => "Replace new-widget default pair",
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) => "更换当前组件交易对",
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) => "Replace current widget pair",
-        (_, i18n::Locale::ZhHans) => "添加当前组件交易对",
-        (_, i18n::Locale::En) => "Add current widget pair",
-    }
+    i18n::symbol_picker_title_text(locale, symbol_picker_copy_mode(mode))
 }
 
 fn symbol_picker_confirm_text(locale: i18n::Locale) -> &'static str {
-    match locale {
-        i18n::Locale::ZhHans => "确定",
-        i18n::Locale::En => "Confirm",
-    }
+    i18n::symbol_picker_confirm_text(locale)
 }
 
 fn symbol_picker_cancel_text(locale: i18n::Locale) -> &'static str {
-    match locale {
-        i18n::Locale::ZhHans => "取消",
-        i18n::Locale::En => "Cancel",
-    }
+    i18n::symbol_picker_cancel_text(locale)
 }
 
 fn symbol_picker_empty_status_text(mode: i32, locale: i18n::Locale) -> &'static str {
-    match (mode, locale) {
-        (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::ZhHans) => "没有可添加的新建默认交易对",
-        (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::En) => {
-            "No new-widget default pairs are available"
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) => "没有可更换的新建默认交易对",
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) => {
-            "No new-widget default pairs are available to replace"
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) => "没有可更换的当前组件交易对",
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) => {
-            "No current widget pairs are available to replace"
-        }
-        (_, i18n::Locale::ZhHans) => "没有可添加的当前组件交易对",
-        (_, i18n::Locale::En) => "No current widget pairs are available",
+    i18n::symbol_picker_empty_status_text(locale, symbol_picker_copy_mode(mode))
+}
+
+fn symbol_picker_copy_mode(mode: i32) -> i18n::SymbolPickerCopyMode {
+    match mode {
+        SYMBOL_PICKER_MODE_DEFAULT => i18n::SymbolPickerCopyMode::DefaultAdd,
+        SYMBOL_PICKER_MODE_DEFAULT_REPLACE => i18n::SymbolPickerCopyMode::DefaultReplace,
+        SYMBOL_PICKER_MODE_WIDGET_REPLACE => i18n::SymbolPickerCopyMode::WidgetReplace,
+        _ => i18n::SymbolPickerCopyMode::WidgetAdd,
     }
 }
 
@@ -3292,136 +3546,26 @@ fn symbol_picker_status_text(
     fallback_only: bool,
     locale: i18n::Locale,
 ) -> String {
-    match (mode, locale) {
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans)
-            if !query.trim().is_empty() && candidate_count == 0 =>
-        {
-            "没有匹配交易对".to_string()
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) if candidate_count == 0 => {
-            "没有可更换的交易对".to_string()
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) if fallback_only => {
-            format!("候选目录暂不可用，已使用本地候选，找到 {candidate_count} 个")
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::ZhHans) => {
-            format!("找到 {candidate_count} 个可更换交易对，只影响以后新建的小组件")
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans)
-            if !query.trim().is_empty() && candidate_count == 0 =>
-        {
-            "没有匹配交易对".to_string()
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) if candidate_count == 0 => {
-            "没有可更换的交易对".to_string()
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) if fallback_only => {
-            format!("候选目录暂不可用，已使用本地候选，找到 {candidate_count} 个")
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::ZhHans) => {
-            format!("找到 {candidate_count} 个可更换交易对，会立即影响当前小组件")
-        }
-        (_, i18n::Locale::ZhHans) if selected_count >= max => {
-            format!("已选 {selected_count}/{max}，已达上限，先移除一个交易对")
-        }
-        (_, i18n::Locale::ZhHans) if !query.trim().is_empty() && candidate_count == 0 => {
-            format!("已选 {selected_count}/{max}，没有匹配交易对")
-        }
-        (_, i18n::Locale::ZhHans) if candidate_count == 0 => {
-            format!("已选 {selected_count}/{max}，没有可添加的交易对")
-        }
-        (_, i18n::Locale::ZhHans) if fallback_only => {
-            format!("候选目录暂不可用，已使用本地候选，找到 {candidate_count} 个")
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::ZhHans) => {
-            format!("找到 {candidate_count} 个可添加交易对，只影响以后新建的小组件")
-        }
-        (_, i18n::Locale::ZhHans) => {
-            format!("找到 {candidate_count} 个可添加交易对，会立即影响当前小组件")
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En)
-            if !query.trim().is_empty() && candidate_count == 0 =>
-        {
-            "No matching pairs".to_string()
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) if candidate_count == 0 => {
-            "No pairs available to replace".to_string()
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) if fallback_only => {
-            format!("Catalog is unavailable; using local candidates. Found {candidate_count}")
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT_REPLACE, i18n::Locale::En) => {
-            format!("Found {candidate_count} replacement pairs. Only affects newly created widgets")
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En)
-            if !query.trim().is_empty() && candidate_count == 0 =>
-        {
-            "No matching pairs".to_string()
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) if candidate_count == 0 => {
-            "No pairs available to replace".to_string()
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) if fallback_only => {
-            format!("Catalog is unavailable; using local candidates. Found {candidate_count}")
-        }
-        (SYMBOL_PICKER_MODE_WIDGET_REPLACE, i18n::Locale::En) => {
-            format!("Found {candidate_count} replacement pairs. Applies to this widget immediately")
-        }
-        (_, i18n::Locale::En) if selected_count >= max => {
-            format!("Selected {selected_count}/{max}. Limit reached; remove one pair first")
-        }
-        (_, i18n::Locale::En) if !query.trim().is_empty() && candidate_count == 0 => {
-            format!("Selected {selected_count}/{max}. No matching pairs")
-        }
-        (_, i18n::Locale::En) if candidate_count == 0 => {
-            format!("Selected {selected_count}/{max}. No pairs available to add")
-        }
-        (_, i18n::Locale::En) if fallback_only => {
-            format!("Catalog is unavailable; using local candidates. Found {candidate_count}")
-        }
-        (SYMBOL_PICKER_MODE_DEFAULT, i18n::Locale::En) => {
-            format!("Found {candidate_count} pairs. Only affects newly created widgets")
-        }
-        (_, i18n::Locale::En) => {
-            format!("Found {candidate_count} pairs. Applies to this widget immediately")
-        }
-    }
+    i18n::symbol_picker_status_text(
+        locale,
+        symbol_picker_copy_mode(mode),
+        selected_count,
+        max,
+        candidate_count,
+        query,
+        fallback_only,
+    )
 }
 
 fn widget_symbol_status_text(
     selected_count: usize,
-    min: usize,
+    _min: usize,
     max: usize,
-    candidate_count: usize,
-    query: &str,
+    _candidate_count: usize,
+    _query: &str,
     locale: i18n::Locale,
 ) -> String {
-    match locale {
-        i18n::Locale::ZhHans if selected_count >= max => {
-            format!("已选择 {selected_count}/{max}")
-        }
-        i18n::Locale::ZhHans if !query.trim().is_empty() && candidate_count == 0 => {
-            format!("已选择 {selected_count}/{max}")
-        }
-        i18n::Locale::ZhHans if selected_count <= min => {
-            format!("已选择 {selected_count}/{max}")
-        }
-        i18n::Locale::ZhHans => {
-            format!("已选择 {selected_count}/{max}")
-        }
-        i18n::Locale::En if selected_count >= max => {
-            format!("Selected {selected_count}/{max}")
-        }
-        i18n::Locale::En if !query.trim().is_empty() && candidate_count == 0 => {
-            format!("Selected {selected_count}/{max}")
-        }
-        i18n::Locale::En if selected_count <= min => {
-            format!("Selected {selected_count}/{max}")
-        }
-        i18n::Locale::En => {
-            format!("Selected {selected_count}/{max}")
-        }
-    }
+    i18n::widget_symbol_status_text(locale, selected_count, max)
 }
 
 fn default_symbol_status_text(
@@ -3431,26 +3575,7 @@ fn default_symbol_status_text(
     query: &str,
     locale: i18n::Locale,
 ) -> String {
-    match locale {
-        i18n::Locale::ZhHans if selected_count >= max => {
-            format!("已选 {selected_count}/{max}，新建小组件默认交易对已满")
-        }
-        i18n::Locale::ZhHans if !query.trim().is_empty() && candidate_count == 0 => {
-            format!("已选 {selected_count}/{max}，没有匹配交易对")
-        }
-        i18n::Locale::ZhHans => {
-            format!("已选 {selected_count}/{max}，只影响以后新建的小组件")
-        }
-        i18n::Locale::En if selected_count >= max => {
-            format!("Selected {selected_count}/{max}. New-widget defaults are full")
-        }
-        i18n::Locale::En if !query.trim().is_empty() && candidate_count == 0 => {
-            format!("Selected {selected_count}/{max}. No matching pairs")
-        }
-        i18n::Locale::En => {
-            format!("Selected {selected_count}/{max}. Only affects newly created widgets")
-        }
-    }
+    i18n::default_symbol_status_text(locale, selected_count, max, candidate_count, query)
 }
 
 fn format_symbols_input(symbols: &[String]) -> String {
@@ -3519,13 +3644,23 @@ mod tests {
     }
 
     fn settings_window_ui_source() -> String {
-        std::fs::read_to_string(
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("ui")
-                .join("settings-window.slint"),
-        )
-        .unwrap()
-        .replace("\r\n", "\n")
+        ui_source("settings-window.slint")
+    }
+
+    fn settings_window_rs_source() -> String {
+        include_str!("settings_window.rs").replace("\r\n", "\n")
+    }
+
+    fn ui_source(file_name: &str) -> String {
+        std::fs::read_to_string(ui_source_path(file_name))
+            .unwrap()
+            .replace("\r\n", "\n")
+    }
+
+    fn ui_source_path(file_name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("ui")
+            .join(file_name)
     }
 
     #[test]
@@ -3576,6 +3711,195 @@ mod tests {
     }
 
     #[test]
+    fn settings_window_shared_text_controls_follow_rtl_layout() {
+        let source = settings_window_ui_source();
+        assert!(
+            source.contains("in property <bool> rtl-layout: false;"),
+            "settings window should expose an RTL layout flag"
+        );
+
+        for component in [
+            "SettingsNavItem",
+            "PanelTitle",
+            "SettingSectionTitle",
+            "SettingLabel",
+        ] {
+            let instance_count = source.matches(&format!("{component} {{")).count();
+            let bound_count = source
+                .matches(&format!(
+                    "{component} {{\n                rtl-layout: root.rtl-layout;"
+                ))
+                .count()
+                + source
+                    .matches(&format!(
+                        "{component} {{\n                    rtl-layout: root.rtl-layout;"
+                    ))
+                    .count()
+                + source
+                    .matches(&format!(
+                        "{component} {{\n                        rtl-layout: root.rtl-layout;"
+                    ))
+                    .count();
+
+            assert_eq!(
+                bound_count, instance_count,
+                "{component} instances should bind root RTL layout"
+            );
+        }
+
+        for (index, (start, _)) in source.match_indices("LineEdit {").enumerate() {
+            let block = &source[start..source.len().min(start + 500)];
+            assert!(
+                block.contains("horizontal-alignment: root.rtl-layout ? right : left;"),
+                "LineEdit {} should align text with the active writing direction",
+                index + 1
+            );
+        }
+    }
+
+    #[test]
+    fn slint_user_facing_text_literals_are_limited_to_non_localized_tokens() {
+        let allowed = [
+            "",
+            " ",
+            " · ",
+            "-",
+            "+",
+            "+ ",
+            "%",
+            ">",
+            "x",
+            "X",
+            "v",
+            "HUD",
+            "SLINT",
+            "BTC",
+            "ETH",
+            "XRP",
+            "BTC/USDT",
+            "Bin",
+            "Binance",
+            "Coinbase",
+            "OK",
+            "OKX",
+            "Hyperliquid",
+            "3s",
+            "1.06",
+            "2.1",
+            "2.4k",
+            "136",
+            "642",
+            "3,583",
+            "2620",
+            "106800",
+            "106k",
+            "+0.03%",
+            "+0.84%",
+            "+0.84% 24h",
+            "+1.85%",
+            "-1.36%",
+            "-2.93%",
+            "crypto-widget/crypto-hud",
+            "crypto-hud-keepalive",
+        ];
+
+        for (file_name, source) in slint_ui_sources() {
+            for (line_index, line) in source.lines().enumerate() {
+                if !is_user_facing_text_line(line) {
+                    continue;
+                }
+                for literal in quoted_literals(line) {
+                    assert!(
+                        allowed.contains(&literal.as_str()),
+                        "unexpected visible text literal in {file_name} line {}: {:?}",
+                        line_index + 1,
+                        literal
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tray_menu_exposes_localized_show_widgets_action() {
+        let source = slint_ui_sources()
+            .into_iter()
+            .find_map(|(file_name, source)| (file_name == "shell-windows.slint").then_some(source))
+            .expect("shell-windows.slint should be included in UI sources");
+
+        assert!(
+            source.contains("in property <string> tray-show-widgets-text;"),
+            "tray menu should receive localized show-widgets text from Rust"
+        );
+        assert!(
+            source.contains("title: root.tray-show-widgets-text;"),
+            "tray menu should render the localized show-widgets label"
+        );
+        assert!(
+            source.contains("activated => { root.show-widgets(); }"),
+            "tray menu should call the existing show-widgets callback"
+        );
+    }
+
+    fn slint_ui_sources() -> Vec<(String, String)> {
+        let ui_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui");
+        let mut sources = std::fs::read_dir(&ui_dir)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", ui_dir.display()))
+            .filter_map(|entry| {
+                let path = entry.ok()?.path();
+                (path.extension().and_then(|extension| extension.to_str()) == Some("slint"))
+                    .then_some(path)
+            })
+            .map(|path| {
+                let file_name = path
+                    .file_name()
+                    .and_then(|file_name| file_name.to_str())
+                    .unwrap()
+                    .to_string();
+                let source = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+                    .replace("\r\n", "\n");
+                (file_name, source)
+            })
+            .collect::<Vec<_>>();
+        sources.sort_by(|left, right| left.0.cmp(&right.0));
+        sources
+    }
+
+    fn is_user_facing_text_line(line: &str) -> bool {
+        line.contains("text:")
+            || line.contains("placeholder-text:")
+            || line.contains("title:")
+            || line.contains("tooltip:")
+    }
+
+    fn quoted_literals(line: &str) -> Vec<String> {
+        let mut literals = Vec::new();
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch != '"' {
+                continue;
+            }
+            let mut literal = String::new();
+            let mut escaped = false;
+            for value in chars.by_ref() {
+                if escaped {
+                    literal.push(value);
+                    escaped = false;
+                } else if value == '\\' {
+                    escaped = true;
+                } else if value == '"' {
+                    break;
+                } else {
+                    literal.push(value);
+                }
+            }
+            literals.push(literal);
+        }
+        literals
+    }
+
+    #[test]
     fn plugin_market_design_previews_do_not_show_behind_image_thumbnails() {
         let source = settings_window_ui_source();
 
@@ -3589,6 +3913,24 @@ mod tests {
             assert!(
                 !source.contains(&format!("visible: plugin.preview_kind == {preview_kind};")),
                 "design preview kind {preview_kind} should not render unconditionally behind thumbnails"
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_market_text_rows_follow_rtl_layout() {
+        let source = settings_window_ui_source();
+
+        for anchor in [
+            "text: plugin.title;",
+            "text: plugin.description;",
+            "text: plugin.usage;",
+            "x: 324px;\n                        y: 67px;\n                        width: parent.width - 438px;\n                        text: plugin.status;",
+        ] {
+            let block = block_before_anchor(&source, "Text {", anchor);
+            assert!(
+                block.contains("horizontal-alignment: root.rtl-layout ? right : left;"),
+                "plugin market text block should mirror alignment for RTL: {anchor}"
             );
         }
     }
@@ -3901,6 +4243,222 @@ mod tests {
     }
 
     #[test]
+    fn my_widgets_list_text_rows_follow_rtl_layout() {
+        let source = settings_window_ui_source();
+
+        for anchor in [
+            "text: root.my-widgets-text;",
+            "text: widget_label;",
+            "text: root.widget-list-detail-options[index];",
+            "text: root.delete-widget-text;",
+        ] {
+            let block = block_before_anchor(&source, "Text {", anchor);
+            assert!(
+                block.contains("horizontal-alignment: root.rtl-layout ? right : left;"),
+                "my widgets text block should mirror alignment for RTL: {anchor}"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_widget_detail_text_rows_follow_rtl_layout() {
+        let source = settings_window_ui_source();
+
+        for anchor in [
+            "text: root.selected-widget-text + \" \" + root.widget-name-input-text;",
+            "text: root.selected-widget-description-text;",
+            "text: root.symbols-text;",
+            "text: root.widget-symbol-status-text;",
+            "text: root.app-settings-text;",
+            "text: root.advanced-options-text;",
+        ] {
+            let block = block_before_anchor(&source, "Text {", anchor);
+            assert!(
+                block.contains("horizontal-alignment: root.rtl-layout ? right : left;"),
+                "selected widget detail text block should mirror alignment for RTL: {anchor}"
+            );
+        }
+    }
+
+    #[test]
+    fn localized_text_rows_leave_descender_padding() {
+        let source = settings_window_ui_source();
+
+        for (anchor, required) in [
+            (
+                "text: widget_label;",
+                ["height: 16px;", "vertical-alignment: center;"],
+            ),
+            (
+                "text: root.widget-list-detail-options[index];",
+                ["height: 14px;", "vertical-alignment: center;"],
+            ),
+            (
+                "text: root.symbols-text;",
+                ["height: 16px;", "vertical-alignment: center;"],
+            ),
+            (
+                "text: root.widget-symbol-status-text;",
+                ["height: 14px;", "vertical-alignment: center;"],
+            ),
+            (
+                "text: root.app-settings-text;",
+                ["height: 16px;", "vertical-alignment: center;"],
+            ),
+            (
+                "text: root.advanced-options-text;",
+                ["height: 16px;", "vertical-alignment: center;"],
+            ),
+            (
+                "text: root.app-version-label-text;",
+                ["height: 15px;", "vertical-alignment: center;"],
+            ),
+            (
+                "text: root.app-version-value-text;",
+                ["height: 15px;", "vertical-alignment: center;"],
+            ),
+        ] {
+            let block = block_before_anchor(&source, "Text {", anchor);
+            for expected in required {
+                assert!(
+                    block.contains(expected),
+                    "localized text row should leave descender padding near {anchor}: {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shared_text_controls_leave_descender_padding() {
+        let source = ui_source("shared-controls.slint");
+
+        for (anchor, required) in [
+            (
+                "text: root.text;",
+                ["height: 20px;", "vertical-alignment: center;"],
+            ),
+            ("text: root.title;", ["height: 18px;", "overflow: elide;"]),
+            (
+                "text: root.subtitle;",
+                ["height: 14px;", "overflow: elide;"],
+            ),
+            ("text: root.label;", ["height: 16px;", "overflow: elide;"]),
+            ("text: root.help;", ["height: 15px;", "overflow: elide;"]),
+        ] {
+            let block = block_before_anchor(&source, "Text {", anchor);
+            for expected in required {
+                assert!(
+                    block.contains(expected),
+                    "shared localized text control should leave descender padding near {anchor}: {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn network_proxy_text_rows_follow_rtl_layout() {
+        let source = settings_window_ui_source();
+
+        for anchor in [
+            "text: root.network-proxy-enabled-text;",
+            "text: root.network-proxy-help-text;",
+            "text: root.network-proxy-url-text;",
+            "text: root.network-proxy-example-hint-text;",
+        ] {
+            let block = block_before_anchor(&source, "Text {", anchor);
+            assert!(
+                block.contains("horizontal-alignment: root.rtl-layout ? right : left;"),
+                "network proxy text block should mirror alignment for RTL: {anchor}"
+            );
+        }
+    }
+
+    #[test]
+    fn system_app_info_labels_follow_rtl_layout() {
+        let source = settings_window_ui_source();
+
+        for anchor in [
+            "text: root.app-version-label-text;",
+            "text: root.about-us-text;",
+        ] {
+            let block = block_before_anchor(&source, "Text {", anchor);
+            assert!(
+                block.contains("horizontal-alignment: root.rtl-layout ? right : left;"),
+                "system app info label should mirror alignment for RTL: {anchor}"
+            );
+        }
+    }
+
+    #[test]
+    fn app_signature_version_keeps_prefix_inside_ltr_isolate() {
+        let source = settings_window_ui_source();
+        let signature = block_after_anchor(&source, "GithubProjectSignature {", "");
+
+        assert!(source.contains("in property <string> app-version-signature-text;"));
+        assert!(signature.contains("version-text: root.app-version-signature-text;"));
+        assert!(
+            !source.contains("text: \"v\" + root.version-text;"),
+            "the visible v prefix should be generated before bidi isolation"
+        );
+        assert_eq!(
+            app_version_value_text(i18n::Locale::Ar),
+            format!("\u{2066}{}\u{2069}", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            app_version_signature_text(i18n::Locale::Ar),
+            format!("\u{2066}v{}\u{2069}", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn symbol_picker_text_rows_follow_rtl_layout() {
+        let source = settings_window_ui_source();
+
+        for anchor in [
+            "text: root.symbol-picker-title-text;",
+            "text: root.symbol-picker-status-text;",
+        ] {
+            let block = block_before_anchor(&source, "Text {", anchor);
+            assert!(
+                block.contains("horizontal-alignment: root.rtl-layout ? right : left;"),
+                "symbol picker text block should mirror alignment for RTL: {anchor}"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_refresh_preserves_open_symbol_picker() {
+        let source = settings_window_rs_source();
+        let refresh_fn = source
+            .split("pub(crate) fn refresh_settings_window(")
+            .nth(1)
+            .unwrap()
+            .split("pub(crate) fn widget_type_title")
+            .next()
+            .unwrap();
+
+        for required in [
+            "let symbol_picker_was_open = ui.get_symbol_picker_open();",
+            "let symbol_picker_mode = ui.get_symbol_picker_mode();",
+            "let symbol_picker_replace_index = ui.get_symbol_picker_replace_index();",
+            "let symbol_picker_search_text = ui.get_symbol_picker_search_text().to_string();",
+            "if symbol_picker_was_open {",
+            "ui.set_symbol_picker_open(true);",
+            "ui.set_symbol_picker_mode(symbol_picker_mode);",
+            "ui.set_symbol_picker_replace_index(symbol_picker_replace_index);",
+            "ui.set_symbol_picker_search_text(symbol_picker_search_text.into());",
+            "ui.set_symbol_picker_confirm_text(symbol_picker_confirm_text(locale).into());",
+            "ui.set_symbol_picker_cancel_text(symbol_picker_cancel_text(locale).into());",
+            "refresh_symbol_picker_models_from_ui(ui, &symbol_catalog_state, locale);",
+        ] {
+            assert!(
+                refresh_fn.contains(required),
+                "settings refresh should preserve and relocalize the open symbol picker: {required}"
+            );
+        }
+    }
+
+    #[test]
     fn widget_symbol_chip_click_replaces_and_x_removes() {
         let source = settings_window_ui_source();
         let chips = block_after_anchor(
@@ -4002,8 +4560,26 @@ mod tests {
 
     #[test]
     fn widget_symbol_chip_label_uses_pair_display() {
-        assert_eq!(format_symbol_chip_label("BTC"), "BTC/USDT");
-        assert_eq!(format_symbol_chip_label("eth/usdt"), "ETH/USDT");
+        assert_eq!(
+            format_symbol_chip_label("BTC", i18n::Locale::En),
+            "BTC/USDT"
+        );
+        assert_eq!(
+            format_symbol_chip_label("eth/usdt", i18n::Locale::En),
+            "ETH/USDT"
+        );
+        assert_eq!(
+            format_symbol_chip_label("BTC", i18n::Locale::Ar),
+            "\u{2066}BTC/USDT\u{2069}"
+        );
+        assert_eq!(
+            format_symbol_option("binance:spot:BTC/USDT", i18n::Locale::Ar),
+            "\u{2066}BTC/USDT\u{2069} · \u{2066}Binance\u{2069} · \u{2066}Bitcoin\u{2069}"
+        );
+        assert_eq!(
+            symbol_chip_width("BTC/USDT"),
+            symbol_chip_width("\u{2066}BTC/USDT\u{2069}")
+        );
     }
 
     #[test]
@@ -4017,6 +4593,20 @@ mod tests {
         assert_eq!(rule.condition, AlertCondition::ChangePercentAbove);
         assert_eq!(rule.threshold, 3.5);
         assert!(rule.enabled);
+    }
+
+    #[test]
+    fn primary_alert_input_accepts_rtl_isolated_symbol_display() {
+        let rule = primary_alert_rule_from_input(
+            true,
+            "\u{2066}BTC/USDT\u{2069} · \u{2066}Coinbase\u{2069} · \u{2066}Bitcoin\u{2069}",
+            0,
+            "100000",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(rule.symbol, "coinbase:spot:BTC/USDT");
     }
 
     #[test]
@@ -4045,8 +4635,32 @@ mod tests {
             normalized_network_proxy_input(true, "socks5://127.0.0.1:1080").unwrap(),
             "socks5://127.0.0.1:1080"
         );
-        assert!(normalized_network_proxy_input(true, "  ").is_err());
-        assert!(normalized_network_proxy_input(true, "ftp://127.0.0.1:21").is_err());
+        assert_eq!(
+            normalized_network_proxy_input(true, "  ").unwrap_err(),
+            NetworkProxyInputError::EmptyAddress
+        );
+        assert!(matches!(
+            normalized_network_proxy_input(true, "ftp://127.0.0.1:21").unwrap_err(),
+            NetworkProxyInputError::InvalidProxy(_)
+        ));
+    }
+
+    #[test]
+    fn empty_network_proxy_status_uses_localized_detail() {
+        let error = normalized_network_proxy_input(true, "  ").unwrap_err();
+
+        assert_eq!(
+            error.status_message(i18n::Locale::ZhHans),
+            "网络代理无效：请输入代理地址"
+        );
+        assert_eq!(
+            error.status_message(i18n::Locale::Ar),
+            "وكيل الشبكة غير صالح: أدخل عنوان الوكيل"
+        );
+        assert!(
+            !error.status_message(i18n::Locale::Ar).contains('\u{2066}'),
+            "localized Arabic detail should not be wrapped as an LTR technical error"
+        );
     }
 
     #[test]
@@ -4494,6 +5108,12 @@ mod tests {
                     catalog_entry(
                         settings::MarketDataSource::Binance,
                         settings::MarketType::Spot,
+                        "BNB",
+                        "USDT",
+                    ),
+                    catalog_entry(
+                        settings::MarketDataSource::Binance,
+                        settings::MarketType::Spot,
                         "BCH",
                         "USDT",
                     ),
@@ -4507,6 +5127,12 @@ mod tests {
                         settings::MarketDataSource::Binance,
                         settings::MarketType::Spot,
                         "ETH",
+                        "USDT",
+                    ),
+                    catalog_entry(
+                        settings::MarketDataSource::Binance,
+                        settings::MarketType::Spot,
+                        "LTC",
                         "USDT",
                     ),
                 ],
@@ -4532,8 +5158,68 @@ mod tests {
             vec!["binance:spot:DOGE/USDT"]
         );
         assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "bitcóin"),
+            vec!["binance:spot:BTC/USDT", "binance:spot:BCH/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "bitkoin"),
+            vec!["binance:spot:BTC/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "moneda binance"),
+            vec!["binance:spot:BNB/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "moeda binance"),
+            vec!["binance:spot:BNB/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "koin binance"),
+            vec!["binance:spot:BNB/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "đồng binance"),
+            vec!["binance:spot:BNB/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "dong binance"),
+            vec!["binance:spot:BNB/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "binance coini"),
+            vec!["binance:spot:BNB/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "BİNANCE COİNİ"),
+            vec!["binance:spot:BNB/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "etereo"),
+            vec!["binance:spot:ETH/USDT"]
+        );
+        assert_eq!(
             symbol_pick_options_with_query(&state, &sources, Vec::new(), "狗"),
             vec!["binance:spot:DOGE/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "БИТКОИН"),
+            vec!["binance:spot:BTC/USDT", "binance:spot:BCH/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "イーサ"),
+            vec!["binance:spot:ETH/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "도지"),
+            vec!["binance:spot:DOGE/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "إيثريوم"),
+            vec!["binance:spot:ETH/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options_with_query(&state, &sources, Vec::new(), "萊特幣"),
+            vec!["binance:spot:LTC/USDT"]
         );
     }
 
@@ -4598,6 +5284,58 @@ mod tests {
         assert!(widget_visibility_options(&store).is_empty());
         assert!(widget_preview_kind_options(&store).is_empty());
         assert!(widget_scale_options(&store, &catalog).is_empty());
+    }
+
+    #[test]
+    fn custom_widget_display_names_preserve_user_text_in_every_locale() {
+        let mut widget = test_widget(
+            "quote-board-7",
+            WidgetType::QuoteBoard.plugin_id(),
+            vec!["BTC"],
+        );
+        widget.name = "My Desk Alpha".to_string();
+
+        assert_eq!(
+            widget_display_name(&widget, 0, i18n::Locale::Ar),
+            "My Desk Alpha"
+        );
+        assert_eq!(
+            widget_display_name(&widget, 0, i18n::Locale::ZhHans),
+            "My Desk Alpha"
+        );
+
+        widget.name = "Quote Board 7".to_string();
+        assert_eq!(
+            widget_display_name(&widget, 0, i18n::Locale::Ar),
+            "لوحة الأسعار \u{2066}7\u{2069}"
+        );
+    }
+
+    #[test]
+    fn custom_widget_name_input_preserves_user_text_in_every_locale() {
+        for (locale, input) in [
+            (i18n::Locale::ZhHans, "我的交易桌 Alpha"),
+            (i18n::Locale::ZhHant, "我的交易桌 Alpha"),
+            (i18n::Locale::Ar, "مكتبي Alpha"),
+            (i18n::Locale::En, "My Desk Alpha"),
+        ] {
+            assert_eq!(
+                normalize_widget_name(input, WidgetType::QuoteBoard, 7, locale),
+                input,
+                "custom widget names should be stored exactly as user text for {locale:?}"
+            );
+        }
+
+        assert_eq!(
+            normalize_widget_name(
+                "لوحة الأسعار \u{2066}7\u{2069}",
+                WidgetType::QuoteBoard,
+                7,
+                i18n::Locale::Ar
+            ),
+            "Quote Board 7",
+            "localized default names should still normalize to the stable saved default"
+        );
     }
 
     #[test]

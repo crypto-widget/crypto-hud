@@ -10,8 +10,8 @@ use settings::{AppSettings, LayoutStore, WidgetInstance};
 use slint::{PhysicalPosition, Timer, TimerMode, WindowPosition};
 
 use crate::{
-    notifications, shortcuts, widget_host::request_widget_redraws, widget_host::WidgetRuntime,
-    AppTray,
+    i18n, notifications, shortcuts, widget_host::request_widget_redraws,
+    widget_host::WidgetRuntime, AppTray,
 };
 
 const DEFAULT_DESKTOP_WIDTH: i32 = 1920;
@@ -509,10 +509,13 @@ fn is_widget_shell_window_title(title: &str) -> bool {
 
 #[cfg(windows)]
 fn is_settings_window_title(title: &str) -> bool {
+    let normalized_title = i18n::strip_bidi_isolate_marks(title);
     matches!(
-        title,
-        "Crypto HUD" | "Crypto HUD Settings" | "Crypto HUD 设置"
-    )
+        normalized_title.as_str(),
+        "Crypto HUD Settings" | "Crypto HUD 设置"
+    ) || i18n::Locale::ALL.iter().any(|locale| {
+        i18n::strip_bidi_isolate_marks(i18n::text(*locale).settings_title) == normalized_title
+    })
 }
 
 #[cfg(windows)]
@@ -680,10 +683,16 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn settings_window_is_not_treated_as_widget_shell_window() {
-        assert!(is_settings_window_title("Crypto HUD"));
         assert!(is_settings_window_title("Crypto HUD Settings"));
         assert!(is_settings_window_title("Crypto HUD 设置"));
+        for locale in i18n::Locale::ALL {
+            assert!(
+                is_settings_window_title(i18n::text(locale).settings_title),
+                "{locale:?} settings title should be recognized"
+            );
+        }
         assert!(!is_widget_shell_window_title("Crypto HUD"));
+        assert!(!is_widget_shell_window_title("\u{2066}Crypto HUD\u{2069}"));
         assert!(!is_widget_shell_window_title("Crypto HUD Settings"));
         assert!(!is_widget_shell_window_title("Crypto HUD 设置"));
         assert!(is_widget_shell_window_title("price-card-1"));

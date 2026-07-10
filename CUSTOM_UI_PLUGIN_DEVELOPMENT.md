@@ -67,6 +67,7 @@ Manifest requirements:
 
 - `schemaVersion` must be `3`.
 - `id` must use lowercase ASCII letters, digits, dots, or hyphens, for example `com.example.my-widget`.
+- `name` is the author-provided display name. Crypto HUD shows it exactly as written and does not localize it.
 - `version` must be valid SemVer.
 - `hostApiVersion` must match the host API, for example `>=0.1.0, <1.0.0`.
 - `renderer.kind` must be `slint`.
@@ -146,6 +147,8 @@ export component MyWidget inherits Window {
 Optional properties:
 
 ```slint
+in property <bool> rtl-layout: false;
+in property <string> source-name-text;
 in property <[image]> quote-icons;
 in property <string> chart-line-path;
 in property <string> chart-fill-path;
@@ -235,9 +238,25 @@ Requirements:
 
 - Render prices and changes from `quote-rows`.
 - Show `empty-text` when `quote-rows` is empty.
-- Use `pairs-heading-text`, `source-text`, and `updated-text` as host-provided localized strings.
+- Use `pairs-heading-text`, `source-text`, `source-name-text`, and `updated-text` as host-provided localized strings.
 - Single-pair chart plugins usually use the first `quote-rows` item plus optional chart path properties.
 - Show a static fallback or lightweight placeholder while chart data is not ready.
+
+## Localization And RTL
+
+Visible UI copy should come from host-provided properties instead of hardcoded English text. Declare `rtl-layout` when a plugin renders localized labels, and use it to align those labels for Arabic:
+
+```slint
+in property <bool> rtl-layout: false;
+
+Text {
+    text: root.source-text;
+    horizontal-alignment: root.rtl-layout ? right : left;
+    overflow: elide;
+}
+```
+
+Keep market symbols, prices, and percent changes visually stable for scanning unless the whole layout is intentionally mirrored. Do not compare against localized strings such as `Connecting`; use host state or data readiness properties instead.
 
 ## Development Flow
 
