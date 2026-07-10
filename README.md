@@ -1,7 +1,7 @@
 <h1 align="center">Crypto HUD</h1>
 
 <p align="center">
-  A lightweight, local-first market HUD for your Windows desktop.
+  A lightweight, local-first market HUD for Windows and macOS.
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-f59e0b">
-  <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078d4">
+  <img alt="Platform: Windows and macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078d4">
   <img alt="Runtime: native" src="https://img.shields.io/badge/runtime-native-22c55e">
   <img alt="No account required" src="https://img.shields.io/badge/account-not%20required-14b8a6">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111827">
@@ -18,7 +18,7 @@
 
 > Keep prices visible enough to glance at, quiet enough to forget about.
 
-Crypto HUD keeps crypto prices quietly visible on your Windows desktop.
+Crypto HUD keeps crypto prices quietly visible on your desktop.
 
 No more switching to an exchange again and again just to check the market. Put a
 small price card where it feels comfortable, then keep working, reading, coding,
@@ -69,13 +69,15 @@ order entry, or alert automation today.
 
 ## Current Status
 
-Crypto HUD is an alpha native Windows desktop app built with Rust and Slint.
+Crypto HUD is an alpha native Windows and macOS desktop app built with Rust and
+Slint. Windows is the currently validated platform; the macOS implementation and
+packaging flow are ready for their first hardware validation.
 
 - Runs as one native desktop process.
 - Uses real desktop windows instead of WebView or browser-hosted UI.
 - Includes a main window, tray controls, global hide/show shortcut, local
-  persistence, plugin loading, and Windows packaging scripts.
-- Default shortcut: `Alt+C` to hide or show all widgets.
+  persistence, plugin loading, and native packaging scripts.
+- Default shortcut: `Alt+C` on Windows or `Option+C` on macOS.
 
 ## Try It Locally
 
@@ -83,26 +85,26 @@ You need Rust. The project uses `mise` to pin the expected Rust toolchain.
 
 Review `mise.toml` first, then install the toolchain:
 
-```powershell
+```shell
 mise trust
 mise install
 ```
 
 Check that the project builds:
 
-```powershell
+```shell
 mise run check
 ```
 
 Run the app:
 
-```powershell
+```shell
 mise run run-app
 ```
 
 To launch a specific number of widgets:
 
-```powershell
+```shell
 cargo run -p crypto-hud -- --widgets 3
 ```
 
@@ -113,7 +115,7 @@ cargo run -p crypto-hud -- --widgets 3
 - Right-click the tray icon for settings and quit actions.
 - Use settings to add widgets, choose symbols, change opacity, switch themes,
   configure startup behavior, and change app-level market preferences.
-- Use `Alt+C` to hide or show all widgets.
+- Use `Alt+C` on Windows or `Option+C` on macOS to hide or show all widgets.
 
 Layout and settings are saved automatically. For isolated testing, set a custom
 state directory:
@@ -156,8 +158,11 @@ security reporting.
 
 ## Release Packaging
 
-Crypto HUD currently uses local Windows release scripts rather than a GitHub
-Actions release workflow.
+Crypto HUD currently uses local release scripts rather than a GitHub Actions
+release workflow. Windows packaging is validated locally. macOS packaging must
+run on a Mac and still requires the hardware checklist in [MACOS.md](MACOS.md).
+The macOS CI workflow builds and smoke-tests ARM64, Intel, and universal
+artifacts, but does not publish releases or access signing credentials.
 
 ```powershell
 cargo test --workspace
@@ -165,7 +170,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
 powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.8.3
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.2
 ```
 
 The package script creates a Windows zip, checksum, and release manifest in
@@ -173,13 +178,25 @@ The package script creates a Windows zip, checksum, and release manifest in
 Windows Authenticode signing is supported through the signing environment
 variables documented in `scripts/package-windows.ps1`.
 
+On macOS, use the `mise`-managed toolchain to build an app bundle and DMG for
+the current architecture:
+
+```shell
+mise run package-macos
+mise run macos-package-smoke
+```
+
+The macOS script also supports `--arch universal`, Developer ID signing, and
+Apple notarization. See [MACOS.md](MACOS.md) for setup, commands, release
+credentials, generated artifacts, and the pending manual test matrix.
+
 ## Roadmap
 
 - Better provider health, stale-data, and error states.
 - Price and 24-hour change alerts.
 - Duplicate, rename, reorder, and per-widget visibility controls.
 - Better first-launch placement and recovery.
-- A richer installer format.
+- More automated cross-platform release validation.
 
 ## License
 

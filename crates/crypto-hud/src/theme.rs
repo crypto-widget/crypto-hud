@@ -155,7 +155,25 @@ fn system_theme() -> ResolvedTheme {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn system_theme() -> ResolvedTheme {
+    let is_dark = std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleInterfaceStyle"])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .eq_ignore_ascii_case("dark")
+        });
+    if is_dark {
+        ResolvedTheme::Dark
+    } else {
+        ResolvedTheme::Light
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn system_theme() -> ResolvedTheme {
     ResolvedTheme::Dark
 }

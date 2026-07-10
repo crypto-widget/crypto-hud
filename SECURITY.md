@@ -20,6 +20,7 @@ Security-sensitive areas include:
 
 - Update download and package verification.
 - Windows install, uninstall, signing, and auto-start behavior.
+- macOS bundle, DMG, Developer ID signing, notarization, and auto-start behavior.
 - Market-data networking, proxy handling, and HTTP response parsing.
 - Local plugin manifest validation and renderer loading.
 - Persisted settings and layout-state migration.

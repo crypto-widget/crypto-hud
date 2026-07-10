@@ -12,7 +12,6 @@ pub fn apply_auto_start(enabled: bool, widget_count: usize) -> Result<(), String
     }
 }
 
-#[cfg(windows)]
 pub fn refresh_auto_start_registration_if_enabled(
     enabled: bool,
     widget_count: usize,
@@ -72,7 +71,42 @@ fn quote_windows_auto_launch_path(exe: &str) -> String {
     format!("\"{exe}\"")
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn build_auto_launch_with_name(
+    app_name: &str,
+    widget_count: usize,
+) -> Result<auto_launch::AutoLaunch, String> {
+    use auto_launch::MacOSLaunchMode;
+
+    let launch_agent_name = macos_launch_agent_name(app_name);
+    let widget_count = widget_count.to_string();
+    auto_launch::AutoLaunchBuilder::new()
+        .set_app_name(launch_agent_name)
+        .set_app_path(
+            std::env::current_exe()
+                .map_err(|error| error.to_string())?
+                .to_string_lossy()
+                .as_ref(),
+        )
+        .set_macos_launch_mode(MacOSLaunchMode::LaunchAgent)
+        .set_bundle_identifiers(&[env!("CRYPTO_HUD_MACOS_BUNDLE_ID")])
+        .set_args(&["--widgets", widget_count.as_str()])
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn macos_launch_agent_name(app_name: &str) -> &str {
+    if app_name == "Crypto HUD" {
+        "com.crypto-hud"
+    } else {
+        // Keep the historical file name so disabling auto-start removes the
+        // LaunchAgent created by pre-rename builds.
+        app_name
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn build_auto_launch_with_name(
     app_name: &str,
     widget_count: usize,
@@ -93,8 +127,17 @@ fn build_auto_launch_with_name(
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
+    #[cfg(any(test, windows))]
     use super::*;
+
+    #[test]
+    fn macos_launch_agent_names_preserve_legacy_cleanup_path() {
+        assert_eq!(macos_launch_agent_name("Crypto HUD"), "com.crypto-hud");
+        assert_eq!(
+            macos_launch_agent_name("Crypto Widget Slint"),
+            "Crypto Widget Slint"
+        );
+    }
 
     #[test]
     #[cfg(windows)]

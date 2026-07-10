@@ -1,0 +1,92 @@
+name: macOS
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/macos.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/**"
+      - "mise.toml"
+      - "packaging/macos/**"
+      - "scripts/macos-package-common.sh"
+      - "scripts/macos-package-common-test.sh"
+      - "scripts/macos-package-smoke.sh"
+      - "scripts/package-macos.sh"
+      - "scripts/run-bash.ps1"
+  push:
+    branches:
+      - main
+      - dev
+      - macos
+    paths:
+      - ".github/workflows/macos.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/**"
+      - "mise.toml"
+      - "packaging/macos/**"
+      - "scripts/macos-package-common.sh"
+      - "scripts/macos-package-common-test.sh"
+      - "scripts/macos-package-smoke.sh"
+      - "scripts/package-macos.sh"
+      - "scripts/run-bash.ps1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon + universal package
+            runner: macos-15
+            package_arch: universal
+          - name: Intel
+            runner: macos-15-intel
+            package_arch: x64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install mise toolchain
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          cache: true
+
+      - name: Check formatting
+        run: mise run format-check
+
+      - name: Lint macOS packaging scripts
+        run: mise run macos-scripts-check
+
+      - name: Check native macOS target
+        run: mise run check
+
+      - name: Run tests
+        run: mise run test
+
+      - name: Build and smoke-test app bundle and DMG
+        run: mise run macos-package-smoke -- --arch ${{ matrix.package_arch }}
+
+      - name: Upload smoke-tested package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: crypto-hud-macos-${{ matrix.package_arch }}-${{ github.sha }}
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+            dist/*.manifest.json
+          if-no-files-found: error
+          retention-days: 14

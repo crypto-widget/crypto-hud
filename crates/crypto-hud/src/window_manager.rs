@@ -401,7 +401,38 @@ fn raise_settings_window() {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn raise_settings_window() {
+    use objc2::{msg_send, sel, MainThreadMarker};
+    use objc2_app_kit::NSApplication;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    // `-[NSApplication activate]` was added in macOS 14. Keep the bundle's
+    // macOS 12 minimum while using cooperative activation where available.
+    let supports_cooperative_activation: bool =
+        unsafe { msg_send![&*app, respondsToSelector: sel!(activate)] };
+    if supports_cooperative_activation {
+        app.activate();
+    } else {
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(false);
+    }
+
+    let windows = app.windows();
+    for index in 0..windows.count() {
+        let window = windows.objectAtIndex(index);
+        if is_settings_window_title(&window.title().to_string()) {
+            window.makeKeyAndOrderFront(None);
+            window.orderFrontRegardless();
+            break;
+        }
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn raise_settings_window() {}
 
 pub(crate) fn desktop_size() -> (i32, i32) {
@@ -421,7 +452,27 @@ fn platform_desktop_size() -> (i32, i32) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn platform_desktop_size() -> (i32, i32) {
+    type CGDirectDisplayId = u32;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGMainDisplayID() -> CGDirectDisplayId;
+        fn CGDisplayPixelsWide(display: CGDirectDisplayId) -> usize;
+        fn CGDisplayPixelsHigh(display: CGDirectDisplayId) -> usize;
+    }
+
+    let display = unsafe { CGMainDisplayID() };
+    let width = unsafe { CGDisplayPixelsWide(display) };
+    let height = unsafe { CGDisplayPixelsHigh(display) };
+    match (i32::try_from(width), i32::try_from(height)) {
+        (Ok(width), Ok(height)) if width > 0 && height > 0 => (width, height),
+        _ => (DEFAULT_DESKTOP_WIDTH, DEFAULT_DESKTOP_HEIGHT),
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn platform_desktop_size() -> (i32, i32) {
     (DEFAULT_DESKTOP_WIDTH, DEFAULT_DESKTOP_HEIGHT)
 }
@@ -507,7 +558,7 @@ fn is_widget_shell_window_title(title: &str) -> bool {
         || title == "crypto-hud-keepalive"
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn is_settings_window_title(title: &str) -> bool {
     matches!(
         title,

@@ -9,14 +9,14 @@ small, testable, and aligned with the existing native shell architecture.
 1. Install `mise`.
 2. Review `mise.toml`, then trust and install the pinned toolchain:
 
-```powershell
+```shell
 mise trust
 mise install
 ```
 
 3. Check the workspace:
 
-```powershell
+```shell
 mise run format-check
 mise run check
 mise run test
@@ -58,13 +58,15 @@ mise run test
 ```
 
 For UI, shell, packaging, or installer changes, also run the relevant PowerShell
-smoke script from `scripts/`.
+smoke script from `scripts/`. macOS changes must also run
+`mise run macos-package-smoke` on a Mac and complete the manual checks in
+`MACOS.md`.
 
 ## Issues and Pull Requests
 
 - Use issues for bugs, feature proposals, and UX reports.
-- Include Windows version, app version or commit, market source, and relevant
-  reproduction steps for bug reports.
+- Include operating-system version, CPU architecture, app version or commit,
+  market source, and relevant reproduction steps for bug reports.
 - Keep pull requests focused on one behavioral change.
 - Mention any state migration, packaging, or update-flow impact in the PR
   description.

@@ -166,7 +166,9 @@ fn update_from_release(
     let asset = release
         .assets
         .iter()
-        .find(|asset| is_package_asset(&asset.name));
+        .filter_map(|asset| package_asset_priority(&asset.name).map(|priority| (priority, asset)))
+        .min_by_key(|(priority, _)| *priority)
+        .map(|(_, asset)| asset);
     let checksum_asset = asset.and_then(|asset| find_checksum_asset(&release.assets, &asset.name));
     Ok(Some(UpdateInfo {
         tag_name: release.tag_name,
@@ -179,8 +181,19 @@ fn update_from_release(
     }))
 }
 
-fn is_package_asset(name: &str) -> bool {
-    name.ends_with(".zip")
+fn package_asset_priority(name: &str) -> Option<u8> {
+    package_asset_priority_for(name, std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn package_asset_priority_for(name: &str, target_os: &str, target_arch: &str) -> Option<u8> {
+    let name = name.to_ascii_lowercase();
+    match (target_os, target_arch) {
+        ("windows", "x86_64") if name.ends_with("-windows-x64.zip") => Some(0),
+        ("macos", "aarch64") if name.ends_with("-macos-arm64.dmg") => Some(0),
+        ("macos", "x86_64") if name.ends_with("-macos-x64.dmg") => Some(0),
+        ("macos", "aarch64" | "x86_64") if name.ends_with("-macos-universal.dmg") => Some(1),
+        _ => None,
+    }
 }
 
 fn find_checksum_asset<'a>(
@@ -188,10 +201,7 @@ fn find_checksum_asset<'a>(
     package_name: &str,
 ) -> Option<&'a GitHubReleaseAsset> {
     let expected_name = format!("{package_name}.sha256");
-    assets
-        .iter()
-        .find(|asset| asset.name == expected_name)
-        .or_else(|| assets.iter().find(|asset| asset.name.ends_with(".sha256")))
+    assets.iter().find(|asset| asset.name == expected_name)
 }
 
 fn parse_version_tag(raw: &str) -> Result<Version> {
@@ -246,6 +256,30 @@ mod tests {
                 {{
                   "name": "crypto-hud-{tag}-windows-x64.zip.sha256",
                   "browser_download_url": "https://example.test/{tag}.zip.sha256"
+                }},
+                {{
+                  "name": "crypto-hud-{tag}-macos-arm64.dmg",
+                  "browser_download_url": "https://example.test/{tag}-arm64.dmg"
+                }},
+                {{
+                  "name": "crypto-hud-{tag}-macos-arm64.dmg.sha256",
+                  "browser_download_url": "https://example.test/{tag}-arm64.dmg.sha256"
+                }},
+                {{
+                  "name": "crypto-hud-{tag}-macos-x64.dmg",
+                  "browser_download_url": "https://example.test/{tag}-x64.dmg"
+                }},
+                {{
+                  "name": "crypto-hud-{tag}-macos-x64.dmg.sha256",
+                  "browser_download_url": "https://example.test/{tag}-x64.dmg.sha256"
+                }},
+                {{
+                  "name": "crypto-hud-{tag}-macos-universal.dmg",
+                  "browser_download_url": "https://example.test/{tag}-universal.dmg"
+                }},
+                {{
+                  "name": "crypto-hud-{tag}-macos-universal.dmg.sha256",
+                  "browser_download_url": "https://example.test/{tag}-universal.dmg.sha256"
                 }}
               ]
             }}"#
@@ -260,13 +294,80 @@ mod tests {
 
         assert_eq!(update.tag_name, "v0.1.1");
         assert_eq!(update.version, Version::parse("0.1.1").unwrap());
+        #[cfg(windows)]
+        let expected = "crypto-hud-v0.1.1-windows-x64.zip";
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        let expected = "crypto-hud-v0.1.1-macos-arm64.dmg";
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        let expected = "crypto-hud-v0.1.1-macos-x64.dmg";
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        let expected: &str = "";
+
+        if expected.is_empty() {
+            assert_eq!(update.asset_name, None);
+            assert_eq!(update.checksum_asset_name, None);
+        } else {
+            assert_eq!(update.asset_name.as_deref(), Some(expected));
+            let expected_checksum = format!("{expected}.sha256");
+            assert_eq!(
+                update.checksum_asset_name.as_deref(),
+                Some(expected_checksum.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn checksum_must_match_the_selected_package() {
+        let assets = vec![
+            GitHubReleaseAsset {
+                name: "other.zip.sha256".to_string(),
+                browser_download_url: String::new(),
+            },
+            GitHubReleaseAsset {
+                name: "crypto-hud.zip.sha256".to_string(),
+                browser_download_url: String::new(),
+            },
+        ];
+
+        assert!(find_checksum_asset(&assets, "crypto-hud.zip").is_some());
+        assert!(find_checksum_asset(&assets, "missing.zip").is_none());
+    }
+
+    #[test]
+    fn package_assets_match_os_and_cpu_architecture() {
+        let arm_dmg = "crypto-hud-v1.2.3-macos-arm64.dmg";
+        let x64_dmg = "crypto-hud-v1.2.3-macos-x64.dmg";
+        let universal_dmg = "crypto-hud-v1.2.3-macos-universal.dmg";
+        let windows_zip = "crypto-hud-v1.2.3-windows-x64.zip";
+
         assert_eq!(
-            update.asset_name.as_deref(),
-            Some("crypto-hud-v0.1.1-windows-x64.zip")
+            package_asset_priority_for(arm_dmg, "macos", "aarch64"),
+            Some(0)
         );
         assert_eq!(
-            update.checksum_asset_name.as_deref(),
-            Some("crypto-hud-v0.1.1-windows-x64.zip.sha256")
+            package_asset_priority_for(x64_dmg, "macos", "x86_64"),
+            Some(0)
+        );
+        assert_eq!(
+            package_asset_priority_for(universal_dmg, "macos", "aarch64"),
+            Some(1)
+        );
+        assert_eq!(
+            package_asset_priority_for(universal_dmg, "macos", "x86_64"),
+            Some(1)
+        );
+        assert_eq!(
+            package_asset_priority_for(x64_dmg, "macos", "aarch64"),
+            None
+        );
+        assert_eq!(package_asset_priority_for(arm_dmg, "macos", "x86_64"), None);
+        assert_eq!(
+            package_asset_priority_for(windows_zip, "windows", "x86_64"),
+            Some(0)
+        );
+        assert_eq!(
+            package_asset_priority_for(arm_dmg, "windows", "x86_64"),
+            None
         );
     }
 

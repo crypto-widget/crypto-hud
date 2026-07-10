@@ -200,7 +200,6 @@ fn main() -> Result<()> {
     }
     let layouts = Rc::new(RefCell::new(layout_store));
     let app_settings = layouts.borrow().settings.clone().normalized();
-    #[cfg(windows)]
     if let Err(error) = autostart::refresh_auto_start_registration_if_enabled(
         app_settings.auto_start_enabled,
         layouts.borrow().widgets.len().max(1),

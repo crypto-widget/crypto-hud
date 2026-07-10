@@ -210,10 +210,13 @@ pub(crate) fn open_external_url(url: &str) -> Result<()> {
     } else {
         "xdg-open"
     };
-    std::process::Command::new(opener)
+    let status = std::process::Command::new(opener)
         .arg(url)
-        .spawn()
+        .status()
         .with_context(|| format!("failed to open {url} with {opener}"))?;
+    if !status.success() {
+        anyhow::bail!("{opener} failed to open {url} with {status}");
+    }
     Ok(())
 }
 
@@ -253,10 +256,13 @@ pub(crate) fn open_path(path: &Path) -> Result<()> {
     } else {
         "xdg-open"
     };
-    std::process::Command::new(opener)
+    let status = std::process::Command::new(opener)
         .arg(path)
-        .spawn()
+        .status()
         .with_context(|| format!("failed to open {} with {opener}", path.display()))?;
+    if !status.success() {
+        anyhow::bail!("{opener} failed to open {} with {status}", path.display());
+    }
     Ok(())
 }
 

@@ -215,7 +215,7 @@ const EN_TEXT: UiText = UiText {
     system_maintenance: "Maintenance",
     auto_start_help: "Runs Crypto HUD after you sign in.",
     show_main_window_on_startup_help: "Opens the main window on app launch.",
-    shortcut_help: "Use Alt+C to hide or restore widgets.",
+    shortcut_help: "Use Alt+C (Option+C on macOS) to hide or restore widgets.",
     tray_icon_help: "Keeps quick access for the main window and quit.",
     tray_hover_display_help: "Temporarily shows widgets while hovering the tray icon.",
     apply: "Apply",
@@ -351,7 +351,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     system_maintenance: "维护",
     auto_start_help: "登录 Windows 后自动运行应用。",
     show_main_window_on_startup_help: "启动应用时同时打开主界面。",
-    shortcut_help: "按 Alt+C 快速隐藏或恢复小组件。",
+    shortcut_help: "按 Alt+C（macOS 上为 Option+C）快速隐藏或恢复小组件。",
     tray_icon_help: "保留托盘入口，方便打开主界面或退出。",
     tray_hover_display_help: "鼠标悬停托盘图标时临时显示小组件。",
     apply: "应用",
@@ -457,9 +457,14 @@ pub fn provider_options(locale: Locale) -> Vec<&'static str> {
 }
 
 pub fn shortcut_options(locale: Locale) -> Vec<&'static str> {
+    let shortcut = if cfg!(target_os = "macos") {
+        "Option+C"
+    } else {
+        "Alt+C"
+    };
     match locale {
-        Locale::En => vec!["Alt+C", "Disabled"],
-        Locale::ZhHans => vec!["Alt+C", "禁用"],
+        Locale::En => vec![shortcut, "Disabled"],
+        Locale::ZhHans => vec![shortcut, "禁用"],
     }
 }
 
@@ -631,7 +636,12 @@ mod tests {
             "v1.2.3 is available. Download crypto-hud.exe and verify it with checksums.txt from GitHub Releases."
         );
         assert_eq!(provider_options(Locale::En), vec!["Auto", "Binance", "OKX"]);
-        assert_eq!(shortcut_options(Locale::En), vec!["Alt+C", "Disabled"]);
+        let shortcut = if cfg!(target_os = "macos") {
+            "Option+C"
+        } else {
+            "Alt+C"
+        };
+        assert_eq!(shortcut_options(Locale::En), vec![shortcut, "Disabled"]);
         assert_eq!(
             alert_condition_options(Locale::En),
             vec![
@@ -698,7 +708,7 @@ mod tests {
             provider_options(Locale::ZhHans),
             vec!["自动", "Binance", "OKX"]
         );
-        assert_eq!(shortcut_options(Locale::ZhHans), vec!["Alt+C", "禁用"]);
+        assert_eq!(shortcut_options(Locale::ZhHans), vec![shortcut, "禁用"]);
         assert_eq!(
             alert_condition_options(Locale::ZhHans),
             vec!["价格高于", "价格低于", "24h 涨跌高于", "24h 涨跌低于"]

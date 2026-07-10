@@ -202,7 +202,71 @@ fn platform_settings_window_work_area() -> Option<SettingsWindowWorkArea> {
     })
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn platform_settings_window_work_area() -> Option<SettingsWindowWorkArea> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let mtm = MainThreadMarker::new()?;
+    let screen = NSScreen::mainScreen(mtm)?;
+    let screens = NSScreen::screens(mtm);
+    if screens.count() == 0 {
+        return None;
+    }
+    let main_display_height = screens.objectAtIndex(0).frame().size.height as f64;
+    let visible = screen.visibleFrame();
+    macos_work_area_from_visible_frame(
+        main_display_height,
+        visible.origin.x as f64,
+        visible.origin.y as f64,
+        visible.size.width as f64,
+        visible.size.height as f64,
+        screen.backingScaleFactor() as f64,
+    )
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn macos_work_area_from_visible_frame(
+    main_display_height: f64,
+    visible_x: f64,
+    visible_y: f64,
+    visible_width: f64,
+    visible_height: f64,
+    scale: f64,
+) -> Option<SettingsWindowWorkArea> {
+    if !scale.is_finite()
+        || scale <= 0.0
+        || !visible_width.is_finite()
+        || visible_width <= 0.0
+        || !visible_height.is_finite()
+        || visible_height <= 0.0
+    {
+        return None;
+    }
+
+    // AppKit uses a bottom-left origin. Slint/winit physical positions use a
+    // top-left origin relative to the system's main display, so flip the
+    // visible frame against that display before applying the Retina scale.
+    let top_y = main_display_height - visible_height - visible_y;
+    Some(SettingsWindowWorkArea {
+        x: scaled_screen_coordinate(visible_x, scale)?,
+        y: scaled_screen_coordinate(top_y, scale)?,
+        width: scaled_screen_coordinate(visible_width, scale)?,
+        height: scaled_screen_coordinate(visible_height, scale)?,
+    })
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn scaled_screen_coordinate(value: f64, scale: f64) -> Option<i32> {
+    let scaled = value * scale;
+    if !scaled.is_finite() || scaled < i32::MIN as f64 || scaled > i32::MAX as f64 {
+        None
+    } else {
+        Some(scaled.round() as i32)
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn platform_settings_window_work_area() -> Option<SettingsWindowWorkArea> {
     None
 }
@@ -226,7 +290,19 @@ fn platform_settings_window_display_scale_factor() -> f32 {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn platform_settings_window_display_scale_factor() -> f32 {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    MainThreadMarker::new()
+        .and_then(NSScreen::mainScreen)
+        .map(|screen| screen.backingScaleFactor() as f32)
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .unwrap_or(1.0)
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn platform_settings_window_display_scale_factor() -> f32 {
     1.0
 }
@@ -3534,6 +3610,7 @@ mod tests {
                 .join("settings-window.slint"),
         )
         .unwrap()
+        .replace("\r\n", "\n")
     }
 
     #[test]
@@ -3570,6 +3647,39 @@ mod tests {
         assert_eq!(geometry.logical_height, 480.0);
         assert_eq!(geometry.physical_x, 122);
         assert_eq!(geometry.physical_y, 24);
+    }
+
+    #[test]
+    fn macos_visible_frame_converts_to_top_left_retina_work_area() {
+        let work_area =
+            macos_work_area_from_visible_frame(900.0, 0.0, 70.0, 1440.0, 805.0, 2.0).unwrap();
+
+        assert_eq!(
+            work_area,
+            SettingsWindowWorkArea {
+                x: 0,
+                y: 50,
+                width: 2880,
+                height: 1610,
+            }
+        );
+    }
+
+    #[test]
+    fn macos_visible_frame_preserves_secondary_display_offsets() {
+        let work_area =
+            macos_work_area_from_visible_frame(900.0, -1920.0, 0.0, 1920.0, 1080.0, 1.0).unwrap();
+
+        assert_eq!(
+            work_area,
+            SettingsWindowWorkArea {
+                x: -1920,
+                y: -180,
+                width: 1920,
+                height: 1080,
+            }
+        );
+        assert!(macos_work_area_from_visible_frame(900.0, 0.0, 0.0, 0.0, 800.0, 2.0).is_none());
     }
 
     #[test]

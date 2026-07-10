@@ -1,5 +1,7 @@
 [tools]
-rust = "1.96.0"
+rust = { version = "1.96.0", targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"] }
+shellcheck = "0.11.0"
+zig = "0.14.1"
 
 [tasks.check]
 description = "Check the Slint native widget app"
@@ -7,7 +9,7 @@ run = "cargo check --workspace"
 
 [tasks.run-app]
 description = "Run the Slint native app with one instance of each widget"
-run = "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\run-app.ps1"
+run = "cargo run -p crypto-hud -- --each-widget"
 
 [tasks.format]
 description = "Format Rust sources"
@@ -20,3 +22,32 @@ run = "cargo fmt --all --check"
 [tasks.test]
 description = "Run the workspace test suite"
 run = "cargo test --workspace"
+
+[tasks.package-macos]
+description = "Build a macOS app bundle and DMG on a Mac"
+run = "bash ./scripts/package-macos.sh"
+
+[tasks.macos-package-smoke]
+description = "Build and smoke-test the macOS app bundle and DMG on a Mac"
+run = "bash ./scripts/macos-package-smoke.sh"
+
+[tasks.macos-scripts-check]
+description = "Lint and test the macOS packaging scripts"
+run = [
+    "shellcheck ./scripts/macos-package-common.sh ./scripts/macos-package-common-test.sh ./scripts/package-macos.sh ./scripts/macos-package-smoke.sh",
+    "bash ./scripts/macos-package-common-test.sh",
+]
+run_windows = [
+    "shellcheck ./scripts/macos-package-common.sh ./scripts/macos-package-common-test.sh ./scripts/package-macos.sh ./scripts/macos-package-smoke.sh",
+    "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-bash.ps1 ./scripts/macos-package-common-test.sh",
+]
+
+[tasks.macos-cross-check]
+description = "Check all Rust targets for both supported macOS architectures"
+# Zig supplies the target explicitly; suppress cc-rs' Apple-Clang-only `arm64`
+# target spelling, which Zig does not accept.
+env = { MACOSX_DEPLOYMENT_TARGET = "12.0", CRATE_CC_NO_DEFAULTS = "1", CC_aarch64_apple_darwin = "zig cc -target aarch64-macos", AR_aarch64_apple_darwin = "zig ar", CC_x86_64_apple_darwin = "zig cc -target x86_64-macos", AR_x86_64_apple_darwin = "zig ar" }
+run = [
+    "cargo check --locked --workspace --all-targets --target aarch64-apple-darwin",
+    "cargo check --locked --workspace --all-targets --target x86_64-apple-darwin",
+]

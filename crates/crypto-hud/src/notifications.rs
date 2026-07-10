@@ -73,7 +73,34 @@ pub fn show(title: &str, body: &str) {
     windows::show(title, body);
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn show(title: &str, body: &str) {
+    let title = apple_script_string(title);
+    let body = apple_script_string(body);
+    let script = format!("display notification \"{body}\" with title \"{title}\"");
+    std::thread::spawn(move || {
+        match std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .status()
+        {
+            Ok(status) if !status.success() => {
+                eprintln!("macOS notification command exited with {status}");
+            }
+            Err(error) => eprintln!("failed to show macOS notification: {error}"),
+            Ok(_) => {}
+        }
+    });
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn apple_script_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace(['\r', '\n'], " ")
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 pub fn show(_title: &str, _body: &str) {}
 
 #[cfg(windows)]
@@ -261,6 +288,20 @@ mod windows {
             .encode_wide()
             .chain(std::iter::once(0))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod macos_tests {
+    use super::apple_script_string;
+
+    #[test]
+    fn notification_text_is_safe_for_apple_script_strings() {
+        assert_eq!(
+            apple_script_string("BTC \"breakout\"\nnow"),
+            "BTC \\\"breakout\\\" now"
+        );
+        assert_eq!(apple_script_string(r"C:\Temp"), r"C:\\Temp");
     }
 }
 
