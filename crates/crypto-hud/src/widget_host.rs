@@ -6,7 +6,7 @@ use crypto_hud_runtime::QuoteRowView;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, Timer, VecModel};
 use slint_interpreter::{ComponentInstance, Struct as SlintStruct, Value};
 
-use crate::{plugin, PriceCardWindow, QuoteRow};
+use crate::{i18n, plugin, PriceCardWindow, QuoteRow};
 
 const STATUS_STRIP_DEFAULT_CELL_WIDTH: i32 = 122;
 const STATUS_STRIP_MIN_CELL_WIDTH: i32 = 112;
@@ -24,6 +24,7 @@ pub(crate) struct WidgetRuntime {
     pub(crate) display_options: widget_runtime::WidgetDisplayOptions,
     pub(crate) widget_scale: f32,
     pub(crate) theme_name: String,
+    pub(crate) locale: i18n::Locale,
 }
 
 pub(crate) enum WidgetUi {
@@ -239,6 +240,13 @@ impl WidgetUi {
         }
     }
 
+    pub(crate) fn set_rtl_layout(&self, value: bool) {
+        match self {
+            Self::BuiltinPriceCard(ui) => ui.set_rtl_layout(value),
+            Self::DynamicSlint(ui) => ui.set_optional_property("rtl-layout", Value::Bool(value)),
+        }
+    }
+
     pub(crate) fn set_pin_to_top(&self, value: bool) {
         match self {
             Self::BuiltinPriceCard(ui) => ui.set_pin_to_top(value),
@@ -376,7 +384,7 @@ fn bail_plugin_unavailable(plugin: &plugin::PluginDefinition) -> Result<WidgetUi
     let reason = match &plugin.status {
         plugin::PluginStatus::Disabled(reason) => reason.as_str(),
         plugin::PluginStatus::Unavailable(reason) => reason.as_str(),
-        plugin::PluginStatus::Available => "Slint renderer is not compiled",
+        plugin::PluginStatus::Available => plugin::SLINT_RENDERER_UNCOMPILED_REASON,
     };
     anyhow::bail!("plugin {} is unavailable: {reason}", plugin.id)
 }
@@ -567,6 +575,45 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_dynamic_widget_uses_localizable_renderer_reason() {
+        let plugin = plugin::PluginDefinition {
+            id: "local.missing-definition".to_string(),
+            name: "Missing Definition".to_string(),
+            version: semver::Version::new(0, 1, 0),
+            source: plugin::PluginSource::LocalUnsigned,
+            renderer: plugin::PluginRendererDefinition::Slint {
+                root_dir: std::path::PathBuf::from("."),
+                entry: std::path::PathBuf::from("ui/main.slint"),
+                component: "MissingDefinition".to_string(),
+                definition: None,
+            },
+            default_size: plugin::PluginSize {
+                width: 120,
+                height: 80,
+            },
+            size_policy: plugin::PluginSizePolicy::Fixed,
+            min_symbol_limit: plugin::MIN_SYMBOL_LIMIT,
+            symbol_limit: 1,
+            default_symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            preview_images: Vec::new(),
+            themes: Vec::new(),
+            data_requirements: Vec::new(),
+            status: plugin::PluginStatus::Available,
+        };
+
+        let error = match WidgetUi::from_plugin(&plugin) {
+            Ok(_) => panic!("missing Slint definition should make the plugin unavailable"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(error.contains(plugin::SLINT_RENDERER_UNCOMPILED_REASON));
+        assert!(
+            !error.contains("Slint renderer is not compiled"),
+            "fallback reason should match the i18n status reason key"
+        );
+    }
+
+    #[test]
     fn quote_cell_widths_sum_to_available_width() {
         let widths = quote_cell_widths(&[row("59800"), row("1594"), row("100250")], 408);
 
@@ -584,6 +631,25 @@ mod tests {
     fn mini_ticker_compact_layout_does_not_reserve_quote_board_header() {
         let source = include_str!("../ui/price-card-window.slint");
 
+        assert!(
+            !source.contains(r#""Pairs""#) && !source.contains(r#""Source""#),
+            "runtime labels should come from the localized host text, not English Slint fallbacks"
+        );
+        assert!(
+            source.contains("in property <bool> rtl-layout: false;"),
+            "builtin widgets should receive text direction from the host"
+        );
+        assert!(
+            source.contains("x: root.rtl-layout ? parent.width - root.s(64px) : root.s(14px);")
+                && source.contains("x: root.rtl-layout ? root.s(36px) : root.s(68px);")
+                && source.contains("horizontal-alignment: root.rtl-layout ? left : right;"),
+            "quote board header should mirror localized labels in RTL locales"
+        );
+        assert!(
+            source.contains("x: root.rtl-layout ? parent.width / 2 : root.s(14px);")
+                && source.contains("x: root.rtl-layout ? root.s(14px) : parent.width / 2;"),
+            "compact mini ticker footer labels should swap sides in RTL locales"
+        );
         assert!(
             source.contains("visible: !root.compact-mode;"),
             "compact mini ticker should not reserve the quote board header"

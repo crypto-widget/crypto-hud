@@ -46,9 +46,12 @@ it is still early software and may change quickly.
 - Shows draggable, optionally always-on-top desktop price widgets.
 - Tracks chosen symbols and fetches live data from Binance, Coinbase, OKX, and
   Hyperliquid.
-- Supports widget styles, light/dark themes, English and Simplified Chinese,
-  and market color preferences.
+- Supports widget styles, light/dark themes, 12 UI languages, RTL Arabic
+  layout, and market color preferences.
 - Saves widget positions and settings between launches.
+
+Supported UI languages: `en`, `zh-CN`, `zh-TW`, `es-419`, `pt-BR`, `vi`, `id`,
+`tr`, `ko`, `ja`, `ru`, and `ar`.
 
 Crypto HUD is only for viewing public market information. It does not place
 trades, connect to wallets, custody funds, or ask for exchange API keys. Its

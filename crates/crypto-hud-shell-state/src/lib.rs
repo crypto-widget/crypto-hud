@@ -11,7 +11,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 pub use crypto_hud_core::{
@@ -406,20 +406,69 @@ impl ShortcutPreference {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum LanguagePreference {
     System,
     #[default]
     En,
     ZhHans,
+    ZhHant,
+    Es419,
+    PtBr,
+    Vi,
+    Id,
+    Tr,
+    Ko,
+    Ja,
+    Ru,
+    Ar,
+}
+
+const LANGUAGE_PREFERENCE_CONFIG_VARIANTS: &[&str] = &[
+    "system", "en", "zh-CN", "zh-TW", "es-419", "pt-BR", "vi", "id", "tr", "ko", "ja", "ru", "ar",
+    "zh_hans", "zh_hant", "es_419", "pt_br",
+];
+
+impl Serialize for LanguagePreference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.config_tag())
+    }
 }
 
 impl LanguagePreference {
+    pub const ALL: [Self; 13] = [
+        Self::System,
+        Self::En,
+        Self::ZhHans,
+        Self::ZhHant,
+        Self::Es419,
+        Self::PtBr,
+        Self::Vi,
+        Self::Id,
+        Self::Tr,
+        Self::Ko,
+        Self::Ja,
+        Self::Ru,
+        Self::Ar,
+    ];
+
     pub const fn from_index(index: i32) -> Self {
         match index {
             1 => Self::En,
             2 => Self::ZhHans,
+            3 => Self::ZhHant,
+            4 => Self::Es419,
+            5 => Self::PtBr,
+            6 => Self::Vi,
+            7 => Self::Id,
+            8 => Self::Tr,
+            9 => Self::Ko,
+            10 => Self::Ja,
+            11 => Self::Ru,
+            12 => Self::Ar,
             _ => Self::System,
         }
     }
@@ -429,8 +478,141 @@ impl LanguagePreference {
             Self::System => 0,
             Self::En => 1,
             Self::ZhHans => 2,
+            Self::ZhHant => 3,
+            Self::Es419 => 4,
+            Self::PtBr => 5,
+            Self::Vi => 6,
+            Self::Id => 7,
+            Self::Tr => 8,
+            Self::Ko => 9,
+            Self::Ja => 10,
+            Self::Ru => 11,
+            Self::Ar => 12,
         }
     }
+
+    pub fn from_locale_tag(value: &str) -> Option<Self> {
+        language_preference_from_locale_tag(value)
+    }
+
+    pub const fn config_tag(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::En => "en",
+            Self::ZhHans => "zh-CN",
+            Self::ZhHant => "zh-TW",
+            Self::Es419 => "es-419",
+            Self::PtBr => "pt-BR",
+            Self::Vi => "vi",
+            Self::Id => "id",
+            Self::Tr => "tr",
+            Self::Ko => "ko",
+            Self::Ja => "ja",
+            Self::Ru => "ru",
+            Self::Ar => "ar",
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LanguagePreference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        language_preference_from_config_tag(&value)
+            .ok_or_else(|| de::Error::unknown_variant(&value, LANGUAGE_PREFERENCE_CONFIG_VARIANTS))
+    }
+}
+
+fn language_preference_from_config_tag(value: &str) -> Option<LanguagePreference> {
+    let (language, _subtags) = normalized_locale_tag_parts(value);
+    if language == "system" {
+        return Some(LanguagePreference::System);
+    }
+    language_preference_from_locale_tag(value)
+}
+
+fn language_preference_from_locale_tag(value: &str) -> Option<LanguagePreference> {
+    let (language, subtags) = normalized_locale_tag_parts(value);
+
+    match language.as_str() {
+        "en" => Some(LanguagePreference::En),
+        "zh" | "cmn" | "yue" => Some(chinese_language_preference(&language, &subtags)),
+        "es" if spanish_subtags_are_latin_american(&subtags) => Some(LanguagePreference::Es419),
+        "pt" if subtags.iter().any(|subtag| subtag == "br") => Some(LanguagePreference::PtBr),
+        "vi" => Some(LanguagePreference::Vi),
+        "id" | "in" => Some(LanguagePreference::Id),
+        "tr" => Some(LanguagePreference::Tr),
+        "ko" => Some(LanguagePreference::Ko),
+        "ja" => Some(LanguagePreference::Ja),
+        "ru" => Some(LanguagePreference::Ru),
+        "ar" => Some(LanguagePreference::Ar),
+        _ => None,
+    }
+}
+
+fn normalized_locale_tag_parts(value: &str) -> (String, Vec<String>) {
+    let normalized = value
+        .trim()
+        .split(['.', '@'])
+        .next()
+        .unwrap_or_default()
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    let mut parts = normalized.split('_');
+    let language = parts.next().unwrap_or_default().to_string();
+    let subtags = parts.map(str::to_string).collect::<Vec<_>>();
+    (language, subtags)
+}
+
+fn chinese_language_preference(language: &str, subtags: &[String]) -> LanguagePreference {
+    if subtags.iter().any(|subtag| subtag == "hans") {
+        return LanguagePreference::ZhHans;
+    }
+    if subtags.iter().any(|subtag| subtag == "hant") {
+        return LanguagePreference::ZhHant;
+    }
+    if language == "yue"
+        || subtags
+            .iter()
+            .any(|subtag| matches!(subtag.as_str(), "tw" | "hk" | "mo"))
+    {
+        LanguagePreference::ZhHant
+    } else {
+        LanguagePreference::ZhHans
+    }
+}
+
+fn spanish_subtags_are_latin_american(subtags: &[String]) -> bool {
+    subtags.iter().any(|subtag| {
+        matches!(
+            subtag.as_str(),
+            "419"
+                | "ar"
+                | "bo"
+                | "br"
+                | "bz"
+                | "cl"
+                | "co"
+                | "cr"
+                | "cu"
+                | "do"
+                | "ec"
+                | "gt"
+                | "hn"
+                | "mx"
+                | "ni"
+                | "pa"
+                | "pe"
+                | "pr"
+                | "py"
+                | "sv"
+                | "us"
+                | "uy"
+                | "ve"
+        )
+    })
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2362,7 +2544,7 @@ mod tests {
     }
 
     #[test]
-    fn enum_serialization_is_stable_snake_case() {
+    fn enum_serialization_uses_stable_config_tags() {
         assert_eq!(
             serde_json::to_string(&MarketProviderPreference::Okx).unwrap(),
             r#""okx""#
@@ -2375,14 +2557,111 @@ mod tests {
             serde_json::to_string(&ShortcutPreference::CtrlShiftSpace).unwrap(),
             r#""ctrl_shift_space""#
         );
-        assert_eq!(
-            serde_json::to_string(&LanguagePreference::ZhHans).unwrap(),
-            r#""zh_hans""#
-        );
+        for (preference, serialized) in [
+            (LanguagePreference::System, "system"),
+            (LanguagePreference::En, "en"),
+            (LanguagePreference::ZhHans, "zh-CN"),
+            (LanguagePreference::ZhHant, "zh-TW"),
+            (LanguagePreference::Es419, "es-419"),
+            (LanguagePreference::PtBr, "pt-BR"),
+            (LanguagePreference::Vi, "vi"),
+            (LanguagePreference::Id, "id"),
+            (LanguagePreference::Tr, "tr"),
+            (LanguagePreference::Ko, "ko"),
+            (LanguagePreference::Ja, "ja"),
+            (LanguagePreference::Ru, "ru"),
+            (LanguagePreference::Ar, "ar"),
+        ] {
+            let json = format!(r#""{serialized}""#);
+            assert_eq!(serde_json::to_string(&preference).unwrap(), json);
+            assert_eq!(
+                serde_json::from_str::<LanguagePreference>(&json).unwrap(),
+                preference
+            );
+        }
         assert_eq!(
             serde_json::to_string(&ThemePreference::Dark).unwrap(),
             r#""dark""#
         );
+    }
+
+    #[test]
+    fn language_preference_deserializes_common_locale_tags() {
+        for (json_value, expected) in [
+            ("system", LanguagePreference::System),
+            ("zh_hans", LanguagePreference::ZhHans),
+            ("zh_hant", LanguagePreference::ZhHant),
+            ("es_419", LanguagePreference::Es419),
+            ("pt_br", LanguagePreference::PtBr),
+            ("en-US", LanguagePreference::En),
+            ("zh-CN", LanguagePreference::ZhHans),
+            ("zh", LanguagePreference::ZhHans),
+            ("cmn-Hans-SG", LanguagePreference::ZhHans),
+            ("zh-Hans-HK", LanguagePreference::ZhHans),
+            ("zh-Hans-SG", LanguagePreference::ZhHans),
+            ("zh-TW", LanguagePreference::ZhHant),
+            ("zh-HK", LanguagePreference::ZhHant),
+            ("zh-MO", LanguagePreference::ZhHant),
+            ("zh-Hant-CN", LanguagePreference::ZhHant),
+            ("zh_Hant_HK.UTF-8", LanguagePreference::ZhHant),
+            ("yue-HK", LanguagePreference::ZhHant),
+            ("es-419", LanguagePreference::Es419),
+            ("es-AR", LanguagePreference::Es419),
+            ("es-CO", LanguagePreference::Es419),
+            ("es-MX", LanguagePreference::Es419),
+            ("es-US", LanguagePreference::Es419),
+            ("es-PE", LanguagePreference::Es419),
+            ("pt-BR", LanguagePreference::PtBr),
+            ("pt_BR.UTF-8", LanguagePreference::PtBr),
+            ("pt_BR@calendar=gregorian", LanguagePreference::PtBr),
+            ("vi-VN", LanguagePreference::Vi),
+            ("id-ID", LanguagePreference::Id),
+            ("in_ID.UTF-8", LanguagePreference::Id),
+            ("tr-TR", LanguagePreference::Tr),
+            ("ko-KR", LanguagePreference::Ko),
+            ("ja-JP", LanguagePreference::Ja),
+            ("ru-KZ", LanguagePreference::Ru),
+            ("ar-SA", LanguagePreference::Ar),
+            ("ar_SA.UTF-8@calendar=gregorian", LanguagePreference::Ar),
+        ] {
+            let json = serde_json::to_string(json_value).unwrap();
+            assert_eq!(
+                serde_json::from_str::<LanguagePreference>(&json).unwrap(),
+                expected,
+                "{json_value} should map to {expected:?}"
+            );
+        }
+
+        assert!(
+            serde_json::from_str::<LanguagePreference>(r#""pt-PT""#).is_err(),
+            "pt-PT should not silently select Brazilian Portuguese"
+        );
+        assert!(
+            serde_json::from_str::<LanguagePreference>(r#""pt""#).is_err(),
+            "generic pt should not silently select Brazilian Portuguese"
+        );
+        assert!(
+            serde_json::from_str::<LanguagePreference>(r#""es-ES""#).is_err(),
+            "es-ES should not silently select Latin American Spanish"
+        );
+        assert!(
+            serde_json::from_str::<LanguagePreference>(r#""es""#).is_err(),
+            "generic es should not silently select Latin American Spanish"
+        );
+    }
+
+    #[test]
+    fn language_preference_error_lists_canonical_and_legacy_config_tags() {
+        let error = serde_json::from_str::<LanguagePreference>(r#""fr-FR""#)
+            .unwrap_err()
+            .to_string();
+
+        for expected in ["zh-CN", "zh-TW", "es-419", "pt-BR", "zh_hans", "es_419"] {
+            assert!(
+                error.contains(expected),
+                "unknown language preference error should list accepted config tag {expected}: {error}"
+            );
+        }
     }
 
     #[test]
@@ -2400,7 +2679,26 @@ mod tests {
             ShortcutPreference::Disabled
         );
         assert_eq!(LanguagePreference::from_index(1), LanguagePreference::En);
+        assert_eq!(
+            LanguagePreference::from_index(3),
+            LanguagePreference::ZhHant
+        );
+        assert_eq!(LanguagePreference::from_index(12), LanguagePreference::Ar);
+        assert_eq!(
+            LanguagePreference::from_index(99),
+            LanguagePreference::System
+        );
+        assert_eq!(LanguagePreference::PtBr.index(), 5);
         assert_eq!(ThemePreference::from_index(2), ThemePreference::Dark);
+    }
+
+    #[test]
+    fn language_preference_indices_round_trip_all_supported_languages() {
+        for (index, preference) in LanguagePreference::ALL.into_iter().enumerate() {
+            let index = index as i32;
+            assert_eq!(preference.index(), index);
+            assert_eq!(LanguagePreference::from_index(index), preference);
+        }
     }
 
     #[test]

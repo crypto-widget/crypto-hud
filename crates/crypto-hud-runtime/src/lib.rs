@@ -583,6 +583,9 @@ pub struct RuntimeTextLabels<'a> {
     pub source_error: &'a str,
     pub live_count_prefix: &'a str,
     pub live_count_suffix: &'a str,
+    pub elapsed_second_unit: &'a str,
+    pub elapsed_minute_unit: &'a str,
+    pub isolate_numeric_values: bool,
 }
 
 impl Default for RuntimeTextLabels<'static> {
@@ -597,6 +600,9 @@ impl Default for RuntimeTextLabels<'static> {
             source_error: "source issue",
             live_count_prefix: "",
             live_count_suffix: " live",
+            elapsed_second_unit: "s",
+            elapsed_minute_unit: "m",
+            isolate_numeric_values: false,
         }
     }
 }
@@ -708,6 +714,7 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             params.symbols,
             params.quote_cache,
             params.provider_labels,
+            params.labels,
         ),
         source_text: source_text_for_symbols(
             params.source_prefix,
@@ -982,14 +989,41 @@ pub fn quote_rows_for_symbols_with_options(
     symbols
         .iter()
         .map(|symbol| {
-            quote_cache
-                .get(symbol)
-                .map(|state| QuoteRowView::from_state_with_options(symbol, state, display_options))
-                .unwrap_or_else(|| {
-                    QuoteRowView::loading_with_options(symbol, labels, display_options)
-                })
+            if let Some(state) = quote_cache.get(symbol) {
+                isolate_quote_row_values_if_needed(
+                    QuoteRowView::from_state_with_options(symbol, state, display_options),
+                    labels,
+                )
+            } else {
+                isolate_quote_row_symbol_if_needed(
+                    QuoteRowView::loading_with_options(symbol, labels, display_options),
+                    labels,
+                )
+            }
         })
         .collect()
+}
+
+fn isolate_quote_row_values_if_needed(
+    mut row: QuoteRowView,
+    labels: RuntimeTextLabels<'_>,
+) -> QuoteRowView {
+    if labels.isolate_numeric_values {
+        row.symbol = bidi_isolate_if_needed(&row.symbol, labels);
+        row.price = bidi_isolate_if_needed(&row.price, labels);
+        row.change = bidi_isolate_if_needed(&row.change, labels);
+    }
+    row
+}
+
+fn isolate_quote_row_symbol_if_needed(
+    mut row: QuoteRowView,
+    labels: RuntimeTextLabels<'_>,
+) -> QuoteRowView {
+    if labels.isolate_numeric_values {
+        row.symbol = bidi_isolate_if_needed(&row.symbol, labels);
+    }
+    row
 }
 
 pub fn quote_assets_for_symbols(symbols: &[String]) -> Vec<String> {
@@ -1050,10 +1084,12 @@ pub fn updated_text_for_symbols(
 }
 
 fn data_freshness_text(elapsed: Duration, labels: RuntimeTextLabels<'_>) -> String {
-    if elapsed.as_secs() > STALE_DATA_SECONDS {
-        format!("{} {}", labels.stale, format_elapsed(elapsed))
+    let is_stale = elapsed.as_secs() > STALE_DATA_SECONDS;
+    let elapsed_text = format_elapsed_with_labels(elapsed, labels);
+    if is_stale {
+        format!("{} {}", labels.stale, elapsed_text)
     } else {
-        format!("{} {}", labels.updated, format_elapsed(elapsed))
+        format!("{} {}", labels.updated, elapsed_text)
     }
 }
 
@@ -1068,7 +1104,7 @@ pub fn source_text_for_symbols(
 ) -> String {
     let mut parts = vec![
         source_prefix.to_string(),
-        source_display_text(symbols, quote_cache, labels),
+        source_display_text(symbols, quote_cache, labels, text_labels),
     ];
     if has_market_error {
         parts.push(text_labels.source_error.to_string());
@@ -1083,14 +1119,16 @@ pub fn source_name_text_for_symbols(
     symbols: &[String],
     quote_cache: &QuoteCache,
     labels: ProviderLabels<'_>,
+    text_labels: RuntimeTextLabels<'_>,
 ) -> String {
-    source_primary_display_text(symbols, quote_cache, labels)
+    source_primary_display_text(symbols, quote_cache, labels, text_labels)
 }
 
 fn source_display_text(
     symbols: &[String],
     quote_cache: &QuoteCache,
     labels: ProviderLabels<'_>,
+    text_labels: RuntimeTextLabels<'_>,
 ) -> String {
     let mut sources = symbols
         .iter()
@@ -1115,7 +1153,7 @@ fn source_display_text(
 
     match sources.as_slice() {
         [] => labels.mixed.to_string(),
-        [source] => provider_display_label(*source, labels).to_string(),
+        [source] => provider_display_text(*source, labels, text_labels),
         _ => labels.mixed.to_string(),
     }
 }
@@ -1124,6 +1162,7 @@ fn source_primary_display_text(
     symbols: &[String],
     quote_cache: &QuoteCache,
     labels: ProviderLabels<'_>,
+    text_labels: RuntimeTextLabels<'_>,
 ) -> String {
     symbols
         .iter()
@@ -1133,7 +1172,7 @@ fn source_primary_display_text(
                 .map(|state| state.source)
                 .or_else(|| market_pair_source(symbol))
         })
-        .map(|source| provider_display_label(source, labels).to_string())
+        .map(|source| provider_display_text(source, labels, text_labels))
         .unwrap_or_else(|| labels.mixed.to_string())
 }
 
@@ -1164,11 +1203,29 @@ pub fn format_pair_symbol_with_options(
 }
 
 pub fn format_elapsed(elapsed: Duration) -> String {
+    format_elapsed_with_labels(elapsed, RuntimeTextLabels::default())
+}
+
+fn format_elapsed_with_labels(elapsed: Duration, labels: RuntimeTextLabels<'_>) -> String {
     if elapsed.as_secs() < 60 {
-        format!("{}s", elapsed.as_secs())
+        let elapsed = numeric_text(elapsed.as_secs(), labels);
+        format!("{}{}", elapsed, labels.elapsed_second_unit)
     } else {
-        format!("{}m", elapsed.as_secs() / 60)
+        let elapsed = numeric_text(elapsed.as_secs() / 60, labels);
+        format!("{}{}", elapsed, labels.elapsed_minute_unit)
     }
+}
+
+fn provider_display_text(
+    provider: MarketDataSource,
+    labels: ProviderLabels<'_>,
+    text_labels: RuntimeTextLabels<'_>,
+) -> String {
+    bidi_isolate_if_needed(provider_display_label(provider, labels), text_labels)
+}
+
+fn numeric_text(value: u64, labels: RuntimeTextLabels<'_>) -> String {
+    bidi_isolate_if_needed(&value.to_string(), labels)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1208,10 +1265,19 @@ pub fn data_health_for_symbols(
 }
 
 fn live_count_text(connected: usize, total: usize, labels: RuntimeTextLabels<'_>) -> String {
+    let count = bidi_isolate_if_needed(&format!("{connected}/{total}"), labels);
     format!(
-        "{}{connected}/{total}{}",
-        labels.live_count_prefix, labels.live_count_suffix
+        "{}{}{}",
+        labels.live_count_prefix, count, labels.live_count_suffix
     )
+}
+
+fn bidi_isolate_if_needed(value: &str, labels: RuntimeTextLabels<'_>) -> String {
+    if labels.isolate_numeric_values {
+        format!("\u{2066}{value}\u{2069}")
+    } else {
+        value.to_string()
+    }
 }
 
 pub fn evaluate_alerts_from_cache(
@@ -1707,6 +1773,9 @@ mod tests {
                 source_error: "数据源异常",
                 live_count_prefix: "已连 ",
                 live_count_suffix: "",
+                elapsed_second_unit: "秒",
+                elapsed_minute_unit: "分钟",
+                isolate_numeric_values: false,
             },
             has_market_error: false,
             now: Instant::now(),
@@ -1748,6 +1817,125 @@ mod tests {
         });
 
         assert_eq!(view.updated_text, "Stale 4m");
+    }
+
+    #[test]
+    fn runtime_view_localizes_elapsed_units() {
+        let now = Instant::now();
+        let mut cache = QuoteCache::new();
+        cache.insert(
+            "binance:spot:BTC/USDT".to_string(),
+            QuoteState::new(
+                106800.12,
+                1.234,
+                vec![105000.0, 106000.0, 106800.12],
+                MarketDataSource::Binance,
+                now - Duration::from_secs(42),
+            ),
+        );
+
+        let fresh = updated_text_for_symbols(
+            &["binance:spot:BTC/USDT".to_string()],
+            &cache,
+            RuntimeTextLabels {
+                updated: "已更新",
+                stale: "已过期",
+                elapsed_second_unit: "秒",
+                elapsed_minute_unit: "分钟",
+                ..RuntimeTextLabels::default()
+            },
+            false,
+            now,
+        );
+
+        cache.insert(
+            "binance:spot:BTC/USDT".to_string(),
+            QuoteState::new(
+                106800.12,
+                1.234,
+                vec![105000.0, 106000.0, 106800.12],
+                MarketDataSource::Binance,
+                now - Duration::from_secs(240),
+            ),
+        );
+        let stale = updated_text_for_symbols(
+            &["binance:spot:BTC/USDT".to_string()],
+            &cache,
+            RuntimeTextLabels {
+                updated: "已更新",
+                stale: "已过期",
+                elapsed_second_unit: "秒",
+                elapsed_minute_unit: "分钟",
+                ..RuntimeTextLabels::default()
+            },
+            false,
+            now,
+        );
+
+        assert_eq!(fresh, "已更新 42秒");
+        assert_eq!(stale, "已过期 4分钟");
+    }
+
+    #[test]
+    fn runtime_view_isolates_rtl_numeric_status_fragments() {
+        let now = Instant::now();
+        let mut cache = QuoteCache::new();
+        cache.insert(
+            "binance:spot:BTC/USDT".to_string(),
+            QuoteState::new(
+                106800.12,
+                1.234,
+                vec![105000.0, 106000.0, 106800.12],
+                MarketDataSource::Binance,
+                now - Duration::from_secs(240),
+            ),
+        );
+
+        let labels = RuntimeTextLabels {
+            no_pairs: "لا توجد أزواج",
+            connecting: "جار الاتصال",
+            connection_error: "فشل الاتصال",
+            updated: "تم التحديث",
+            stale: "قديم",
+            fallback: "احتياطي",
+            source_error: "مشكلة في المصدر",
+            live_count_prefix: "",
+            live_count_suffix: " مباشر",
+            elapsed_second_unit: " ث",
+            elapsed_minute_unit: " د",
+            isolate_numeric_values: true,
+        };
+
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "quote-board-1",
+            symbols: &[
+                "binance:spot:BTC/USDT".to_string(),
+                "binance:spot:ETH/USDT".to_string(),
+            ],
+            quote_cache: &cache,
+            source_prefix: "تدفق مباشر",
+            provider_labels: ProviderLabels::default(),
+            labels,
+            has_market_error: false,
+            now,
+            display_options: WidgetDisplayOptions::default(),
+        });
+
+        assert_eq!(
+            view.updated_text,
+            "قديم \u{2066}4\u{2069} د · \u{2066}1/2\u{2069} مباشر"
+        );
+        assert_eq!(view.source_name_text, "\u{2066}Binance\u{2069}");
+        assert_eq!(
+            view.source_text,
+            "تدفق مباشر · \u{2066}Binance\u{2069} · \u{2066}1/2\u{2069} مباشر"
+        );
+        assert_eq!(view.quote_rows[0].symbol, "\u{2066}BTC/USDT\u{2069}");
+        assert_eq!(view.quote_rows[0].price, "\u{2066}106800\u{2069}");
+        assert_eq!(view.quote_rows[0].change, "\u{2066}+1.23%\u{2069}");
+        assert_eq!(view.quote_rows[1].symbol, "\u{2066}ETH/USDT\u{2069}");
+        assert_eq!(view.quote_rows[1].price, "جار الاتصال");
+        assert_eq!(view.quote_rows[1].change, "--");
     }
 
     #[test]
@@ -1835,6 +2023,8 @@ mod tests {
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].rule_id, "btc-price");
         assert_eq!(alerts[0].symbol, "binance:spot:BTC/USDT");
-        assert!(alerts[0].body.contains("100000"));
+        assert_eq!(alerts[0].condition, AlertCondition::PriceAbove);
+        assert_eq!(alerts[0].threshold, 100000.0);
+        assert_eq!(alerts[0].current_value, 106800.12);
     }
 }

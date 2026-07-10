@@ -70,6 +70,14 @@ use window_manager::{desktop_size, widget_pin_to_top};
 
 slint::include_modules!();
 
+fn shortcut_registration_status(
+    settings: &settings::AppSettings,
+    error: impl std::fmt::Display,
+) -> String {
+    let locale = i18n::resolve_locale(settings.language);
+    i18n::status_failure_message(locale, i18n::text(locale).status_shortcut_failed, error)
+}
+
 #[cfg(test)]
 const LEGACY_DEFAULT_POSITION_X: i32 = settings::DEFAULT_WIDGET_POSITION_X;
 #[cfg(test)]
@@ -218,7 +226,7 @@ fn main() -> Result<()> {
         proxy_url: settings::effective_network_proxy_url(&app_settings),
     }));
     if let Err(error) = shortcut_manager.borrow_mut().apply(app_settings.shortcut) {
-        *settings_status.borrow_mut() = error;
+        *settings_status.borrow_mut() = shortcut_registration_status(&app_settings, error);
     }
 
     let quote_cache = Rc::new(RefCell::new(QuoteCache::new()));
@@ -416,6 +424,19 @@ mod tests {
         assert_eq!(settings::clamp_opacity(12), settings::MIN_OPACITY_PERCENT);
         assert_eq!(settings::clamp_opacity(70), 70);
         assert_eq!(settings::clamp_opacity(140), settings::MAX_OPACITY_PERCENT);
+    }
+
+    #[test]
+    fn startup_shortcut_failure_status_uses_selected_language() {
+        let settings = AppSettings {
+            language: settings::LanguagePreference::Ar,
+            ..AppSettings::default()
+        };
+
+        assert_eq!(
+            shortcut_registration_status(&settings, "denied"),
+            "فشل تسجيل الاختصار: \u{2066}denied\u{2069}"
+        );
     }
 
     #[test]
@@ -679,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_market_item_uses_local_plugin_metadata() {
+    fn plugin_market_item_preserves_local_plugin_metadata_in_every_locale() {
         let store = LayoutStore {
             widgets: vec![WidgetInstance {
                 id: "plugin-card-1".to_string(),
@@ -695,17 +716,31 @@ mod tests {
         };
         let plugin = local_test_plugin_definition();
 
-        let item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::En);
+        for locale in i18n::Locale::ALL {
+            let item = settings_window::plugin_market_item(&plugin, &store, locale);
 
-        assert_eq!(item.title.as_str(), "Stage 3 Price Card");
+            assert_eq!(
+                item.title.as_str(),
+                "Stage 3 Price Card",
+                "local plugin manifest names should stay exact for {locale:?}"
+            );
+            assert_eq!(item.status.as_str(), "");
+            assert!(item.available);
+            assert!(!item.builtin);
+            assert_eq!(item.symbol_limit, 2);
+            assert_eq!(item.preview_kind, 0);
+            assert_eq!(item.preview_image_count, 0);
+            assert!(item.description.as_str().contains("260x170"));
+            assert!(!item.description.as_str().contains("market.price"));
+        }
+
+        let item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::En);
         assert_eq!(item.usage.as_str(), "Used 1");
-        assert_eq!(item.status.as_str(), "");
-        assert!(item.available);
-        assert!(!item.builtin);
-        assert_eq!(item.symbol_limit, 2);
-        assert_eq!(item.preview_kind, 0);
-        assert_eq!(item.preview_image_count, 0);
-        assert!(item.description.as_str().contains("260x170"));
+        assert!(item.description.as_str().contains("prices"));
+
+        let ar_item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::Ar);
+        assert!(ar_item.description.as_str().contains("الأسعار"));
+        assert!(!ar_item.description.as_str().contains("market.price"));
     }
 
     #[test]
@@ -725,6 +760,34 @@ mod tests {
 
             assert_eq!(item.preview_kind, expected_preview_kind);
         }
+    }
+
+    #[test]
+    fn builtin_slint_plugin_market_titles_follow_locale() {
+        let store = LayoutStore::default();
+        let mut plugin = local_test_plugin_definition();
+        plugin.id = "com.cryptohud.market-compass".to_string();
+        plugin.name = "Market Compass".to_string();
+        plugin.source = plugin::PluginSource::Builtin;
+
+        let zh_item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::ZhHans);
+        assert_eq!(zh_item.title.as_str(), "市场罗盘");
+        assert_eq!(
+            zh_item.description.as_str(),
+            "环形多交易对视图，方便快速观察市场轮动。"
+        );
+
+        let ar_item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::Ar);
+        assert_eq!(ar_item.title.as_str(), "بوصلة السوق");
+        assert_eq!(
+            ar_item.description.as_str(),
+            "عرض دائري لعدة أزواج لرصد دوران السوق بسرعة."
+        );
+
+        plugin.source = plugin::PluginSource::LocalUnsigned;
+        let local_item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::ZhHans);
+        assert_eq!(local_item.title.as_str(), "Market Compass");
+        assert!(local_item.description.as_str().contains("260x170"));
     }
 
     #[test]
@@ -797,6 +860,24 @@ mod tests {
                 WidgetType::QuoteBoard,
                 7,
                 i18n::Locale::ZhHans
+            ),
+            "Quote Board 7"
+        );
+        assert_eq!(
+            settings_window::normalize_widget_name(
+                "行情面板 9",
+                WidgetType::QuoteBoard,
+                7,
+                i18n::Locale::En
+            ),
+            "Quote Board 9"
+        );
+        assert_eq!(
+            settings_window::normalize_widget_name(
+                "لوحة الأسعار \u{2066}7\u{2069}",
+                WidgetType::QuoteBoard,
+                7,
+                i18n::Locale::Ar
             ),
             "Quote Board 7"
         );

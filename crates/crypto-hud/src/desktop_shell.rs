@@ -334,6 +334,7 @@ pub(crate) fn refresh_tray_text(tray: &AppTray, settings: AppSettings) {
     let text = i18n::text(i18n::resolve_locale(settings.language));
     tray.set_tray_tooltip_text(text.tray_tooltip.into());
     tray.set_tray_settings_text(text.tray_settings.into());
+    tray.set_tray_show_widgets_text(text.tray_show_widgets.into());
     tray.set_tray_quit_text(text.tray_quit.into());
     let tray_enabled = effective_tray_icon_enabled(&settings);
     tray.set_tray_visible(tray_enabled);
@@ -341,5 +342,33 @@ pub(crate) fn refresh_tray_text(tray: &AppTray, settings: AppSettings) {
         restore_native_tray_icon(tray);
     } else {
         remove_native_tray_icon();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn refresh_tray_text_sets_every_localized_tray_label() {
+        let source = include_str!("desktop_shell.rs");
+        let refresh_fn = source
+            .split("pub(crate) fn refresh_tray_text(")
+            .nth(1)
+            .unwrap()
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+
+        for required in [
+            "let text = i18n::text(i18n::resolve_locale(settings.language));",
+            "tray.set_tray_tooltip_text(text.tray_tooltip.into());",
+            "tray.set_tray_settings_text(text.tray_settings.into());",
+            "tray.set_tray_show_widgets_text(text.tray_show_widgets.into());",
+            "tray.set_tray_quit_text(text.tray_quit.into());",
+        ] {
+            assert!(
+                refresh_fn.contains(required),
+                "tray text refresh should set localized tray label: {required}"
+            );
+        }
     }
 }
