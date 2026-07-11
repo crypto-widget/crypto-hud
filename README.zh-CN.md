@@ -1,172 +1,227 @@
+<p align="center">
+  <img src="crates/crypto-hud/ui/icon.png" width="88" alt="Crypto HUD 图标">
+</p>
+
 <h1 align="center">Crypto HUD</h1>
 
 <p align="center">
-  轻量、本地、安全的 Windows 桌面行情 HUD。
+  <strong>行情一直在，需要时扫一眼。</strong><br>
+  常驻 Windows 桌面的原生加密行情组件，不抢走你的注意力。
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+  <a href="README.md">English</a> ·
+  <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="README.zh-TW.md">繁體中文</a> ·
+  <a href="README.es.md">Español</a> ·
+  <a href="README.pt-BR.md">Português</a> ·
+  <a href="README.vi.md">Tiếng Việt</a><br>
+  <a href="README.id.md">Bahasa Indonesia</a> ·
+  <a href="README.tr.md">Türkçe</a> ·
+  <a href="README.ko.md">한국어</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.ru.md">Русский</a> ·
+  <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center">
-  <img alt="状态：alpha" src="https://img.shields.io/badge/status-alpha-f59e0b">
-  <img alt="平台：Windows" src="https://img.shields.io/badge/platform-Windows-0078d4">
-  <img alt="运行方式：原生" src="https://img.shields.io/badge/runtime-native-22c55e">
-  <img alt="无需账号" src="https://img.shields.io/badge/account-not%20required-14b8a6">
-  <img alt="许可证：MIT" src="https://img.shields.io/badge/license-MIT-111827">
+  <img alt="平台：Windows" src="https://img.shields.io/badge/platform-Windows-0078d4?style=flat-square&logo=windows11&logoColor=white">
+  <img alt="使用 Rust 构建" src="https://img.shields.io/badge/built_with-Rust-dea584?style=flat-square&logo=rust&logoColor=white">
+  <img alt="原生 Slint 界面" src="https://img.shields.io/badge/UI-native_Slint-2379f4?style=flat-square">
+  <img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square">
 </p>
 
-> 把行情放在桌面边缘，需要时扫一眼，不需要时安静待着。
+<p align="center">
+  <a href="#快速开始"><strong>本地运行</strong></a> ·
+  <a href="#组件效果"><strong>查看组件</strong></a> ·
+  <a href="CUSTOM_UI_PLUGIN_DEVELOPMENT.md"><strong>开发组件</strong></a>
+</p>
 
-Crypto HUD 让加密货币价格安静地显示在你的 Windows 桌面上。
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-light.png">
+    <img src="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-dark.png" width="500" alt="Market Compass 组件，展示 BTC 价格、K 线和周边市场交易对">
+  </picture>
+</p>
 
-不用再一次次切到交易所，只为了看一眼行情。把一个小小的价格卡片放在顺眼的位置，
-然后继续工作、学习、写代码或者过自己的生活。想看的时候扫一眼，不想看的时候它不会打扰你。
+<p align="center">
+  <sub>行情就在工作区边缘。不用切交易所，不连接钱包，也不制造噪音。</sub>
+</p>
 
-项目目前处于 alpha 阶段。它已经可以用来查看价格，但仍属于早期软件，功能和界面可能会快速变化。
+---
 
-## 产品特点
+Crypto HUD 是一款轻量、本地优先的桌面行情工具，适合想关注几个币种、
+又不想整天泡在交易终端里的人。把组件摆在顺眼的位置，继续工作；
+只有当行情值得在意时，再抬眼看一下。
 
-- **扫一眼行情**：价格常驻桌面边缘，不用反复打开交易所，也不打断工作和生活。
-- **轻量低占用**：原生 Rust + Slint，不依赖 Electron、Tauri、WebView 或内置浏览器运行时。
-- **本地运行更安心**：布局和偏好保存在本机，不需要账号、OAuth、API key、钱包权限、私钥或助记词。
-- **一键隐藏/显示**：按 `Alt+C` 隐藏所有组件，需要时再一键唤回。
-- **只看行情，不碰资产**：只读取公开行情，不下单、不连接钱包、不托管资产。
+<table>
+  <tr>
+    <td width="25%"><strong>⚡ 原生轻量</strong><br><sub>Rust + Slint，不依赖 Electron、Tauri、WebView 或内置浏览器。</sub></td>
+    <td width="25%"><strong>👀 一眼看懂</strong><br><sub>可拖拽、可置顶的组件，让关键数字一直在视线内。</sub></td>
+    <td width="25%"><strong>🔒 本地优先</strong><br><sub>布局和偏好保存在本机，不需要账号或 API Key。</sub></td>
+    <td width="25%"><strong>🙈 随时安静</strong><br><sub>按 <kbd>Alt</kbd> + <kbd>C</kbd> 一键隐藏或恢复全部组件。</sub></td>
+  </tr>
+</table>
 
-## 它能做什么
+## 组件效果
 
-- 在桌面显示可拖拽、可置顶的悬浮行情组件。
-- 选择关注的币种/交易对，并从 Binance、Coinbase、OKX 和 Hyperliquid 获取实时行情。
-- 支持不同组件样式、浅色/深色主题、12 种界面语言、阿拉伯语 RTL 布局和涨跌颜色偏好。
-- 自动保存组件位置和设置，下次打开继续使用。
+你可以选择极简行情条、完整图表卡片或多币种看板。内置组件和自定义组件
+使用同一套插件协议。
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.focus-ticker/ui/preview-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/plugins/com.cryptohud.focus-ticker/ui/preview-light.png">
+    <img src="crates/crypto-hud/plugins/com.cryptohud.focus-ticker/ui/preview-dark.png" width="820" alt="Focus Ticker，展示 BTC 价格、日涨跌和迷你走势图">
+  </picture>
+</p>
+
+<p align="center"><strong>Focus Ticker</strong> — 只看一个市场，不多占一点注意力。</p>
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.trust-card/ui/preview-dark.png">
+        <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/plugins/com.cryptohud.trust-card/ui/preview-light.png">
+        <img src="crates/crypto-hud/plugins/com.cryptohud.trust-card/ui/preview-dark.png" width="500" alt="Trust Card，展示 BTC 价格和较大的行情图表">
+      </picture>
+    </td>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/ui/previews/quote-board-dark.png">
+        <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/ui/previews/quote-board-light.png">
+        <img src="crates/crypto-hud/ui/previews/quote-board-dark.png" width="360" alt="Quote Board，展示多个加密货币交易对">
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Trust Card</strong><br><sub>当一个交易对值得认真关注，给你更多上下文。</sub></td>
+    <td align="center"><strong>Quote Board</strong><br><sub>用很小的空间，同时感知多个市场。</sub></td>
+  </tr>
+</table>
+
+<details>
+  <summary><strong>桌面是浅色主题？</strong> 查看浅色效果</summary>
+  <br>
+  <table>
+    <tr>
+      <td width="50%" align="center"><img src="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-light.png" width="440" alt="浅色主题的 Market Compass"></td>
+      <td width="50%" align="center"><img src="crates/crypto-hud/plugins/com.cryptohud.trust-card/ui/preview-light.png" width="480" alt="浅色主题的 Trust Card"></td>
+    </tr>
+  </table>
+</details>
+
+## 为后台常驻而生
+
+- **真正的桌面组件**：自由拖动、保持置顶，并在下次启动时恢复原来的布局。
+- **四个公开行情源**：Binance、Coinbase、OKX 和 Hyperliquid。
+- **灵活的外观**：多种组件样式、深浅色主题、透明度控制和涨跌颜色偏好。
+- **全局专注开关**：按 <kbd>Alt</kbd> + <kbd>C</kbd> 一次隐藏或显示整个 HUD。
+- **12 种界面语言**：包含简繁中文、英语、日语、韩语、西班牙语、葡萄牙语和 RTL 阿拉伯语等。
+- **支持插件扩展**：用 Slint 编写本地组件，声明所需数据、主题、参数和预览图。
 
 支持的界面语言：`en`、`zh-CN`、`zh-TW`、`es-419`、`pt-BR`、`vi`、`id`、
 `tr`、`ko`、`ja`、`ru` 和 `ar`。
 
-Crypto HUD 只用于查看公开行情信息。它不会下单，不连接钱包，不托管资产，也不会要求你提供交易所 API key。
-它的安全边界刻意保持简单：公开行情来自市场数据源，布局和偏好设置保存在本机。
+> [!IMPORTANT]
+> Crypto HUD 刻意只做行情查看。它会读取公开市场数据，但不会下单、连接钱包、
+> 托管资产，也不会索要私钥、助记词、交易所账号或 API Key。
 
-## 适合谁使用
+## 快速开始
 
-如果你有这些需求，Crypto HUD 可能适合你：
-
-- 白天会一直关注几个币种。
-- 不想反复打开交易所，只为了确认一下价格。
-- 想要一个轻量原生桌面工具，而不是完整交易终端。
-- 喜欢把小组件固定摆在桌面上。
-
-如果你现在需要完整图表、投资组合统计、交易下单或复杂提醒自动化，它暂时还不是最合适的工具。
-
-## 当前状态
-
-Crypto HUD 是一个 alpha 阶段的原生 Windows 桌面应用，使用 Rust 和 Slint 构建。
-
-- 作为单个原生桌面进程运行。
-- 使用真正的桌面窗口，而不是 WebView 或浏览器宿主 UI。
-- 已包含主界面、托盘控制、全局隐藏/显示快捷键、本地持久化、插件加载和 Windows 打包脚本。
-- 默认快捷键：`Alt+C` 隐藏或显示所有组件。
-
-## 本地试用
-
-你需要 Rust。项目使用 `mise` 固定预期的 Rust 工具链版本。
-
-请先审阅 `mise.toml`，然后安装工具链：
+Crypto HUD 面向 Windows 构建。仓库使用 `mise` 固定 Rust `1.96`，
+并提供一条命令即可完成的本地启动任务。
 
 ```powershell
+git clone https://github.com/crypto-widget/crypto-hud.git
+cd crypto-hud
 mise trust
 mise install
-```
-
-检查项目能否构建：
-
-```powershell
-mise run check
-```
-
-运行应用：
-
-```powershell
 mise run run-app
 ```
 
-如果想指定启动几个组件：
+以上命令会各启动一个内置组件。如果只想启动指定数量的组件：
 
 ```powershell
 cargo run -p crypto-hud -- --widgets 3
 ```
 
-## 基本使用
+启动后：
 
-- 拖拽价格卡片即可移动。
-- 点击托盘图标打开主界面。
-- 右键托盘图标可以打开主界面或退出。
-- 在设置里可以添加组件、选择币种、调整透明度、切换主题、配置开机启动，以及修改市场数据偏好。
-- 使用 `Alt+C` 隐藏或显示所有组件。
+1. 拖动任意组件，把它放到合适的位置。
+2. 点击托盘图标打开设置。
+3. 添加组件、选择币种、切换主题并调整透明度。
+4. 想要干净桌面时，按 <kbd>Alt</kbd> + <kbd>C</kbd>。
 
-布局和设置会自动保存。做隔离测试时，可以设置自定义状态目录：
+组件位置和偏好设置会自动保存。
 
-```powershell
-$env:CRYPTO_HUD_STATE_DIR = "$PWD\.crypto-hud-state"
-mise run run-app
-```
+## 做成你喜欢的样子
 
-## 给贡献者
+Crypto HUD 的内置组件由本地插件系统驱动。组件可以声明币种、行情数据能力、
+尺寸、主题和设置参数，同时不直接拥有网络或文件系统权限。
 
-常用开发命令：
+- 阅读[自定义 UI 插件开发指南](CUSTOM_UI_PLUGIN_DEVELOPMENT.md)。
+- 查看[插件协议与内置示例](crates/crypto-hud/plugins/README.md)。
+- 从现有 Slint 组件出发，给行情换一种形状。
+
+## 开发
 
 ```powershell
 mise run format-check
 mise run check
 mise run test
-mise run format
 mise run run-app
-powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\single-instance-smoke.ps1
 ```
 
-代码拆分为几个小型 Rust crate：
+<details>
+  <summary><strong>仓库结构与 GUI 冒烟测试</strong></summary>
+  <br>
 
-```text
-crates/
-  crypto-hud-core/          市场符号、格式化和提醒基础逻辑
-  crypto-hud-market/        行情数据获取
-  crypto-hud-runtime/       小组件运行时视图合同
-  crypto-hud-shell-state/   设置和布局状态持久化
-  crypto-hud/              原生桌面外壳和 Slint UI
-```
+  ```text
+  crates/
+    crypto-hud-core/          市场符号、格式化和提醒基础逻辑
+    crypto-hud-market/        公开行情数据获取
+    crypto-hud-runtime/       组件运行时视图协议
+    crypto-hud-shell-state/   设置和布局状态持久化
+    crypto-hud/               原生 Windows 外壳和 Slint UI
+  ```
 
-内置和本地小组件插件合同位于 `crates/crypto-hud/plugins/README.md`。
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
+  powershell -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
+  powershell -ExecutionPolicy Bypass -File .\scripts\single-instance-smoke.ps1
+  ```
+</details>
 
-贡献指南见 `CONTRIBUTING.md`，安全问题报告方式见 `SECURITY.md`。
+<details>
+  <summary><strong>Windows 发布打包</strong></summary>
+  <br>
 
-## 发布打包
+  发布包由本地 Windows 脚本生成。打包流程会在 `dist/` 中创建 zip、校验和与
+  release manifest。生产包必须使用 Authenticode 签名；smoke 脚本仅通过明确的
+  本地开发开关使用未签名包。
 
-Crypto HUD 目前使用本地 Windows 发布脚本，而不是 GitHub Actions 自动发布流程。
-
-```powershell
-cargo test --locked --workspace
-cargo audit
-powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-# 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）。
-powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
-```
-
-打包脚本会在 `dist/` 中生成 Windows zip、校验和和 release manifest。安装器会先校验包内容，
-再复制文件。生产包必须使用 Authenticode 签名；smoke 脚本仅通过明确的本地开发开关使用
-未签名包。相关签名环境变量记录在 `scripts/package-windows.ps1` 中。
+  ```powershell
+  cargo test --locked --workspace
+  cargo audit
+  powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
+  powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
+  # 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）。
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
+  ```
+</details>
 
 ## 路线图
 
-- 更好的数据源健康状态、过期数据状态和错误状态。
-- 价格和 24 小时涨跌幅提醒。
-- 复制、重命名、排序和按组件显示/隐藏。
-- 更好的首次启动摆放和恢复。
-- 更完整的安装器格式。
+当前重点包括更清晰的数据源健康状态、价格与 24 小时涨跌提醒、更丰富的组件管理、
+更好的首次启动摆放，以及更完整的安装器。
+
+欢迎参与贡献。请查看[贡献指南](CONTRIBUTING.md)与[更新日志](CHANGELOG.md)；
+报告漏洞前，请先阅读[安全策略](SECURITY.md)。
 
 ## 许可证
 
-Crypto HUD 使用 MIT License 授权。详见 `LICENSE`。
+MIT © Crypto HUD Contributors
