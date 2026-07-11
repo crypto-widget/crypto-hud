@@ -150,6 +150,25 @@ impl From<(i32, i32)> for WidgetSize {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopWorkArea {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl DesktopWorkArea {
+    pub const fn from_desktop_size(desktop_size: (i32, i32)) -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            width: desktop_size.0,
+            height: desktop_size.1,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum WidgetSizePolicy {
     #[default]
@@ -1241,6 +1260,22 @@ pub fn load_layout_store_with_diagnostics(
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
 ) -> LoadedLayoutStore {
+    load_layout_store_with_diagnostics_and_work_areas(
+        path,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn load_layout_store_with_diagnostics_and_work_areas(
+    path: &Path,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> LoadedLayoutStore {
     match try_load_persisted_layout_store(path) {
         Ok(Some(persisted)) => {
             return finish_loaded_layout_store(
@@ -1249,6 +1284,7 @@ pub fn load_layout_store_with_diagnostics(
                 requested_widget_count,
                 catalog,
                 desktop_size,
+                work_areas,
             );
         }
         Ok(None) => {}
@@ -1258,6 +1294,7 @@ pub fn load_layout_store_with_diagnostics(
                 requested_widget_count,
                 catalog,
                 desktop_size,
+                work_areas,
             );
         }
     }
@@ -1274,6 +1311,7 @@ pub fn load_layout_store_with_diagnostics(
                     requested_widget_count,
                     catalog,
                     desktop_size,
+                    work_areas,
                 );
                 if let Err(error) = save_layout_store(path, &loaded.store) {
                     eprintln!(
@@ -1290,13 +1328,20 @@ pub fn load_layout_store_with_diagnostics(
                     requested_widget_count,
                     catalog,
                     desktop_size,
+                    work_areas,
                 );
             }
         }
     }
 
     let mut store = LayoutStore::default();
-    normalize_store_with_catalog(&mut store, requested_widget_count, catalog, desktop_size);
+    normalize_store_with_catalog_and_work_areas(
+        &mut store,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        work_areas,
+    );
     LoadedLayoutStore {
         store,
         source: LayoutStoreLoadSource::Missing,
@@ -1310,12 +1355,21 @@ fn finish_loaded_layout_store(
     requested_widget_count: usize,
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
 ) -> LoadedLayoutStore {
     let mut store = match persisted {
         PersistedLayoutStore::Current(store) => store,
-        PersistedLayoutStore::Legacy(store) => migrate_legacy_store(store, desktop_size),
+        PersistedLayoutStore::Legacy(store) => {
+            migrate_legacy_store_in_work_areas(store, desktop_size, work_areas)
+        }
     };
-    normalize_store_with_catalog(&mut store, requested_widget_count, catalog, desktop_size);
+    normalize_store_with_catalog_and_work_areas(
+        &mut store,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        work_areas,
+    );
     LoadedLayoutStore {
         store,
         source,
@@ -1328,10 +1382,17 @@ fn default_layout_store_after_error(
     requested_widget_count: usize,
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
 ) -> LoadedLayoutStore {
     let warning = layout_store_load_warning(&error);
     let mut store = LayoutStore::default();
-    normalize_store_with_catalog(&mut store, requested_widget_count, catalog, desktop_size);
+    normalize_store_with_catalog_and_work_areas(
+        &mut store,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        work_areas,
+    );
     LoadedLayoutStore {
         store,
         source: LayoutStoreLoadSource::DefaultsAfterError,
@@ -1402,6 +1463,18 @@ fn legacy_layout_store_paths(path: &Path) -> Vec<PathBuf> {
 }
 
 pub fn migrate_legacy_store(legacy: LegacyLayoutStore, desktop_size: (i32, i32)) -> LayoutStore {
+    migrate_legacy_store_in_work_areas(
+        legacy,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+fn migrate_legacy_store_in_work_areas(
+    legacy: LegacyLayoutStore,
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> LayoutStore {
     let settings = legacy.settings.clone().normalized();
     let symbols = normalized_symbols_for_type(WidgetKind::QuoteBoard, legacy.symbols);
     let mut widgets = legacy.widgets.into_iter().collect::<Vec<_>>();
@@ -1426,7 +1499,7 @@ pub fn migrate_legacy_store(legacy: LegacyLayoutStore, desktop_size: (i32, i32))
             })
             .collect(),
     };
-    normalize_store_with_catalog(&mut store, 0, &[], desktop_size);
+    normalize_store_with_catalog_and_work_areas(&mut store, 0, &[], desktop_size, work_areas);
     store
 }
 
@@ -1439,6 +1512,22 @@ pub fn normalize_store_with_catalog(
     requested_widget_count: usize,
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
+) {
+    normalize_store_with_catalog_and_work_areas(
+        store,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    );
+}
+
+pub fn normalize_store_with_catalog_and_work_areas(
+    store: &mut LayoutStore,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
 ) {
     store.settings = store.settings.clone().normalized();
     store.next_widget_number = store.next_widget_number.max(DEFAULT_NEXT_WIDGET_NUMBER);
@@ -1546,7 +1635,11 @@ pub fn normalize_store_with_catalog(
             instance.layout.x = layout.x;
             instance.layout.y = layout.y;
         }
-        if layout_needs_recovery_for_size(&instance.layout, instance_size, desktop_size) {
+        if layout_needs_recovery_for_size_in_work_areas(
+            &instance.layout,
+            instance_size,
+            work_areas,
+        ) {
             let layout =
                 default_layout_for_size(index, instance_size, store.settings.clone(), desktop_size);
             instance.layout.x = layout.x;
@@ -1659,8 +1752,26 @@ pub fn layout_for_instance(
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
 ) -> WidgetLayout {
+    layout_for_instance_in_work_areas(
+        instance,
+        index,
+        settings,
+        catalog,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn layout_for_instance_in_work_areas(
+    instance: &WidgetInstance,
+    index: usize,
+    settings: AppSettings,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> WidgetLayout {
     let size = widget_size_for_instance(instance, catalog);
-    if layout_needs_recovery_for_size(&instance.layout, size, desktop_size) {
+    if layout_needs_recovery_for_size_in_work_areas(&instance.layout, size, work_areas) {
         let mut layout = default_layout_for_size(index, size, settings.clone(), desktop_size);
         layout.scale_percent =
             widget_scale_percent_for_instance(instance, catalog, settings.widget_scale_percent);
@@ -1776,14 +1887,37 @@ pub fn layout_has_visible_area_for_size(
     size: WidgetSize,
     desktop_size: (i32, i32),
 ) -> bool {
-    let (desktop_width, desktop_height) = desktop_size;
-    let visible_left = layout.x.max(0);
-    let visible_top = layout.y.max(0);
-    let visible_right = (layout.x + size.width).min(desktop_width);
-    let visible_bottom = (layout.y + size.height).min(desktop_height);
+    layout_has_visible_area_for_size_in_work_areas(
+        layout,
+        size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
 
-    visible_right - visible_left >= MIN_VISIBLE_WIDGET_PX
-        && visible_bottom - visible_top >= MIN_VISIBLE_WIDGET_PX
+pub fn layout_has_visible_area_for_size_in_work_areas(
+    layout: &WidgetLayout,
+    size: WidgetSize,
+    work_areas: &[DesktopWorkArea],
+) -> bool {
+    let widget_left = i64::from(layout.x);
+    let widget_top = i64::from(layout.y);
+    let widget_right = widget_left + i64::from(size.width.max(0));
+    let widget_bottom = widget_top + i64::from(size.height.max(0));
+
+    work_areas.iter().any(|work_area| {
+        if work_area.width <= 0 || work_area.height <= 0 {
+            return false;
+        }
+        let work_left = i64::from(work_area.x);
+        let work_top = i64::from(work_area.y);
+        let work_right = work_left + i64::from(work_area.width);
+        let work_bottom = work_top + i64::from(work_area.height);
+        let visible_width = widget_right.min(work_right) - widget_left.max(work_left);
+        let visible_height = widget_bottom.min(work_bottom) - widget_top.max(work_top);
+
+        visible_width >= i64::from(MIN_VISIBLE_WIDGET_PX)
+            && visible_height >= i64::from(MIN_VISIBLE_WIDGET_PX)
+    })
 }
 
 pub fn clamp_widget_size(size: WidgetSize) -> WidgetSize {
@@ -1910,8 +2044,20 @@ pub fn layout_needs_recovery_for_size(
     size: WidgetSize,
     desktop_size: (i32, i32),
 ) -> bool {
+    layout_needs_recovery_for_size_in_work_areas(
+        layout,
+        size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn layout_needs_recovery_for_size_in_work_areas(
+    layout: &WidgetLayout,
+    size: WidgetSize,
+    work_areas: &[DesktopWorkArea],
+) -> bool {
     is_parked_position(layout.x, layout.y)
-        || !layout_has_visible_area_for_size(layout, size, desktop_size)
+        || !layout_has_visible_area_for_size_in_work_areas(layout, size, work_areas)
 }
 
 pub fn is_parked_position(x: i32, y: i32) -> bool {
@@ -1963,6 +2109,20 @@ pub fn remove_widget_from_store_by_id(
     widget_id: &str,
     desktop_size: (i32, i32),
 ) -> bool {
+    remove_widget_from_store_by_id_in_work_areas(
+        store,
+        widget_id,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn remove_widget_from_store_by_id_in_work_areas(
+    store: &mut LayoutStore,
+    widget_id: &str,
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> bool {
     let Some(index) = store
         .widgets
         .iter()
@@ -1979,7 +2139,7 @@ pub fn remove_widget_from_store_by_id(
         .widgets
         .get(next_index)
         .map(|widget| widget.id.clone());
-    normalize_store_with_catalog(store, 0, &[], desktop_size);
+    normalize_store_with_catalog_and_work_areas(store, 0, &[], desktop_size, work_areas);
     true
 }
 
@@ -3548,5 +3708,65 @@ mod tests {
         assert!(warning.to_string().contains("was preserved at"));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn multi_monitor_work_areas_preserve_valid_secondary_screen_positions() {
+        let work_areas = [
+            DesktopWorkArea {
+                x: -1920,
+                y: 0,
+                width: 1920,
+                height: 1040,
+            },
+            DesktopWorkArea {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1040,
+            },
+            DesktopWorkArea {
+                x: 1920,
+                y: -200,
+                width: 2560,
+                height: 1440,
+            },
+        ];
+        let size = WidgetSize {
+            width: QUOTE_BOARD_WIDTH,
+            height: QUOTE_BOARD_HEIGHT,
+        };
+        let layout_at = |x, y| WidgetLayout {
+            x,
+            y,
+            width: size.width,
+            height: size.height,
+            ..WidgetLayout::default()
+        };
+
+        for layout in [layout_at(-1800, 100), layout_at(2200, -100)] {
+            assert!(layout_has_visible_area_for_size_in_work_areas(
+                &layout,
+                size,
+                &work_areas
+            ));
+            assert!(!layout_needs_recovery_for_size_in_work_areas(
+                &layout,
+                size,
+                &work_areas
+            ));
+        }
+
+        let truly_offscreen = layout_at(5000, 1600);
+        assert!(!layout_has_visible_area_for_size_in_work_areas(
+            &truly_offscreen,
+            size,
+            &work_areas
+        ));
+        assert!(layout_needs_recovery_for_size_in_work_areas(
+            &truly_offscreen,
+            size,
+            &work_areas
+        ));
     }
 }

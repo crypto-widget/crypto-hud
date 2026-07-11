@@ -6,7 +6,7 @@ use std::{
 };
 
 use crypto_hud_shell_state as settings;
-use settings::{AppSettings, LayoutStore, WidgetInstance};
+use settings::{AppSettings, DesktopWorkArea, LayoutStore, WidgetInstance};
 use slint::{PhysicalPosition, Timer, TimerMode, WindowPosition};
 
 use crate::{
@@ -38,6 +38,8 @@ pub(crate) fn show_widgets(
     widgets_hidden: &Rc<RefCell<bool>>,
     settings_mode_active: &Rc<RefCell<bool>>,
 ) {
+    let desktop_size = desktop_size();
+    let work_areas = desktop_work_areas();
     let store = layouts.borrow();
     for (index, runtime) in widgets.borrow().iter().enumerate() {
         if let Some(instance) = store
@@ -51,12 +53,13 @@ pub(crate) fn show_widgets(
                 }
                 continue;
             }
-            let layout = settings::layout_for_instance(
+            let layout = settings::layout_for_instance_in_work_areas(
                 instance,
                 index,
                 store.settings.clone().normalized(),
                 &[],
-                desktop_size(),
+                desktop_size,
+                &work_areas,
             );
             runtime
                 .ui
@@ -408,6 +411,15 @@ pub(crate) fn desktop_size() -> (i32, i32) {
     platform_desktop_size()
 }
 
+pub(crate) fn desktop_work_areas() -> Vec<DesktopWorkArea> {
+    let work_areas = platform_desktop_work_areas();
+    if work_areas.is_empty() {
+        vec![DesktopWorkArea::from_desktop_size(desktop_size())]
+    } else {
+        work_areas
+    }
+}
+
 #[cfg(windows)]
 fn platform_desktop_size() -> (i32, i32) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
@@ -421,9 +433,62 @@ fn platform_desktop_size() -> (i32, i32) {
     }
 }
 
+#[cfg(windows)]
+fn platform_desktop_work_areas() -> Vec<DesktopWorkArea> {
+    use windows_sys::Win32::Foundation::{LPARAM, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+    };
+
+    unsafe extern "system" fn enum_monitor(
+        monitor: HMONITOR,
+        _device_context: HDC,
+        _monitor_rect: *mut RECT,
+        data: LPARAM,
+    ) -> i32 {
+        let work_areas = unsafe { &mut *(data as *mut Vec<DesktopWorkArea>) };
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..MONITORINFO::default()
+        };
+        if unsafe { GetMonitorInfoW(monitor, &mut info) } != 0 {
+            let rect = info.rcWork;
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            if width > 0 && height > 0 {
+                work_areas.push(DesktopWorkArea {
+                    x: rect.left,
+                    y: rect.top,
+                    width,
+                    height,
+                });
+            }
+        }
+        1
+    }
+
+    let mut work_areas: Vec<DesktopWorkArea> = Vec::new();
+    unsafe {
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            Some(enum_monitor),
+            (&mut work_areas as *mut Vec<DesktopWorkArea>) as LPARAM,
+        );
+    }
+    work_areas.sort_by_key(|area| (area.x, area.y, area.width, area.height));
+    work_areas.dedup();
+    work_areas
+}
+
 #[cfg(not(windows))]
 fn platform_desktop_size() -> (i32, i32) {
     (DEFAULT_DESKTOP_WIDTH, DEFAULT_DESKTOP_HEIGHT)
+}
+
+#[cfg(not(windows))]
+fn platform_desktop_work_areas() -> Vec<DesktopWorkArea> {
+    Vec::new()
 }
 
 #[cfg(windows)]
