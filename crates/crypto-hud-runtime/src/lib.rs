@@ -30,6 +30,7 @@ const CHART_VERTICAL_PADDING: f64 = 6.0;
 const CHART_MAX_RENDER_POINTS: usize = 96;
 const CHART_MAX_CANDLES: usize = 34;
 const STALE_DATA_SECONDS: u64 = 180;
+const CHART_STALE_DATA_SECONDS: u64 = 10 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -467,7 +468,18 @@ pub struct MarketQuoteSnapshot {
     pub price: f64,
     pub change_percent_24h: f64,
     pub chart_closes_24h: Vec<f64>,
+    #[serde(default)]
+    pub chart_candles_24h: Vec<ChartCandle>,
     pub source: MarketDataSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ChartCandle {
+    pub open_time_millis: u64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
 }
 
 pub type QuoteCache = HashMap<String, QuoteState>;
@@ -477,6 +489,9 @@ pub struct QuoteState {
     pub price: f64,
     pub change_percent_24h: f64,
     pub chart_closes_24h: Vec<f64>,
+    pub chart_candles_24h: Vec<ChartCandle>,
+    pub chart_updated_at: Option<Instant>,
+    pub chart_error: Option<String>,
     pub source: MarketDataSource,
     pub updated_at: Instant,
 }
@@ -493,18 +508,47 @@ impl QuoteState {
             price,
             change_percent_24h,
             chart_closes_24h,
+            chart_candles_24h: Vec::new(),
+            chart_updated_at: Some(updated_at),
+            chart_error: None,
+            source,
+            updated_at,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_chart_status(
+        price: f64,
+        change_percent_24h: f64,
+        chart_closes_24h: Vec<f64>,
+        chart_candles_24h: Vec<ChartCandle>,
+        source: MarketDataSource,
+        updated_at: Instant,
+        chart_updated_at: Option<Instant>,
+        chart_error: Option<String>,
+    ) -> Self {
+        Self {
+            price,
+            change_percent_24h,
+            chart_closes_24h,
+            chart_candles_24h,
+            chart_updated_at,
+            chart_error,
             source,
             updated_at,
         }
     }
 
     pub fn from_snapshot(snapshot: &MarketQuoteSnapshot, updated_at: Instant) -> Self {
-        Self::new(
+        Self::new_with_chart_status(
             snapshot.price,
             snapshot.change_percent_24h,
             snapshot.chart_closes_24h.clone(),
+            snapshot.chart_candles_24h.clone(),
             snapshot.source,
             updated_at,
+            Some(updated_at),
+            None,
         )
     }
 }
@@ -674,8 +718,16 @@ impl QuoteRowView {
 }
 
 pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetRuntimeView {
-    let chart = chart_path_view_for_symbols(params.symbols, params.quote_cache);
-    let quote_charts = chart_path_views_for_symbols(params.symbols, params.quote_cache);
+    let chart = chart_path_view_for_symbols_at(params.symbols, params.quote_cache, params.now);
+    let quote_charts =
+        chart_path_views_for_symbols_at(params.symbols, params.quote_cache, params.now);
+    let has_market_error = params.has_market_error
+        || params.symbols.iter().any(|symbol| {
+            params
+                .quote_cache
+                .get(symbol)
+                .is_some_and(|state| state.chart_error.is_some())
+        });
     WidgetRuntimeView {
         widget_id: params.widget_id.to_string(),
         quote_rows: quote_rows_for_symbols_with_options(
@@ -716,7 +768,7 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             params.provider_labels,
             params.labels,
             data_health_for_symbols(params.symbols, params.quote_cache, params.now),
-            params.has_market_error,
+            has_market_error,
         ),
         updated_text: updated_text_for_symbols(
             params.symbols,
@@ -771,42 +823,104 @@ impl ChartPathView {
 }
 
 pub fn chart_path_view_for_symbols(symbols: &[String], quote_cache: &QuoteCache) -> ChartPathView {
+    chart_path_view_for_symbols_at(symbols, quote_cache, Instant::now())
+}
+
+fn chart_path_view_for_symbols_at(
+    symbols: &[String],
+    quote_cache: &QuoteCache,
+    now: Instant,
+) -> ChartPathView {
     let Some(state) = symbols.first().and_then(|symbol| quote_cache.get(symbol)) else {
         return ChartPathView::empty();
     };
-    chart_path_view_from_closes(&state.chart_closes_24h)
+    chart_path_view_from_state(state, now)
 }
 
 pub fn chart_path_views_for_symbols(
     symbols: &[String],
     quote_cache: &QuoteCache,
 ) -> Vec<ChartPathView> {
+    chart_path_views_for_symbols_at(symbols, quote_cache, Instant::now())
+}
+
+fn chart_path_views_for_symbols_at(
+    symbols: &[String],
+    quote_cache: &QuoteCache,
+    now: Instant,
+) -> Vec<ChartPathView> {
     symbols
         .iter()
         .map(|symbol| {
             quote_cache
                 .get(symbol)
-                .map(|state| chart_path_view_from_closes(&state.chart_closes_24h))
+                .map(|state| chart_path_view_from_state(state, now))
                 .unwrap_or_else(ChartPathView::empty)
         })
         .collect()
 }
 
+fn chart_path_view_from_state(state: &QuoteState, now: Instant) -> ChartPathView {
+    let mut chart = chart_path_view_from_series(&state.chart_closes_24h, &state.chart_candles_24h);
+    let chart_is_stale = state.chart_updated_at.is_none_or(|updated_at| {
+        now.saturating_duration_since(updated_at).as_secs() > CHART_STALE_DATA_SECONDS
+    });
+    if chart_is_stale || state.chart_error.is_some() {
+        chart.ready = false;
+    }
+    chart
+}
+
 pub fn chart_path_view_from_closes(closes: &[f64]) -> ChartPathView {
-    let values = closes
+    chart_path_view_from_series(closes, &[])
+}
+
+pub fn chart_path_view_from_candles(candles: &[ChartCandle]) -> ChartPathView {
+    chart_path_view_from_series(&[], candles)
+}
+
+fn chart_path_view_from_series(closes: &[f64], candles: &[ChartCandle]) -> ChartPathView {
+    let valid_candles = candles
         .iter()
         .copied()
-        .filter(|value| value.is_finite())
+        .filter(ChartCandle::is_valid)
         .collect::<Vec<_>>();
+    let values = if valid_candles.len() >= 2 {
+        valid_candles
+            .iter()
+            .map(|candle| candle.close)
+            .collect::<Vec<_>>()
+    } else {
+        closes
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect::<Vec<_>>()
+    };
     if values.len() < 2 {
         return ChartPathView::empty();
     }
 
-    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let (min, max) = if valid_candles.len() >= 2 {
+        (
+            valid_candles
+                .iter()
+                .map(|candle| candle.low)
+                .fold(f64::INFINITY, f64::min),
+            valid_candles
+                .iter()
+                .map(|candle| candle.high)
+                .fold(f64::NEG_INFINITY, f64::max),
+        )
+    } else {
+        (
+            values.iter().copied().fold(f64::INFINITY, f64::min),
+            values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        )
+    };
     let range = max - min;
     let render_values = chart_render_values(&values);
-    let (up_candle_path, down_candle_path) = chart_candle_paths_from_values(&values, min, max);
+    let (up_candle_path, down_candle_path) = chart_candle_paths(&valid_candles, min, max);
     let last_index = render_values.len().saturating_sub(1).max(1) as f64;
     let points = render_values
         .iter()
@@ -854,37 +968,38 @@ pub fn chart_path_view_from_closes(closes: &[f64]) -> ChartPathView {
     }
 }
 
-fn chart_candle_paths_from_values(values: &[f64], min: f64, max: f64) -> (String, String) {
-    let candle_values = chart_render_values_with_limit(values, CHART_MAX_CANDLES);
-    if candle_values.len() < 2 {
+impl ChartCandle {
+    fn is_valid(&self) -> bool {
+        let prices = [self.open, self.high, self.low, self.close];
+        self.open_time_millis > 0
+            && prices.iter().all(|value| value.is_finite() && *value > 0.0)
+            && self.low <= self.open.min(self.close)
+            && self.high >= self.open.max(self.close)
+            && self.low <= self.high
+    }
+}
+
+fn chart_candle_paths(candles: &[ChartCandle], min: f64, max: f64) -> (String, String) {
+    let candles = chart_render_candles_with_limit(candles, CHART_MAX_CANDLES);
+    if candles.len() < 2 {
         return (String::new(), String::new());
     }
 
-    let range = max - min;
-    let step = CHART_VIEWBOX_WIDTH / (candle_values.len().saturating_sub(1).max(1) as f64);
+    let step = CHART_VIEWBOX_WIDTH / candles.len() as f64;
     let body_width = (step * 0.46).clamp(1.2, 2.8);
     let wick_width = 0.34;
     let mut up_path = String::new();
     let mut down_path = String::new();
 
-    for index in 1..candle_values.len() {
-        let open = candle_values[index - 1];
-        let close = candle_values[index];
-        let wick_pad = if range.abs() <= f64::EPSILON {
-            0.0
-        } else {
-            range * (0.035 + (index % 3) as f64 * 0.012)
-        };
-        let high = open.max(close) + wick_pad;
-        let low = open.min(close) - wick_pad * 0.82;
-        let x = index as f64 * step;
-        let open_y = chart_value_y(open, min, max);
-        let close_y = chart_value_y(close, min, max);
-        let high_y = chart_value_y(high, min, max);
-        let low_y = chart_value_y(low, min, max);
+    for (index, candle) in candles.iter().enumerate() {
+        let x = (index as f64 + 0.5) * step;
+        let open_y = chart_value_y(candle.open, min, max);
+        let close_y = chart_value_y(candle.close, min, max);
+        let high_y = chart_value_y(candle.high, min, max);
+        let low_y = chart_value_y(candle.low, min, max);
         let body_y = open_y.min(close_y);
         let body_height = (open_y - close_y).abs().max(1.5);
-        let target = if close >= open {
+        let target = if candle.close >= candle.open {
             &mut up_path
         } else {
             &mut down_path
@@ -956,6 +1071,23 @@ fn chart_render_values_with_limit(values: &[f64], limit: usize) -> Vec<f64> {
                 * last_source_index as f64)
                 .round() as usize;
             values[source_index.min(last_source_index)]
+        })
+        .collect()
+}
+
+fn chart_render_candles_with_limit(candles: &[ChartCandle], limit: usize) -> Vec<ChartCandle> {
+    if candles.len() <= limit {
+        return candles.to_vec();
+    }
+
+    let last_source_index = candles.len() - 1;
+    let last_output_index = limit - 1;
+    (0..limit)
+        .map(|index| {
+            let source_index = ((index as f64 / last_output_index as f64)
+                * last_source_index as f64)
+                .round() as usize;
+            candles[source_index.min(last_source_index)]
         })
         .collect()
 }
@@ -1044,6 +1176,26 @@ pub fn oldest_update_for_symbols(symbols: &[String], quote_cache: &QuoteCache) -
         .min()
 }
 
+fn oldest_display_update_for_symbols(
+    symbols: &[String],
+    quote_cache: &QuoteCache,
+) -> Option<Instant> {
+    symbols
+        .iter()
+        .filter_map(|symbol| quote_cache.get(symbol))
+        .map(|state| {
+            if state.chart_closes_24h.is_empty() && state.chart_candles_24h.is_empty() {
+                state.updated_at
+            } else {
+                state
+                    .chart_updated_at
+                    .map(|chart_updated_at| chart_updated_at.min(state.updated_at))
+                    .unwrap_or(state.updated_at)
+            }
+        })
+        .min()
+}
+
 pub fn source_for_symbols(
     symbols: &[String],
     quote_cache: &QuoteCache,
@@ -1067,7 +1219,7 @@ pub fn updated_text_for_symbols(
     }
 
     let health = data_health_for_symbols(symbols, quote_cache, now);
-    let Some(updated_at) = oldest_update_for_symbols(symbols, quote_cache) else {
+    let Some(updated_at) = oldest_display_update_for_symbols(symbols, quote_cache) else {
         return if has_market_error {
             labels.connection_error.to_string()
         } else {
@@ -1649,6 +1801,7 @@ mod tests {
             price: 106800.12,
             change_percent_24h: 1.234,
             chart_closes_24h: vec![100.0, 101.0, 102.0],
+            chart_candles_24h: Vec::new(),
             source: MarketDataSource::Binance,
         };
 
@@ -2026,7 +2179,88 @@ mod tests {
         assert!(chart.line_path.contains("L 50.0 34.0"));
         assert!(chart.fill_path.starts_with("M 0 40.0"));
         assert!(chart.fill_path.ends_with(" Z"));
+        assert!(chart.up_candle_path.is_empty());
+        assert!(chart.down_candle_path.is_empty());
         assert_eq!(chart.end_y_ratio, 150);
+    }
+
+    #[test]
+    fn builds_candle_paths_only_from_real_ohlc_values() {
+        let chart = chart_path_view_from_candles(&[
+            ChartCandle {
+                open_time_millis: 1,
+                open: 100.0,
+                high: 120.0,
+                low: 90.0,
+                close: 110.0,
+            },
+            ChartCandle {
+                open_time_millis: 2,
+                open: 110.0,
+                high: 115.0,
+                low: 80.0,
+                close: 90.0,
+            },
+        ]);
+
+        assert!(chart.ready);
+        assert!(!chart.positive);
+        assert!(chart.line_path.starts_with("M 0.0 13.0"));
+        assert!(chart.line_path.contains("L 100.0 27.0"));
+        assert!(!chart.up_candle_path.is_empty());
+        assert!(!chart.down_candle_path.is_empty());
+    }
+
+    #[test]
+    fn stale_failed_chart_does_not_inherit_fresh_ticker_timestamp() {
+        let now = Instant::now();
+        let mut cache = QuoteCache::new();
+        cache.insert(
+            "binance:spot:BTC/USDT".to_string(),
+            QuoteState::new_with_chart_status(
+                106800.12,
+                1.234,
+                vec![100.0, 110.0],
+                vec![
+                    ChartCandle {
+                        open_time_millis: 1,
+                        open: 100.0,
+                        high: 112.0,
+                        low: 98.0,
+                        close: 110.0,
+                    },
+                    ChartCandle {
+                        open_time_millis: 2,
+                        open: 110.0,
+                        high: 114.0,
+                        low: 105.0,
+                        close: 108.0,
+                    },
+                ],
+                MarketDataSource::Binance,
+                now - Duration::from_secs(2),
+                Some(now - Duration::from_secs(60 * 60)),
+                Some("candle request timed out".to_string()),
+            ),
+        );
+
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "trust-card-1",
+            symbols: &["binance:spot:BTC/USDT".to_string()],
+            quote_cache: &cache,
+            source_prefix: "live feed",
+            provider_labels: ProviderLabels::default(),
+            labels: RuntimeTextLabels::default(),
+            has_market_error: false,
+            now,
+            display_options: WidgetDisplayOptions::default(),
+        });
+
+        assert_eq!(view.updated_text, "Stale 60m");
+        assert_eq!(view.source_text, "live feed · Binance · source issue");
+        assert!(!view.chart_ready);
+        assert!(!view.chart_up_candle_path.is_empty());
+        assert!(!view.chart_down_candle_path.is_empty());
     }
 
     #[test]

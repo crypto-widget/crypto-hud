@@ -34,7 +34,19 @@ pub struct MarketSnapshot {
     pub price: f64,
     pub change_percent_24h: f64,
     pub chart_closes_24h: Vec<f64>,
+    pub chart_candles_24h: Vec<MarketCandle>,
+    pub chart_updated_at: Option<Instant>,
+    pub chart_error: Option<String>,
     pub source: MarketDataSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MarketCandle {
+    pub open_time_millis: u64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -68,8 +80,15 @@ pub struct SymbolCatalog {
 
 #[derive(Debug, Clone)]
 struct CandleCacheEntry {
-    closes: Vec<f64>,
+    candles: Vec<MarketCandle>,
     fetched_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct CandleFetchOutcome {
+    candles: Vec<MarketCandle>,
+    fetched_at: Option<Instant>,
+    error: Option<String>,
 }
 
 type CandleCache = HashMap<String, CandleCacheEntry>;
@@ -401,20 +420,17 @@ fn fetch_hyperliquid(
 
 fn snapshot_with_candles(
     mut snapshot: MarketSnapshot,
-    candles: Result<Vec<f64>>,
+    candles: CandleFetchOutcome,
 ) -> MarketFetchOutcome {
-    match candles {
-        Ok(closes) => {
-            snapshot.chart_closes_24h = closes;
-            MarketFetchOutcome {
-                snapshot,
-                warning: None,
-            }
-        }
-        Err(error) => MarketFetchOutcome {
-            snapshot,
-            warning: Some(format!("chart update failed: {error}")),
-        },
+    snapshot.chart_closes_24h = candles.candles.iter().map(|candle| candle.close).collect();
+    snapshot.chart_candles_24h = candles.candles;
+    snapshot.chart_updated_at = candles.fetched_at;
+    snapshot.chart_error = candles.error.clone();
+    MarketFetchOutcome {
+        snapshot,
+        warning: candles
+            .error
+            .map(|error| format!("chart update failed: {error}")),
     }
 }
 
@@ -450,46 +466,93 @@ fn cached_or_fetch_candles(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
-    fetch: fn(&ureq::Agent, &MarketPair) -> Result<Vec<f64>>,
-) -> Result<Vec<f64>> {
+    fetch: fn(&ureq::Agent, &MarketPair) -> Result<Vec<MarketCandle>>,
+) -> CandleFetchOutcome {
+    cached_or_fetch_candles_at(agent, pair, candle_cache, fetch, Instant::now())
+}
+
+fn cached_or_fetch_candles_at(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    candle_cache: &mut CandleCache,
+    fetch: fn(&ureq::Agent, &MarketPair) -> Result<Vec<MarketCandle>>,
+    now: Instant,
+) -> CandleFetchOutcome {
     let key = pair.key();
-    let now = Instant::now();
     if let Some(entry) = candle_cache.get(&key) {
         if now.saturating_duration_since(entry.fetched_at) < CANDLE_REFRESH_INTERVAL {
-            return Ok(entry.closes.clone());
+            return CandleFetchOutcome {
+                candles: entry.candles.clone(),
+                fetched_at: Some(entry.fetched_at),
+                error: None,
+            };
         }
     }
 
-    match fetch(agent, pair) {
-        Ok(closes) => {
-            ensure_usable_candles(&closes)?;
+    let fetched = fetch(agent, pair).and_then(|candles| {
+        ensure_usable_candles(&candles)?;
+        Ok(candles)
+    });
+    match fetched {
+        Ok(candles) => {
             candle_cache.insert(
                 key,
                 CandleCacheEntry {
-                    closes: closes.clone(),
+                    candles: candles.clone(),
                     fetched_at: now,
                 },
             );
-            Ok(closes)
+            CandleFetchOutcome {
+                candles,
+                fetched_at: Some(now),
+                error: None,
+            }
         }
         Err(error) => {
             if let Some(entry) = candle_cache.get(&key) {
-                Ok(entry.closes.clone())
+                CandleFetchOutcome {
+                    candles: entry.candles.clone(),
+                    fetched_at: Some(entry.fetched_at),
+                    error: Some(error.to_string()),
+                }
             } else {
-                Err(error)
+                CandleFetchOutcome {
+                    candles: Vec::new(),
+                    fetched_at: None,
+                    error: Some(error.to_string()),
+                }
             }
         }
     }
 }
 
-fn ensure_usable_candles(closes: &[f64]) -> Result<()> {
-    if closes.len() < 2 || closes.iter().any(|value| !value.is_finite()) {
-        bail!("candle response did not include usable 24h close data");
+fn ensure_usable_candles(candles: &[MarketCandle]) -> Result<()> {
+    if candles.len() < 2 {
+        bail!("candle response did not include enough 24h OHLC data");
+    }
+    for candle in candles {
+        let prices = [candle.open, candle.high, candle.low, candle.close];
+        if candle.open_time_millis == 0
+            || prices
+                .iter()
+                .any(|value| !value.is_finite() || *value <= 0.0)
+            || candle.low > candle.open.min(candle.close)
+            || candle.high < candle.open.max(candle.close)
+            || candle.low > candle.high
+        {
+            bail!("candle response included invalid OHLC data");
+        }
+    }
+    if candles
+        .windows(2)
+        .any(|pair| pair[0].open_time_millis >= pair[1].open_time_millis)
+    {
+        bail!("candle response timestamps were not strictly increasing");
     }
     Ok(())
 }
 
-fn fetch_binance_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f64>> {
+fn fetch_binance_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
     let ticker_symbol = binance_ticker_symbol(pair);
     let url = format!(
         "{BINANCE_BASE_URL}/api/v3/klines?symbol={ticker_symbol}&interval=5m&limit={CANDLE_LIMIT_24H_5M}"
@@ -498,14 +561,14 @@ fn fetch_binance_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f
     parse_binance_klines(&body)
 }
 
-fn fetch_coinbase_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f64>> {
+fn fetch_coinbase_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
     let product_id = coinbase_product_id(pair);
     let url = format!("{COINBASE_EXCHANGE_BASE_URL}/products/{product_id}/candles?granularity=300");
     let body = get_json(agent, &url)?;
     parse_coinbase_candles(&body)
 }
 
-fn fetch_okx_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f64>> {
+fn fetch_okx_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
     let instrument_id = okx_instrument_id(pair);
     let url = format!(
         "{OKX_BASE_URL}/api/v5/market/candles?instId={instrument_id}&bar=5m&limit={CANDLE_LIMIT_24H_5M}"
@@ -514,7 +577,7 @@ fn fetch_okx_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f64>>
     parse_okx_candles(&body)
 }
 
-fn fetch_hyperliquid_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<f64>> {
+fn fetch_hyperliquid_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
     let end_time = unix_epoch_millis()?;
     let start_time = end_time.saturating_sub(HYPERLIQUID_24H_MILLIS);
     let url = format!("{HYPERLIQUID_BASE_URL}/info");
@@ -662,16 +725,30 @@ fn parse_binance_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot>
             "Binance priceChangePercent",
         )?,
         chart_closes_24h: Vec::new(),
+        chart_candles_24h: Vec::new(),
+        chart_updated_at: None,
+        chart_error: None,
         source: MarketDataSource::Binance,
     })
 }
 
-fn parse_binance_klines(body: &str) -> Result<Vec<f64>> {
+fn parse_binance_klines(body: &str) -> Result<Vec<MarketCandle>> {
     let rows = serde_json::from_str::<Vec<Vec<serde_json::Value>>>(body)
         .context("failed to parse Binance klines")?;
-    rows.iter()
-        .map(|row| parse_json_decimal(row.get(4), "Binance kline close"))
-        .collect()
+    let mut candles = rows
+        .iter()
+        .map(|row| {
+            Ok(MarketCandle {
+                open_time_millis: parse_json_u64(row.first(), "Binance kline open time")?,
+                open: parse_json_decimal(row.get(1), "Binance kline open")?,
+                high: parse_json_decimal(row.get(2), "Binance kline high")?,
+                low: parse_json_decimal(row.get(3), "Binance kline low")?,
+                close: parse_json_decimal(row.get(4), "Binance kline close")?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
 }
 
 #[derive(Debug, Deserialize)]
@@ -724,17 +801,32 @@ fn parse_coinbase_stats(pair: &MarketPair, body: &str) -> Result<MarketSnapshot>
         price,
         change_percent_24h: ((price - open_24h) / open_24h) * 100.0,
         chart_closes_24h: Vec::new(),
+        chart_candles_24h: Vec::new(),
+        chart_updated_at: None,
+        chart_error: None,
         source: MarketDataSource::Coinbase,
     })
 }
 
-fn parse_coinbase_candles(body: &str) -> Result<Vec<f64>> {
+fn parse_coinbase_candles(body: &str) -> Result<Vec<MarketCandle>> {
     let rows = serde_json::from_str::<Vec<Vec<serde_json::Value>>>(body)
         .context("failed to parse Coinbase candles")?;
-    rows.iter()
-        .rev()
-        .map(|row| parse_json_decimal(row.get(4), "Coinbase candle close"))
-        .collect()
+    let mut candles = rows
+        .iter()
+        .map(|row| {
+            Ok(MarketCandle {
+                open_time_millis: parse_json_u64(row.first(), "Coinbase candle time")?
+                    .checked_mul(1_000)
+                    .ok_or_else(|| anyhow!("Coinbase candle time overflow"))?,
+                low: parse_json_decimal(row.get(1), "Coinbase candle low")?,
+                high: parse_json_decimal(row.get(2), "Coinbase candle high")?,
+                open: parse_json_decimal(row.get(3), "Coinbase candle open")?,
+                close: parse_json_decimal(row.get(4), "Coinbase candle close")?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
 }
 
 #[derive(Debug, Deserialize)]
@@ -796,24 +888,43 @@ fn parse_okx_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
     ))
 }
 
-fn parse_okx_candles(body: &str) -> Result<Vec<f64>> {
+fn parse_okx_candles(body: &str) -> Result<Vec<MarketCandle>> {
     let response =
         serde_json::from_str::<OkxCandlesResponse>(body).context("failed to parse OKX candles")?;
     if response.code != "0" {
         bail!("OKX returned {}: {}", response.code, response.msg);
     }
 
-    response
+    let mut candles = response
         .data
         .iter()
-        .rev()
         .map(|row| {
-            parse_decimal(
-                row.get(4).map(String::as_str).unwrap_or(""),
-                "OKX candle close",
-            )
+            Ok(MarketCandle {
+                open_time_millis: parse_u64(
+                    row.first().map(String::as_str).unwrap_or(""),
+                    "OKX candle time",
+                )?,
+                open: parse_decimal(
+                    row.get(1).map(String::as_str).unwrap_or(""),
+                    "OKX candle open",
+                )?,
+                high: parse_decimal(
+                    row.get(2).map(String::as_str).unwrap_or(""),
+                    "OKX candle high",
+                )?,
+                low: parse_decimal(
+                    row.get(3).map(String::as_str).unwrap_or(""),
+                    "OKX candle low",
+                )?,
+                close: parse_decimal(
+                    row.get(4).map(String::as_str).unwrap_or(""),
+                    "OKX candle close",
+                )?,
+            })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
 }
 
 fn parse_okx_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
@@ -837,6 +948,9 @@ fn parse_okx_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
         price,
         change_percent_24h: ((price - open_24h) / open_24h) * 100.0,
         chart_closes_24h: Vec::new(),
+        chart_candles_24h: Vec::new(),
+        chart_updated_at: None,
+        chart_error: None,
         source: MarketDataSource::Okx,
     })
 }
@@ -863,6 +977,10 @@ struct HyperliquidAssetCtx {
 
 #[derive(Debug, Deserialize)]
 struct HyperliquidCandle {
+    t: u64,
+    o: String,
+    h: String,
+    l: String,
     c: String,
 }
 
@@ -914,16 +1032,30 @@ fn parse_hyperliquid_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnaps
         price,
         change_percent_24h: ((price - prev_day) / prev_day) * 100.0,
         chart_closes_24h: Vec::new(),
+        chart_candles_24h: Vec::new(),
+        chart_updated_at: None,
+        chart_error: None,
         source: MarketDataSource::Hyperliquid,
     })
 }
 
-fn parse_hyperliquid_candles(body: &str) -> Result<Vec<f64>> {
+fn parse_hyperliquid_candles(body: &str) -> Result<Vec<MarketCandle>> {
     let rows = serde_json::from_str::<Vec<HyperliquidCandle>>(body)
         .context("failed to parse Hyperliquid candles")?;
-    rows.iter()
-        .map(|row| parse_decimal(&row.c, "Hyperliquid candle close"))
-        .collect()
+    let mut candles = rows
+        .iter()
+        .map(|row| {
+            Ok(MarketCandle {
+                open_time_millis: row.t,
+                open: parse_decimal(&row.o, "Hyperliquid candle open")?,
+                high: parse_decimal(&row.h, "Hyperliquid candle high")?,
+                low: parse_decimal(&row.l, "Hyperliquid candle low")?,
+                close: parse_decimal(&row.c, "Hyperliquid candle close")?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
 }
 
 fn stable_quote(quote: &str) -> bool {
@@ -959,9 +1091,26 @@ fn parse_json_decimal(value: Option<&serde_json::Value>, field: &str) -> Result<
     }
 }
 
+fn parse_json_u64(value: Option<&serde_json::Value>, field: &str) -> Result<u64> {
+    match value {
+        Some(serde_json::Value::String(value)) => parse_u64(value, field),
+        Some(serde_json::Value::Number(value)) => value
+            .as_u64()
+            .ok_or_else(|| anyhow!("failed to parse {field}: {value}")),
+        Some(value) => bail!("failed to parse {field}: {value}"),
+        None => bail!("missing {field}"),
+    }
+}
+
 fn parse_decimal(value: &str, field: &str) -> Result<f64> {
     value
         .parse::<f64>()
+        .with_context(|| format!("failed to parse {field}: {value}"))
+}
+
+fn parse_u64(value: &str, field: &str) -> Result<u64> {
+    value
+        .parse::<u64>()
         .with_context(|| format!("failed to parse {field}: {value}"))
 }
 
@@ -979,8 +1128,25 @@ mod tests {
             price: 100.0,
             change_percent_24h: 1.0,
             chart_closes_24h: Vec::new(),
+            chart_candles_24h: Vec::new(),
+            chart_updated_at: None,
+            chart_error: None,
             source: MarketDataSource::Binance,
         }
+    }
+
+    fn candle(open_time_millis: u64, open: f64, high: f64, low: f64, close: f64) -> MarketCandle {
+        MarketCandle {
+            open_time_millis,
+            open,
+            high,
+            low,
+            close,
+        }
+    }
+
+    fn unavailable_candles(_: &ureq::Agent, _: &MarketPair) -> Result<Vec<MarketCandle>> {
+        Err(anyhow!("candles unavailable"))
     }
 
     #[test]
@@ -999,15 +1165,56 @@ mod tests {
     fn candle_failure_does_not_discard_ticker_snapshot() {
         let outcome = snapshot_with_candles(
             snapshot("binance:spot:BTC/USDT"),
-            Err(anyhow!("candles unavailable")),
+            CandleFetchOutcome {
+                candles: Vec::new(),
+                fetched_at: None,
+                error: Some("candles unavailable".to_string()),
+            },
         );
 
         assert_eq!(outcome.snapshot.price, 100.0);
         assert!(outcome.snapshot.chart_closes_24h.is_empty());
+        assert!(outcome.snapshot.chart_candles_24h.is_empty());
+        assert_eq!(outcome.snapshot.chart_updated_at, None);
+        assert_eq!(
+            outcome.snapshot.chart_error.as_deref(),
+            Some("candles unavailable")
+        );
         assert_eq!(
             outcome.warning.as_deref(),
             Some("chart update failed: candles unavailable")
         );
+    }
+
+    #[test]
+    fn failed_stale_candle_refresh_preserves_original_freshness_and_reports_error() {
+        let pair = pair("binance:spot:BTC/USDT");
+        let fetched_at = Instant::now();
+        let now = fetched_at + CANDLE_REFRESH_INTERVAL + Duration::from_secs(1);
+        let cached_candles = vec![
+            candle(1, 100.0, 105.0, 95.0, 101.5),
+            candle(2, 101.5, 106.0, 99.0, 104.25),
+        ];
+        let mut cache = CandleCache::from([(
+            pair.key(),
+            CandleCacheEntry {
+                candles: cached_candles.clone(),
+                fetched_at,
+            },
+        )]);
+
+        let outcome = cached_or_fetch_candles_at(
+            &build_agent(None).unwrap(),
+            &pair,
+            &mut cache,
+            unavailable_candles,
+            now,
+        );
+
+        assert_eq!(outcome.candles, cached_candles);
+        assert_eq!(outcome.fetched_at, Some(fetched_at));
+        assert_eq!(outcome.error.as_deref(), Some("candles unavailable"));
+        assert_eq!(cache[&pair.key()].fetched_at, fetched_at);
     }
 
     #[test]
@@ -1061,8 +1268,8 @@ mod tests {
     }
 
     #[test]
-    fn parses_binance_5m_kline_closes() {
-        let closes = parse_binance_klines(
+    fn parses_binance_5m_kline_ohlc() {
+        let candles = parse_binance_klines(
             r#"[
                 [1499040000000,"100.0","105.0","95.0","101.5","12.0",1499040299999,"0",0,"0","0","0"],
                 [1499040300000,"101.5","106.0","99.0","104.25","10.0",1499040599999,"0",0,"0","0","0"]
@@ -1070,7 +1277,13 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(closes, vec![101.5, 104.25]);
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_499_040_000_000, 100.0, 105.0, 95.0, 101.5),
+                candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
+            ]
+        );
     }
 
     #[test]
@@ -1115,15 +1328,21 @@ mod tests {
 
     #[test]
     fn parses_coinbase_5m_candles_oldest_first() {
-        let closes = parse_coinbase_candles(
+        let candles = parse_coinbase_candles(
             r#"[
-                [1499040300,101.5,106.0,99.0,104.25,10.0],
-                [1499040000,100.0,105.0,95.0,101.5,12.0]
+                [1499040300,99.0,106.0,101.5,104.25,10.0],
+                [1499040000,95.0,105.0,100.0,101.5,12.0]
             ]"#,
         )
         .unwrap();
 
-        assert_eq!(closes, vec![101.5, 104.25]);
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_499_040_000_000, 100.0, 105.0, 95.0, 101.5),
+                candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
+            ]
+        );
     }
 
     #[test]
@@ -1156,7 +1375,7 @@ mod tests {
 
     #[test]
     fn parses_okx_5m_candles_oldest_first() {
-        let closes = parse_okx_candles(
+        let candles = parse_okx_candles(
             r#"{
                 "code":"0",
                 "msg":"",
@@ -1168,7 +1387,13 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(closes, vec![101.0, 108.0]);
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_597_026_300_000, 100.0, 105.0, 95.0, 101.0),
+                candle(1_597_026_600_000, 101.0, 110.0, 100.0, 108.0),
+            ]
+        );
     }
 
     #[test]
@@ -1221,7 +1446,7 @@ mod tests {
 
     #[test]
     fn parses_hyperliquid_candles() {
-        let closes = parse_hyperliquid_candles(
+        let candles = parse_hyperliquid_candles(
             r#"[
                 {"t":1,"T":2,"s":"BTC","i":"5m","o":"100","c":"101.5","h":"102","l":"99","v":"10","n":1},
                 {"t":2,"T":3,"s":"BTC","i":"5m","o":"101.5","c":"104.25","h":"105","l":"100","v":"12","n":1}
@@ -1229,7 +1454,13 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(closes, vec![101.5, 104.25]);
+        assert_eq!(
+            candles,
+            vec![
+                candle(1, 100.0, 102.0, 99.0, 101.5),
+                candle(2, 101.5, 105.0, 100.0, 104.25),
+            ]
+        );
     }
 
     #[test]

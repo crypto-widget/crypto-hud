@@ -119,12 +119,25 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
                             let mut cache = quote_cache.borrow_mut();
                             cache.insert(
                                 snapshot.symbol.clone(),
-                                QuoteState::new(
+                                QuoteState::new_with_chart_status(
                                     snapshot.price,
                                     snapshot.change_percent_24h,
                                     snapshot.chart_closes_24h.clone(),
+                                    snapshot
+                                        .chart_candles_24h
+                                        .iter()
+                                        .map(|candle| widget_runtime::ChartCandle {
+                                            open_time_millis: candle.open_time_millis,
+                                            open: candle.open,
+                                            high: candle.high,
+                                            low: candle.low,
+                                            close: candle.close,
+                                        })
+                                        .collect(),
                                     snapshot.source,
                                     updated_at,
+                                    snapshot.chart_updated_at,
+                                    snapshot.chart_error.clone(),
                                 ),
                             );
                         }
