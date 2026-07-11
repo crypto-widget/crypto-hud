@@ -18,6 +18,7 @@ pub const MIN_SYMBOL_LIMIT: usize = 1;
 pub const MAX_SYMBOL_LIMIT: usize = 8;
 pub const MAX_PREVIEW_IMAGES: usize = 5;
 pub const MAX_PLUGIN_THEMES: usize = 8;
+pub const MAX_QUOTE_CACHE_ENTRIES: usize = 128;
 
 const MIN_PLUGIN_WIDTH: i32 = 120;
 const MIN_PLUGIN_HEIGHT: i32 = 80;
@@ -482,8 +483,6 @@ pub struct ChartCandle {
     pub close: f64,
 }
 
-pub type QuoteCache = HashMap<String, QuoteState>;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuoteState {
     pub price: f64,
@@ -550,6 +549,67 @@ impl QuoteState {
             Some(updated_at),
             None,
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct QuoteCache {
+    entries: HashMap<String, QuoteState>,
+    max_entries: usize,
+}
+
+impl QuoteCache {
+    pub fn new() -> Self {
+        Self::with_max_entries(MAX_QUOTE_CACHE_ENTRIES)
+    }
+
+    pub fn with_max_entries(max_entries: usize) -> Self {
+        let max_entries = max_entries.max(1);
+        Self {
+            entries: HashMap::with_capacity(max_entries),
+            max_entries,
+        }
+    }
+
+    pub fn insert(&mut self, symbol: String, state: QuoteState) -> Option<QuoteState> {
+        if !self.entries.contains_key(&symbol) && self.entries.len() >= self.max_entries {
+            let eviction_key = self
+                .entries
+                .iter()
+                .min_by(|(left_symbol, left_state), (right_symbol, right_state)| {
+                    left_state
+                        .updated_at
+                        .cmp(&right_state.updated_at)
+                        .then_with(|| left_symbol.cmp(right_symbol))
+                })
+                .map(|(symbol, _)| symbol.clone());
+            if let Some(eviction_key) = eviction_key {
+                self.entries.remove(&eviction_key);
+            }
+        }
+        self.entries.insert(symbol, state)
+    }
+
+    pub fn get(&self, symbol: &str) -> Option<&QuoteState> {
+        self.entries.get(symbol)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &QuoteState)> {
+        self.entries.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+impl Default for QuoteCache {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -721,13 +781,12 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
     let chart = chart_path_view_for_symbols_at(params.symbols, params.quote_cache, params.now);
     let quote_charts =
         chart_path_views_for_symbols_at(params.symbols, params.quote_cache, params.now);
-    let has_market_error = params.has_market_error
-        || params.symbols.iter().any(|symbol| {
-            params
-                .quote_cache
-                .get(symbol)
-                .is_some_and(|state| state.chart_error.is_some())
-        });
+    let has_market_error = market_error_affects_symbols(
+        params.symbols,
+        params.quote_cache,
+        params.has_market_error,
+        params.now,
+    );
     WidgetRuntimeView {
         widget_id: params.widget_id.to_string(),
         quote_rows: quote_rows_for_symbols_with_options(
@@ -774,7 +833,7 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             params.symbols,
             params.quote_cache,
             params.labels,
-            params.has_market_error,
+            has_market_error,
             params.now,
         ),
         chart_line_path: chart.line_path,
@@ -785,6 +844,26 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
         chart_ready: chart.ready,
         chart_positive: chart.positive,
     }
+}
+
+fn market_error_affects_symbols(
+    symbols: &[String],
+    quote_cache: &QuoteCache,
+    has_market_error: bool,
+    now: Instant,
+) -> bool {
+    let has_symbol_chart_error = symbols.iter().any(|symbol| {
+        quote_cache
+            .get(symbol)
+            .is_some_and(|state| state.chart_error.is_some())
+    });
+    has_symbol_chart_error
+        || (has_market_error
+            && symbols.iter().any(|symbol| {
+                quote_cache.get(symbol).is_none_or(|state| {
+                    now.saturating_duration_since(state.updated_at).as_secs() > STALE_DATA_SECONDS
+                })
+            }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1839,6 +1918,34 @@ mod tests {
     }
 
     #[test]
+    fn quote_cache_evicts_oldest_entries_at_its_limit() {
+        let now = Instant::now();
+        let mut cache = QuoteCache::new();
+
+        for index in 0..(MAX_QUOTE_CACHE_ENTRIES + 16) {
+            cache.insert(
+                format!("binance:spot:ASSET{index}/USDT"),
+                QuoteState::new(
+                    index as f64,
+                    0.0,
+                    Vec::new(),
+                    MarketDataSource::Binance,
+                    now + Duration::from_millis(index as u64),
+                ),
+            );
+        }
+
+        assert_eq!(cache.len(), MAX_QUOTE_CACHE_ENTRIES);
+        assert!(cache.get("binance:spot:ASSET0/USDT").is_none());
+        assert!(cache
+            .get(&format!(
+                "binance:spot:ASSET{}/USDT",
+                MAX_QUOTE_CACHE_ENTRIES + 15
+            ))
+            .is_some());
+    }
+
+    #[test]
     fn builds_widget_runtime_view_from_quote_cache() {
         let now = Instant::now();
         let mut cache = QuoteCache::new();
@@ -2171,6 +2278,53 @@ mod tests {
     }
 
     #[test]
+    fn global_market_error_only_marks_widgets_with_unhealthy_data() {
+        let now = Instant::now();
+        let mut cache = QuoteCache::new();
+        cache.insert(
+            "binance:spot:BTC/USDT".to_string(),
+            QuoteState::new(
+                106800.12,
+                1.234,
+                vec![105000.0, 106000.0, 106800.12],
+                MarketDataSource::Binance,
+                now - Duration::from_secs(2),
+            ),
+        );
+
+        let healthy_view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "healthy-widget",
+            symbols: &["binance:spot:BTC/USDT".to_string()],
+            quote_cache: &cache,
+            source_prefix: "live feed",
+            provider_labels: ProviderLabels::default(),
+            labels: RuntimeTextLabels::default(),
+            has_market_error: true,
+            now,
+            display_options: WidgetDisplayOptions::default(),
+        });
+        let missing_view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "missing-widget",
+            symbols: &["okx:spot:ETH/USDT".to_string()],
+            quote_cache: &cache,
+            source_prefix: "live feed",
+            provider_labels: ProviderLabels::default(),
+            labels: RuntimeTextLabels::default(),
+            has_market_error: true,
+            now,
+            display_options: WidgetDisplayOptions::default(),
+        });
+
+        assert_eq!(healthy_view.source_text, "live feed · Binance");
+        assert_eq!(healthy_view.updated_text, "Updated 2s");
+        assert_eq!(
+            missing_view.source_text,
+            "live feed · OKX · source issue · 0/1 live"
+        );
+        assert_eq!(missing_view.updated_text, "Connection failed");
+    }
+
+    #[test]
     fn builds_chart_paths_from_24h_closes() {
         let chart = chart_path_view_from_closes(&[100.0, 90.0, 110.0]);
 
@@ -2213,7 +2367,7 @@ mod tests {
 
     #[test]
     fn stale_failed_chart_does_not_inherit_fresh_ticker_timestamp() {
-        let now = Instant::now();
+        let now = Instant::now() + Duration::from_secs(60 * 60);
         let mut cache = QuoteCache::new();
         cache.insert(
             "binance:spot:BTC/USDT".to_string(),

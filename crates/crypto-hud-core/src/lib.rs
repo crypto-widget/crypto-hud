@@ -422,12 +422,21 @@ fn default_quote_for_source(source: MarketDataSource) -> &'static str {
 }
 
 pub fn format_price(price: f64) -> String {
-    if price >= 1_000.0 {
+    let magnitude = price.abs();
+    if magnitude >= 1_000.0 {
         format!("{price:.0}")
-    } else if price >= 10.0 {
+    } else if magnitude >= 10.0 {
         format!("{price:.2}")
-    } else {
+    } else if magnitude >= 0.0001 || magnitude == 0.0 || !magnitude.is_finite() {
         format!("{price:.4}")
+    } else {
+        let decimal_places = ((-magnitude.log10()).ceil() as usize + 3).min(12);
+        let formatted = format!("{price:.decimal_places$}");
+        if formatted.bytes().any(|byte| matches!(byte, b'1'..=b'9')) {
+            formatted
+        } else {
+            format!("{price:.3e}")
+        }
     }
 }
 
@@ -614,6 +623,10 @@ mod tests {
         assert_eq!(format_price(3420.5), "3420");
         assert_eq!(format_price(42.125), "42.12");
         assert_eq!(format_price(0.123456), "0.1235");
+        assert_eq!(format_price(0.0000123456), "0.00001235");
+        assert_eq!(format_price(0.00000000123456), "0.000000001235");
+        assert_eq!(format_price(0.000000000000123456), "1.235e-13");
+        assert_eq!(format_price(-0.0000123456), "-0.00001235");
     }
 
     #[test]
