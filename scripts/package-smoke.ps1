@@ -61,7 +61,8 @@ try {
         "-File", ".\scripts\package-windows.ps1",
         "-Version", $Version,
         "-AllowDirty",
-        "-AllowDevelopmentVersion"
+        "-AllowDevelopmentVersion",
+        "-AllowUnsignedPackage"
     )
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"
