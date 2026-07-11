@@ -1,0 +1,10 @@
+[advisories]
+ignore = [
+    # quick-xml 0.39 is locked only through Slint's Linux Wayland/AT-SPI
+    # dependency graph. It is absent from the supported windows-x64 target
+    # (`cargo tree --target x86_64-pc-windows-msvc -i quick-xml@0.39.4`).
+    # Remove these exceptions when wayland-scanner and zbus_xml allow
+    # quick-xml 0.41 or newer.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
