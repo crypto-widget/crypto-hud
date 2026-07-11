@@ -164,18 +164,21 @@ Crypto HUD currently uses local Windows release scripts rather than a GitHub
 Actions release workflow.
 
 ```powershell
-cargo test --workspace
+cargo test --locked --workspace
+cargo audit
 powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
 powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.2
+# Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) first.
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
 ```
 
 The package script creates a Windows zip, checksum, and release manifest in
-`dist/`. The installer verifies package contents before copying files. Optional
-Windows Authenticode signing is supported through the signing environment
-variables documented in `scripts/package-windows.ps1`.
+`dist/`. The installer verifies package contents before copying files. Production
+packages must be Authenticode signed; the smoke scripts use an explicit
+local-development override for unsigned packages. Signing environment variables
+are documented in `scripts/package-windows.ps1`.
 
 ## Roadmap
 

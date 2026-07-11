@@ -89,6 +89,7 @@ if ($manifest) {
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Copy-Item -LiteralPath $SourceExe -Destination $TargetExe -Force
 Copy-Item -LiteralPath (Join-Path $PackageDir "README.md") -Destination (Join-Path $InstallDir "README.md") -Force -ErrorAction SilentlyContinue
+Copy-Item -LiteralPath (Join-Path $PackageDir "LICENSE") -Destination (Join-Path $InstallDir "LICENSE") -Force
 Copy-Item -LiteralPath $ManifestPath -Destination (Join-Path $InstallDir "release-manifest.json") -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $PackageDir "uninstall.ps1") -Destination $UninstallScript -Force
 Copy-Item -LiteralPath (Join-Path $PackageDir "install-update-package.ps1") -Destination $UpdateScript -Force

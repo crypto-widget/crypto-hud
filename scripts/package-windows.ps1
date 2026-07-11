@@ -201,6 +201,7 @@ try {
     $packageFiles = @(
         @{ Source = $Exe; Target = "crypto-hud.exe" },
         @{ Source = (Join-Path $RepoRoot "README.md"); Target = "README.md" },
+        @{ Source = (Join-Path $RepoRoot "LICENSE"); Target = "LICENSE" },
         @{ Source = (Join-Path $RepoRoot "packaging\windows\install.ps1"); Target = "install.ps1" },
         @{ Source = (Join-Path $RepoRoot "packaging\windows\uninstall.ps1"); Target = "uninstall.ps1" },
         @{ Source = (Join-Path $RepoRoot "scripts\install-update-package.ps1"); Target = "install-update-package.ps1" }

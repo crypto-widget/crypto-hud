@@ -97,6 +97,9 @@ try {
     if (-not (@($manifest.files).path -contains "install-update-package.ps1")) {
         throw "Package manifest is missing install-update-package.ps1"
     }
+    if (-not (@($manifest.files).path -contains "LICENSE")) {
+        throw "Package manifest is missing LICENSE"
+    }
     if (-not $manifest.codeSigning) {
         throw "Package manifest is missing codeSigning metadata"
     }
@@ -136,6 +139,9 @@ try {
     }
     if (-not (Test-Path (Join-Path $InstallDir "install-update-package.ps1"))) {
         throw "Installed update handoff script was not copied"
+    }
+    if (-not (Test-Path (Join-Path $InstallDir "LICENSE"))) {
+        throw "Installed license was not copied"
     }
 
     powershell -ExecutionPolicy Bypass -File (Join-Path $InstallDir "uninstall.ps1") -InstallDir $InstallDir -SkipShellIntegration

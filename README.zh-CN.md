@@ -145,17 +145,19 @@ crates/
 Crypto HUD 目前使用本地 Windows 发布脚本，而不是 GitHub Actions 自动发布流程。
 
 ```powershell
-cargo test --workspace
+cargo test --locked --workspace
+cargo audit
 powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
 powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.2
+# 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）。
+powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
 ```
 
 打包脚本会在 `dist/` 中生成 Windows zip、校验和和 release manifest。安装器会先校验包内容，
-再复制文件。项目支持可选 Windows Authenticode 签名，相关环境变量记录在
-`scripts/package-windows.ps1` 中。
+再复制文件。生产包必须使用 Authenticode 签名；smoke 脚本仅通过明确的本地开发开关使用
+未签名包。相关签名环境变量记录在 `scripts/package-windows.ps1` 中。
 
 ## 路线图
 
