@@ -6,6 +6,7 @@ pub const DEFAULT_MARKET_SYMBOLS: &[&str] = &[
     "binance:spot:ETH/USDT",
     "binance:spot:SOL/USDT",
 ];
+pub const MAX_MARKET_SYMBOLS: usize = 20;
 pub const MIN_REFRESH_INTERVAL_SECONDS: i32 = 5;
 pub const MAX_REFRESH_INTERVAL_SECONDS: i32 = 60;
 pub const DEFAULT_REFRESH_INTERVAL_SECONDS: i32 = 5;
@@ -170,11 +171,7 @@ pub fn clamp_refresh_interval(value: i32) -> i32 {
 }
 
 pub fn normalize_market_symbols(symbols: Vec<String>) -> Vec<String> {
-    normalize_symbols_with_limit(
-        symbols,
-        DEFAULT_MARKET_SYMBOLS.len(),
-        default_market_symbols(),
-    )
+    normalize_symbols_with_limit(symbols, MAX_MARKET_SYMBOLS, default_market_symbols())
 }
 
 pub fn normalize_symbols_with_limit(
@@ -210,6 +207,7 @@ pub fn normalize_market_pair_key(raw: &str) -> Option<String> {
 }
 
 pub fn parse_market_pair(raw: &str) -> Option<MarketPair> {
+    let raw = strip_bidi_isolate_marks(raw);
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
@@ -232,6 +230,16 @@ pub fn parse_market_pair(raw: &str) -> Option<MarketPair> {
 
     parse_keyed_market_pair(value, source_hint, type_hint)
         .or_else(|| parse_unkeyed_market_pair(value, source_hint, type_hint))
+}
+
+fn strip_bidi_isolate_marks(raw: &str) -> String {
+    raw.chars()
+        .filter(|character| !is_bidi_isolate_mark(*character))
+        .collect()
+}
+
+fn is_bidi_isolate_mark(character: char) -> bool {
+    matches!(character, '\u{2066}' | '\u{2067}' | '\u{2068}' | '\u{2069}')
 }
 
 pub fn format_market_pair_symbol(raw: &str) -> String {
@@ -414,12 +422,21 @@ fn default_quote_for_source(source: MarketDataSource) -> &'static str {
 }
 
 pub fn format_price(price: f64) -> String {
-    if price >= 1_000.0 {
+    let magnitude = price.abs();
+    if magnitude >= 1_000.0 {
         format!("{price:.0}")
-    } else if price >= 10.0 {
+    } else if magnitude >= 10.0 {
         format!("{price:.2}")
-    } else {
+    } else if magnitude >= 0.0001 || magnitude == 0.0 || !magnitude.is_finite() {
         format!("{price:.4}")
+    } else {
+        let decimal_places = ((-magnitude.log10()).ceil() as usize + 3).min(12);
+        let formatted = format!("{price:.decimal_places$}");
+        if formatted.bytes().any(|byte| matches!(byte, b'1'..=b'9')) {
+            formatted
+        } else {
+            format!("{price:.3e}")
+        }
     }
 }
 
@@ -454,8 +471,6 @@ pub struct AlertEvaluation {
     pub condition: AlertCondition,
     pub threshold: f64,
     pub current_value: f64,
-    pub title: String,
-    pub body: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -499,38 +514,13 @@ fn evaluate_alert(
         return None;
     }
 
-    let metric = match rule.condition {
-        AlertCondition::PriceAbove | AlertCondition::PriceBelow => "price",
-        AlertCondition::ChangePercentAbove | AlertCondition::ChangePercentBelow => "24h change",
-    };
-    let direction = match rule.condition {
-        AlertCondition::PriceAbove | AlertCondition::ChangePercentAbove => "above",
-        AlertCondition::PriceBelow | AlertCondition::ChangePercentBelow => "below",
-    };
-
     Some(AlertEvaluation {
         rule_id: rule.id.clone(),
         symbol: symbol.clone(),
         condition: rule.condition,
         threshold: rule.threshold,
         current_value,
-        title: format!("{} alert", format_market_pair_symbol(&symbol)),
-        body: format!(
-            "{} {metric} is {direction} {}: {}",
-            format_market_pair_symbol(&symbol),
-            format_alert_value(rule.condition, rule.threshold),
-            format_alert_value(rule.condition, current_value)
-        ),
     })
-}
-
-fn format_alert_value(condition: AlertCondition, value: f64) -> String {
-    match condition {
-        AlertCondition::PriceAbove | AlertCondition::PriceBelow => format_price(value),
-        AlertCondition::ChangePercentAbove | AlertCondition::ChangePercentBelow => {
-            format_pair_change(value)
-        }
-    }
 }
 
 fn default_alert_enabled() -> bool {
@@ -576,7 +566,29 @@ mod tests {
                 "binance:spot:BTC/USDT",
                 "binance:spot:ETH/USDT",
                 "binance:spot:SOL/USDT",
+                "binance:spot:BNB/USDT",
+                "binance:spot:XRP/USDT",
+                "binance:spot:DOGE/USDT",
             ]
+        );
+    }
+
+    #[test]
+    fn normalizes_market_symbols_up_to_the_explicit_limit() {
+        let symbols = (0..MAX_MARKET_SYMBOLS + 5)
+            .map(|index| format!("ASSET{index}/USDT"))
+            .collect();
+
+        let normalized = normalize_market_symbols(symbols);
+
+        assert_eq!(normalized.len(), MAX_MARKET_SYMBOLS);
+        assert_eq!(
+            normalized.first().map(String::as_str),
+            Some("binance:spot:ASSET0/USDT")
+        );
+        assert_eq!(
+            normalized.last().map(String::as_str),
+            Some("binance:spot:ASSET19/USDT")
         );
     }
 
@@ -595,6 +607,11 @@ mod tests {
             Some("hyperliquid:perp:BTC/USDC")
         );
         assert_eq!(
+            normalize_market_pair_key("\u{2066}BTC/USDT\u{2069} · \u{2066}Coinbase\u{2069}")
+                .as_deref(),
+            Some("coinbase:spot:BTC/USDT")
+        );
+        assert_eq!(
             format_market_pair_display("binance:spot:ETH/USDT"),
             "ETH/USDT · Binance"
         );
@@ -606,6 +623,10 @@ mod tests {
         assert_eq!(format_price(3420.5), "3420");
         assert_eq!(format_price(42.125), "42.12");
         assert_eq!(format_price(0.123456), "0.1235");
+        assert_eq!(format_price(0.0000123456), "0.00001235");
+        assert_eq!(format_price(0.00000000123456), "0.000000001235");
+        assert_eq!(format_price(0.000000000000123456), "1.235e-13");
+        assert_eq!(format_price(-0.0000123456), "-0.00001235");
     }
 
     #[test]
@@ -640,6 +661,8 @@ mod tests {
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].rule_id, "btc-price");
         assert_eq!(alerts[0].symbol, "binance:spot:BTC/USDT");
-        assert!(alerts[0].body.contains("100000"));
+        assert_eq!(alerts[0].condition, AlertCondition::PriceAbove);
+        assert_eq!(alerts[0].threshold, 100000.0);
+        assert_eq!(alerts[0].current_value, 106800.12);
     }
 }

@@ -23,6 +23,7 @@ export component MarketCompass inherits Window {
     in property <string> source-name-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 480;
@@ -32,6 +33,7 @@ export component MarketCompass inherits Window {
     in property <int> content-opacity: 100;
     in property <string> theme-name: "dark";
     in property <bool> show-coin-logos: true;
+    in property <int> config-switch-interval-seconds: 5;
     in property <string> chart-line-path;
     in property <string> chart-fill-path;
     in property <string> chart-up-candle-path;
@@ -48,7 +50,7 @@ export component MarketCompass inherits Window {
     }
     property <int> orbit-count: root.quote-rows.length < 1 ? 0 : (root.quote-rows.length > 8 ? 8 : root.quote-rows.length);
     property <int> orbit-denominator: root.orbit-count < 1 ? 1 : root.orbit-count;
-    property <int> bounded-rotation-step: root.orbit-count <= 0 ? 0 : (root.rotation-step < root.orbit-count ? root.rotation-step : 0);
+    property <int> bounded-rotation-step: root.orbit-count <= 0 ? 0 : Math.mod(root.rotation-step, root.orbit-count);
     property <length> orbit-center-x: root.s(240px);
     property <length> orbit-center-y: root.s(240px);
     property <length> orbit-radius: root.orbit-count <= 1 ? root.s(179px) : root.s(181px);
@@ -100,14 +102,10 @@ export component MarketCompass inherits Window {
     background: transparent;
 
     Timer {
-        interval: 5s;
+        interval: root.config-switch-interval-seconds * 1s;
         running: root.orbit-count > 1;
         triggered() => {
-            if root.rotation-step + 1 >= root.orbit-count {
-                root.rotation-step = 0;
-            } else {
-                root.rotation-step += 1;
-            }
+            root.rotation-step += 1;
         }
     }
 
@@ -252,7 +250,7 @@ export component MarketCompass inherits Window {
                 height: root.s(76px);
                 text: quote.price;
                 color: root.price-shadow-color;
-                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
                 font-weight: 900;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -266,7 +264,7 @@ export component MarketCompass inherits Window {
                 height: root.s(76px);
                 text: quote.price;
                 color: root.price-glow-color;
-                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
                 font-weight: 900;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -280,7 +278,7 @@ export component MarketCompass inherits Window {
                 height: root.s(76px);
                 text: quote.price;
                 color: root.price-text-color;
-                font-size: quote.price == "Connecting" || quote.price == "连接中" ? root.s(36px) : root.s(60px);
+                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
                 font-weight: 900;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -395,7 +393,7 @@ export component MarketCompass inherits Window {
 
         for quote[index] in root.quote-rows : coin_node := Rectangle {
             property <bool> selected: index == root.active-index();
-            property <angle> slot-angle: -90deg + (root.bounded-rotation-step - index) * 1turn / root.orbit-denominator;
+            property <angle> slot-angle: -90deg + (root.rotation-step - index) * 1turn / root.orbit-denominator;
             property <length> node-size: self.selected ? root.s(78px) : root.s(69px);
             property <length> icon-size: self.selected ? root.s(34px) : root.s(30px);
             property <length> icon-top: self.selected ? root.s(18px) : root.s(17px);
@@ -409,8 +407,7 @@ export component MarketCompass inherits Window {
             visible: index < root.orbit-count;
             background: transparent;
 
-            animate x { duration: 620ms; easing: ease-in-out; }
-            animate y { duration: 620ms; easing: ease-in-out; }
+            animate slot-angle { duration: 620ms; easing: ease-in-out; }
             animate width { duration: 260ms; easing: ease-out; }
             animate height { duration: 260ms; easing: ease-out; }
 
@@ -444,6 +441,18 @@ export component MarketCompass inherits Window {
                 source: @image-url("coin-node-light-selected.png");
                 image-fit: fill;
                 visible: coin_node.selected && root.light-theme;
+            }
+
+            dark_inner_ring_mask := Rectangle {
+                width: parent.width * 0.594;
+                height: self.width;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                border-radius: self.width / 2;
+                background: transparent;
+                border-width: parent.width * 0.032;
+                border-color: #05090d;
+                visible: !root.light-theme;
             }
 
             Image {

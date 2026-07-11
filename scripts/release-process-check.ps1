@@ -62,7 +62,8 @@ function Get-StartupTargetMs {
     param([int]$WidgetCount)
 
     switch ($WidgetCount) {
-        1 { return 300 }
+        1 { return 500 }
+        5 { return 1000 }
         10 { return 1500 }
         default { return $MaxStartupMs }
     }
@@ -197,8 +198,8 @@ function Invoke-ReleaseScenario {
 
         $memoryTargetMb = Get-MemoryTargetMb -WidgetCount $WidgetCount
         $startupTargetMs = Get-StartupTargetMs -WidgetCount $WidgetCount
-        if ($startupMs -gt $MaxStartupMs) {
-            $failures += "startup ${startupMs}ms exceeded ${MaxStartupMs}ms gate"
+        if ($startupMs -gt $startupTargetMs) {
+            $failures += "startup ${startupMs}ms exceeded ${startupTargetMs}ms target"
         }
         if ($privateMemoryMb -gt $memoryTargetMb) {
             $failures += "private memory ${privateMemoryMb}MB exceeded ${memoryTargetMb}MB target"
@@ -294,7 +295,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ReportPath) | Out
 Push-Location $RepoRoot
 try {
     if (-not $SkipBuild) {
-        cargo build --release -p crypto-hud
+        cargo build --locked --release -p crypto-hud
         if ($LASTEXITCODE -ne 0) {
             throw "Release build failed with code $LASTEXITCODE"
         }
@@ -326,6 +327,12 @@ try {
             maxStartupMs = $MaxStartupMs
             maxCpuPercent = $MaxCpuPercent
             maxChildProcesses = $MaxChildProcesses
+            startupTargetsMs = [ordered]@{
+                widgets1 = 500
+                widgets5 = 1000
+                widgets10 = 1500
+                fallback = $MaxStartupMs
+            }
             memoryTargetsMb = [ordered]@{
                 widgets1 = 60
                 widgets5 = 90

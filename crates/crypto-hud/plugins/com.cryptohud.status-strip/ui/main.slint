@@ -31,6 +31,7 @@ export component StatusStrip inherits Window {
     in property <string> source-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 618;
@@ -260,6 +261,7 @@ export component StatusStrip inherits Window {
                 color: root.default-text-color;
                 font-size: root.s(18px);
                 font-weight: 800;
+                horizontal-alignment: root.rtl-layout ? right : left;
                 visible: root.quote-rows.length == 0;
                 overflow: elide;
             }

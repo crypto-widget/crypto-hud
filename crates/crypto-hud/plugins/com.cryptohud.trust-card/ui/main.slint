@@ -13,6 +13,7 @@ export component TrustCard inherits Window {
     in property <string> source-name-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 520;
@@ -141,6 +142,7 @@ export component TrustCard inherits Window {
                     color: root.gain-color;
                     font-size: root.s(17px);
                     font-weight: 800;
+                    horizontal-alignment: root.rtl-layout ? right : left;
                     overflow: elide;
                 }
             }
@@ -257,6 +259,7 @@ export component TrustCard inherits Window {
                 color: root.card-source-text-color;
                 font-size: root.s(18px);
                 font-weight: 500;
+                horizontal-alignment: root.rtl-layout ? right : left;
                 overflow: elide;
             }
 

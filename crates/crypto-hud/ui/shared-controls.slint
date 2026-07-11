@@ -1,5 +1,7 @@
 export component SettingSwitch inherits Rectangle {
     in-out property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> accessible-label-text;
     in property <color> accent-color;
     in property <color> track-color;
     in property <color> knob-color;
@@ -9,6 +11,24 @@ export component SettingSwitch inherits Rectangle {
     height: 20px;
     border-radius: 10px;
     background: root.checked ? root.accent-color : root.track-color;
+    opacity: root.enabled ? 1 : 0.55;
+    border-width: switch_focus.has-focus ? 2px : 0px;
+    border-color: root.accent-color;
+    forward-focus: switch_focus;
+
+    accessible-role: switch;
+    accessible-label: root.accessible-label-text;
+    accessible-enabled: root.enabled;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.toggle(); }
+
+    function toggle() {
+        if root.enabled {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
 
     Rectangle {
         x: root.checked ? 19px : 2px;
@@ -22,10 +42,24 @@ export component SettingSwitch inherits Rectangle {
     TouchArea {
         width: parent.width;
         height: parent.height;
-        mouse-cursor: pointer;
-        clicked => {
-            root.checked = !root.checked;
-            root.toggled();
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.toggle(); }
+    }
+
+    switch_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: root.enabled;
+
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                root.toggle();
+                return accept;
+            }
+            return reject;
         }
     }
 }
@@ -34,6 +68,7 @@ export component SettingsNavItem inherits Rectangle {
     in property <string> text;
     in property <int> icon-kind: 0;
     in property <bool> selected;
+    in property <bool> rtl-layout: false;
     in property <color> selected-background;
     in property <color> hover-background;
     in property <color> accent-color;
@@ -45,10 +80,17 @@ export component SettingsNavItem inherits Rectangle {
     width: 165px;
     height: 40px;
     border-radius: 4px;
-    background: root.selected ? root.selected-background : nav_touch.has-hover ? root.hover-background : transparent;
+    background: root.selected ? root.selected-background : nav_touch.has-hover || nav_focus.has-focus ? root.hover-background : transparent;
+    forward-focus: nav_focus;
+
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
 
     Rectangle {
-        x: 0px;
+        x: root.rtl-layout ? parent.width - 4px : 0px;
         y: 0px;
         width: 4px;
         height: parent.height;
@@ -57,7 +99,7 @@ export component SettingsNavItem inherits Rectangle {
     }
 
     Rectangle {
-        x: 19px;
+        x: root.rtl-layout ? parent.width - 37px : 19px;
         y: 11px;
         width: 18px;
         height: 18px;
@@ -125,13 +167,16 @@ export component SettingsNavItem inherits Rectangle {
     }
 
     Text {
-        x: 50px;
-        y: 12px;
+        x: root.rtl-layout ? 14px : 50px;
+        y: 10px;
         width: parent.width - 64px;
+        height: 20px;
         text: root.text;
         color: root.selected ? root.label-color : root.muted-color;
         font-size: 14px;
         font-weight: 400;
+        horizontal-alignment: root.rtl-layout ? right : left;
+        vertical-alignment: center;
         overflow: elide;
     }
 
@@ -141,11 +186,27 @@ export component SettingsNavItem inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
+
+    nav_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
 }
 
 export component PanelTitle inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
+    in property <bool> rtl-layout: false;
     in property <color> title-color;
     in property <color> muted-color;
 
@@ -157,26 +218,31 @@ export component PanelTitle inherits Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
+        height: 18px;
         text: root.title;
         color: root.title-color;
         font-size: 14px;
         font-weight: 500;
+        horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
     }
 
     Text {
         x: 0px;
-        y: 21px;
+        y: 22px;
         width: parent.width;
+        height: 14px;
         text: root.subtitle;
         color: root.muted-color;
         font-size: 9px;
+        horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
     }
 }
 
 export component SettingSectionTitle inherits Rectangle {
     in property <string> title;
+    in property <bool> rtl-layout: false;
     in property <color> title-color;
     in property <color> divider-color;
 
@@ -187,10 +253,12 @@ export component SettingSectionTitle inherits Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
+        height: 15px;
         text: root.title;
         color: root.title-color;
         font-size: 11px;
         font-weight: 500;
+        horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
     }
 
@@ -206,6 +274,7 @@ export component SettingSectionTitle inherits Rectangle {
 export component SettingLabel inherits Rectangle {
     in property <string> label;
     in property <string> help;
+    in property <bool> rtl-layout: false;
     in property <color> label-color;
     in property <color> muted-color;
 
@@ -217,21 +286,24 @@ export component SettingLabel inherits Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
+        height: 16px;
         text: root.label;
         color: root.label-color;
         font-size: 12px;
         font-weight: 500;
+        horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
     }
 
     Text {
         x: 0px;
-        y: 17px;
+        y: 18px;
         width: parent.width;
-        height: 13px;
+        height: 15px;
         text: root.help;
         color: root.muted-color;
         font-size: 11px;
+        horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
     }
 }

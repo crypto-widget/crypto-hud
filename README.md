@@ -1,186 +1,239 @@
+<p align="center">
+  <img src="crates/crypto-hud/ui/icon.png" width="88" alt="Crypto HUD logo">
+</p>
+
 <h1 align="center">Crypto HUD</h1>
 
 <p align="center">
-  A lightweight, local-first market HUD for your Windows desktop.
+  <strong>Your market, always within a glance.</strong><br>
+  Native crypto widgets that stay on your Windows desktop without taking over it.
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+  <a href="README.md">English</a> ·
+  <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="README.zh-TW.md">繁體中文</a> ·
+  <a href="README.es.md">Español</a> ·
+  <a href="README.pt-BR.md">Português</a> ·
+  <a href="README.vi.md">Tiếng Việt</a><br>
+  <a href="README.id.md">Bahasa Indonesia</a> ·
+  <a href="README.tr.md">Türkçe</a> ·
+  <a href="README.ko.md">한국어</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.ru.md">Русский</a> ·
+  <a href="README.ar.md">العربية</a>
 </p>
 
 <p align="center">
-  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-f59e0b">
-  <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078d4">
-  <img alt="Runtime: native" src="https://img.shields.io/badge/runtime-native-22c55e">
-  <img alt="No account required" src="https://img.shields.io/badge/account-not%20required-14b8a6">
-  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111827">
+  <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078d4?style=flat-square&logo=windows11&logoColor=white">
+  <img alt="Built with Rust" src="https://img.shields.io/badge/built_with-Rust-dea584?style=flat-square&logo=rust&logoColor=white">
+  <img alt="Native Slint UI" src="https://img.shields.io/badge/UI-native_Slint-2379f4?style=flat-square">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square">
 </p>
 
-> Keep prices visible enough to glance at, quiet enough to forget about.
+<p align="center">
+  <a href="#quick-start"><strong>Run it locally</strong></a> ·
+  <a href="#widget-gallery"><strong>Explore widgets</strong></a> ·
+  <a href="CUSTOM_UI_PLUGIN_DEVELOPMENT.md"><strong>Build a widget</strong></a>
+</p>
 
-Crypto HUD keeps crypto prices quietly visible on your Windows desktop.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-light.png">
+    <img src="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-dark.png" width="500" alt="Market Compass widget showing BTC price, a candlestick chart, and surrounding market pairs">
+  </picture>
+</p>
 
-No more switching to an exchange again and again just to check the market. Put a
-small price card where it feels comfortable, then keep working, reading, coding,
-or living your day. When you care, glance at it. When you do not, it stays out
-of the way.
+<p align="center">
+  <sub>Live prices at the edge of your workspace. No exchange tab. No wallet connection. No noise.</sub>
+</p>
 
-The project is currently in alpha. It is already useful for watching prices, but
-it is still early software and may change quickly.
+---
 
-## Highlights
+Crypto HUD is a lightweight, local-first market display for people who want to
+follow a few coins without living inside a trading terminal. Place a widget
+where it feels natural, keep working, and glance over only when the market
+matters.
 
-- **Glanceable prices**: keep market prices at the edge of your desktop without
-  repeatedly opening an exchange.
-- **Light and low-overhead**: native Rust + Slint, with no Electron, Tauri,
-  WebView, or bundled browser runtime.
-- **Local and permissionless**: layout and preferences stay on your machine; no
-  accounts, OAuth, API keys, wallet access, private keys, or seed phrases.
-- **One-key hide/show**: press `Alt+C` to hide every widget when you need a
-  clean desktop, then bring them back just as quickly.
-- **View-only by design**: reads public market data only; no trading, wallet
-  connection, or custody.
+<table>
+  <tr>
+    <td width="25%"><strong>⚡ Native & light</strong><br><sub>Rust + Slint. No Electron, Tauri, WebView, or bundled browser runtime.</sub></td>
+    <td width="25%"><strong>👀 Glanceable</strong><br><sub>Draggable, always-on-top widgets keep the important numbers in view.</sub></td>
+    <td width="25%"><strong>🔒 Local-first</strong><br><sub>Your layout and preferences stay on your machine. No account or API key.</sub></td>
+    <td width="25%"><strong>🙈 Quiet on demand</strong><br><sub>Hide or restore every widget with <kbd>Alt</kbd> + <kbd>C</kbd>.</sub></td>
+  </tr>
+</table>
 
-## What It Does
+## Widget gallery
 
-- Shows draggable, optionally always-on-top desktop price widgets.
-- Tracks chosen symbols and fetches live data from Binance, Coinbase, OKX, and
-  Hyperliquid.
-- Supports widget styles, light/dark themes, English and Simplified Chinese,
-  and market color preferences.
-- Saves widget positions and settings between launches.
+Choose a compact ticker, a richer chart, or a multi-market view. Built-in
+widgets use the same plugin contract available to custom widgets.
 
-Crypto HUD is only for viewing public market information. It does not place
-trades, connect to wallets, custody funds, or ask for exchange API keys. Its
-security boundary is intentionally simple: public market data comes from market
-providers, while layout and preferences stay local.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.focus-ticker/ui/preview-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/plugins/com.cryptohud.focus-ticker/ui/preview-light.png">
+    <img src="crates/crypto-hud/plugins/com.cryptohud.focus-ticker/ui/preview-dark.png" width="820" alt="Focus Ticker showing BTC price, daily change, and a sparkline">
+  </picture>
+</p>
 
-## Who It Is For
+<p align="center"><strong>Focus Ticker</strong> — one market, zero distraction.</p>
 
-Crypto HUD is useful if you:
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.trust-card/ui/preview-dark.png">
+        <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/plugins/com.cryptohud.trust-card/ui/preview-light.png">
+        <img src="crates/crypto-hud/plugins/com.cryptohud.trust-card/ui/preview-dark.png" width="500" alt="Trust Card widget with BTC price and a larger market chart">
+      </picture>
+    </td>
+    <td width="50%" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/ui/previews/quote-board-dark.png">
+        <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/ui/previews/quote-board-light.png">
+        <img src="crates/crypto-hud/ui/previews/quote-board-dark.png" width="360" alt="Quote Board widget showing several crypto trading pairs">
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Trust Card</strong><br><sub>More context when one pair deserves attention.</sub></td>
+    <td align="center"><strong>Quote Board</strong><br><sub>A compact pulse check across several pairs.</sub></td>
+  </tr>
+</table>
 
-- Watch a few coins throughout the day.
-- Feel tired of repeatedly opening an exchange just to check prices.
-- Prefer a lightweight native desktop tool over a full trading terminal.
-- Like arranging small always-on-top widgets on your desktop.
+<details>
+  <summary><strong>Prefer a light desktop?</strong> See the light theme</summary>
+  <br>
+  <table>
+    <tr>
+      <td width="50%" align="center"><img src="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-light.png" width="440" alt="Market Compass in the light theme"></td>
+      <td width="50%" align="center"><img src="crates/crypto-hud/plugins/com.cryptohud.trust-card/ui/preview-light.png" width="480" alt="Trust Card in the light theme"></td>
+    </tr>
+  </table>
+</details>
 
-It is probably not the right tool if you need full charting, portfolio tracking,
-order entry, or alert automation today.
+## Built for the background
 
-## Current Status
+- **Real desktop widgets** — move them freely, keep them always on top, and
+  restore the same layout next time.
+- **Four public market sources** — Binance, Coinbase, OKX, and Hyperliquid.
+- **Flexible appearance** — multiple widget styles, light and dark themes,
+  opacity controls, and configurable market colors.
+- **Global focus switch** — press <kbd>Alt</kbd> + <kbd>C</kbd> to hide or show
+  the entire HUD at once.
+- **12 interface languages** — including Simplified and Traditional Chinese,
+  English, Japanese, Korean, Spanish, Portuguese, and RTL Arabic.
+- **Plugin-ready** — create local Slint widgets with declared data requirements,
+  themes, parameters, and preview images.
 
-Crypto HUD is an alpha native Windows desktop app built with Rust and Slint.
+Supported UI languages: `en`, `zh-CN`, `zh-TW`, `es-419`, `pt-BR`, `vi`, `id`,
+`tr`, `ko`, `ja`, `ru`, and `ar`.
 
-- Runs as one native desktop process.
-- Uses real desktop windows instead of WebView or browser-hosted UI.
-- Includes a main window, tray controls, global hide/show shortcut, local
-  persistence, plugin loading, and Windows packaging scripts.
-- Default shortcut: `Alt+C` to hide or show all widgets.
+> [!IMPORTANT]
+> Crypto HUD is view-only by design. It reads public market data, but it does
+> not place trades, connect to wallets, custody funds, or ask for private keys,
+> seed phrases, exchange accounts, or API keys.
 
-## Try It Locally
+## Quick start
 
-You need Rust. The project uses `mise` to pin the expected Rust toolchain.
-
-Review `mise.toml` first, then install the toolchain:
+Crypto HUD is built for Windows. The repository uses `mise` to pin Rust
+`1.96` and provides a one-command local launch task.
 
 ```powershell
+git clone https://github.com/crypto-widget/crypto-hud.git
+cd crypto-hud
 mise trust
 mise install
-```
-
-Check that the project builds:
-
-```powershell
-mise run check
-```
-
-Run the app:
-
-```powershell
 mise run run-app
 ```
 
-To launch a specific number of widgets:
+That starts one instance of each bundled widget. To launch a specific number
+of widgets instead:
 
 ```powershell
 cargo run -p crypto-hud -- --widgets 3
 ```
 
-## Basic Use
+Once running:
 
-- Drag a price card to move it.
-- Click the tray icon to open the main window.
-- Right-click the tray icon for settings and quit actions.
-- Use settings to add widgets, choose symbols, change opacity, switch themes,
-  configure startup behavior, and change app-level market preferences.
-- Use `Alt+C` to hide or show all widgets.
+1. Drag any widget to place it.
+2. Click the tray icon to open settings.
+3. Add widgets, select symbols, switch themes, and tune opacity.
+4. Press <kbd>Alt</kbd> + <kbd>C</kbd> whenever you want a clean desktop.
 
-Layout and settings are saved automatically. For isolated testing, set a custom
-state directory:
+Positions and preferences are saved automatically.
 
-```powershell
-$env:CRYPTO_HUD_STATE_DIR = "$PWD\.crypto-hud-state"
-mise run run-app
-```
+## Make it yours
 
-## For Contributors
+Crypto HUD's bundled widgets are powered by a local plugin system. A widget can
+declare its symbols, market-data capabilities, sizes, themes, and settings
+without owning network or filesystem access.
 
-Useful development commands:
+- Read the [custom UI plugin guide](CUSTOM_UI_PLUGIN_DEVELOPMENT.md).
+- Browse the [plugin contract and bundled examples](crates/crypto-hud/plugins/README.md).
+- Start from an existing Slint widget and give the market a different shape.
+
+## Development
 
 ```powershell
 mise run format-check
 mise run check
 mise run test
-mise run format
 mise run run-app
-powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
 ```
 
-The code is split into small Rust crates:
+<details>
+  <summary><strong>Repository structure and GUI smoke tests</strong></summary>
+  <br>
 
-```text
-crates/
-  crypto-hud-core/          market symbols, formatting, alert primitives
-  crypto-hud-market/        market data fetching
-  crypto-hud-runtime/       widget runtime view contracts
-  crypto-hud-shell-state/   settings and persisted layout state
-  crypto-hud/              native desktop shell and Slint UI
-```
+  ```text
+  crates/
+    crypto-hud-core/          market symbols, formatting, and alert primitives
+    crypto-hud-market/        public market-data fetching
+    crypto-hud-runtime/       widget runtime view contracts
+    crypto-hud-shell-state/   settings and persisted layout state
+    crypto-hud/               native Windows shell and Slint UI
+  ```
 
-Built-in and local widget plugin contracts live in
-`crates/crypto-hud/plugins/README.md`.
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
+  powershell -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
+  powershell -ExecutionPolicy Bypass -File .\scripts\single-instance-smoke.ps1
+  ```
+</details>
 
-See `CONTRIBUTING.md` for contribution guidelines and `SECURITY.md` for
-security reporting.
+<details>
+  <summary><strong>Windows release packaging</strong></summary>
+  <br>
 
-## Release Packaging
+  Releases are produced with the local Windows scripts. The package workflow
+  creates a zip, checksum, and release manifest in `dist/`. Production packages
+  must be Authenticode signed; the smoke scripts use an explicit local-only
+  unsigned override.
 
-Crypto HUD currently uses local Windows release scripts rather than a GitHub
-Actions release workflow.
-
-```powershell
-cargo test --workspace
-powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.8.3
-```
-
-The package script creates a Windows zip, checksum, and release manifest in
-`dist/`. The installer verifies package contents before copying files. Optional
-Windows Authenticode signing is supported through the signing environment
-variables documented in `scripts/package-windows.ps1`.
+  ```powershell
+  cargo test --locked --workspace
+  cargo audit
+  powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
+  powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
+  # Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) first.
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
+  ```
+</details>
 
 ## Roadmap
 
-- Better provider health, stale-data, and error states.
-- Price and 24-hour change alerts.
-- Duplicate, rename, reorder, and per-widget visibility controls.
-- Better first-launch placement and recovery.
-- A richer installer format.
+Current priorities include stronger provider health states, price and 24-hour
+change alerts, richer widget management, better first-launch placement, and a
+more complete installer.
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), review the
+[changelog](CHANGELOG.md), or read the [security policy](SECURITY.md) before
+reporting a vulnerability.
 
 ## License
 
-Crypto HUD is licensed under the MIT License. See `LICENSE`.
+MIT © Crypto HUD Contributors

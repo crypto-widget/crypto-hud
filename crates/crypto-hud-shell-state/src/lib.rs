@@ -4,14 +4,16 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::{OsStr, OsString},
+    fmt,
     fs::{self, File},
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 pub use crypto_hud_core::{
@@ -19,7 +21,7 @@ pub use crypto_hud_core::{
     format_market_pair_display, format_market_pair_source, format_market_pair_symbol,
     market_pair_source, normalize_market_pair_key, normalize_market_symbols,
     normalize_symbol_token, AlertCondition, AlertRule, MarketDataSource, MarketPair,
-    MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS,
+    MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS, MAX_MARKET_SYMBOLS,
     MAX_REFRESH_INTERVAL_SECONDS, MIN_REFRESH_INTERVAL_SECONDS,
 };
 
@@ -36,6 +38,7 @@ pub const DEFAULT_LAYOUT_GAP: i32 = 24;
 pub const WIDGET_CONFIG_SHOW_COIN_LOGOS: &str = "show_coin_logos";
 pub const WIDGET_CONFIG_HIDE_QUOTE_ASSET: &str = "hide_quote_asset";
 pub const WIDGET_CONFIG_THEME: &str = "theme";
+pub const WIDGET_CONFIG_PLUGIN_PARAMETERS: &str = "plugin_parameters";
 pub const WIDGET_THEME_SYSTEM: &str = "system";
 pub const QUOTE_BOARD_WIDTH: i32 = 286;
 pub const QUOTE_BOARD_HEIGHT: i32 = 194;
@@ -62,7 +65,7 @@ pub const DEFAULT_WIDGET_SCALE_PERCENT: i32 = 100;
 pub const PARKED_WIDGET_X: i32 = -32_000;
 pub const PARKED_WIDGET_Y: i32 = -32_000;
 pub const MIN_SYMBOLS_PER_WIDGET: usize = 1;
-pub const MAX_SYMBOLS_PER_WIDGET: usize = 20;
+pub const MAX_SYMBOLS_PER_WIDGET: usize = MAX_MARKET_SYMBOLS;
 pub const MINI_TICKER_SYMBOL_LIMIT: usize = 1;
 pub const BUILTIN_QUOTE_BOARD_PLUGIN_ID: &str = "builtin.quote-board";
 pub const BUILTIN_MINI_TICKER_PLUGIN_ID: &str = "builtin.mini-ticker";
@@ -144,6 +147,25 @@ impl From<(i32, i32)> for WidgetSize {
         Self {
             width: value.0,
             height: value.1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesktopWorkArea {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl DesktopWorkArea {
+    pub const fn from_desktop_size(desktop_size: (i32, i32)) -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            width: desktop_size.0,
+            height: desktop_size.1,
         }
     }
 }
@@ -372,6 +394,110 @@ pub enum PersistedLayoutStore {
     Legacy(LegacyLayoutStore),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutStoreReadErrorKind {
+    Read,
+    Parse,
+}
+
+#[derive(Debug)]
+pub enum LayoutStoreReadError {
+    Read {
+        path: PathBuf,
+        source: io::Error,
+    },
+    Parse {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+}
+
+impl LayoutStoreReadError {
+    pub const fn kind(&self) -> LayoutStoreReadErrorKind {
+        match self {
+            Self::Read { .. } => LayoutStoreReadErrorKind::Read,
+            Self::Parse { .. } => LayoutStoreReadErrorKind::Parse,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Read { path, .. } | Self::Parse { path, .. } => path,
+        }
+    }
+}
+
+impl fmt::Display for LayoutStoreReadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { path, source } => {
+                write!(formatter, "failed to read {}: {source}", path.display())
+            }
+            Self::Parse { path, source } => {
+                write!(formatter, "failed to parse {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for LayoutStoreReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } => Some(source),
+            Self::Parse { source, .. } => Some(source),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LayoutStoreLoadSource {
+    Current,
+    Legacy(PathBuf),
+    Missing,
+    DefaultsAfterError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayoutStoreLoadWarning {
+    pub kind: LayoutStoreReadErrorKind,
+    pub path: PathBuf,
+    pub error: String,
+    pub preserved_path: Option<PathBuf>,
+    pub preservation_error: Option<String>,
+}
+
+impl fmt::Display for LayoutStoreLoadWarning {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "saved state could not be loaded from {} ({}); defaults were loaded",
+            self.path.display(),
+            self.error
+        )?;
+        if let Some(path) = &self.preserved_path {
+            write!(
+                formatter,
+                "; the unreadable file was preserved at {}",
+                path.display()
+            )
+        } else if let Some(error) = &self.preservation_error {
+            write!(
+                formatter,
+                "; the original file remains in place, but creating a backup failed: {error}"
+            )
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct LoadedLayoutStore {
+    pub store: LayoutStore,
+    pub source: LayoutStoreLoadSource,
+    pub warning: Option<LayoutStoreLoadWarning>,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShortcutPreference {
@@ -406,20 +532,69 @@ impl ShortcutPreference {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum LanguagePreference {
     System,
     #[default]
     En,
     ZhHans,
+    ZhHant,
+    Es419,
+    PtBr,
+    Vi,
+    Id,
+    Tr,
+    Ko,
+    Ja,
+    Ru,
+    Ar,
+}
+
+const LANGUAGE_PREFERENCE_CONFIG_VARIANTS: &[&str] = &[
+    "system", "en", "zh-CN", "zh-TW", "es-419", "pt-BR", "vi", "id", "tr", "ko", "ja", "ru", "ar",
+    "zh_hans", "zh_hant", "es_419", "pt_br",
+];
+
+impl Serialize for LanguagePreference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.config_tag())
+    }
 }
 
 impl LanguagePreference {
+    pub const ALL: [Self; 13] = [
+        Self::System,
+        Self::En,
+        Self::ZhHans,
+        Self::ZhHant,
+        Self::Es419,
+        Self::PtBr,
+        Self::Vi,
+        Self::Id,
+        Self::Tr,
+        Self::Ko,
+        Self::Ja,
+        Self::Ru,
+        Self::Ar,
+    ];
+
     pub const fn from_index(index: i32) -> Self {
         match index {
             1 => Self::En,
             2 => Self::ZhHans,
+            3 => Self::ZhHant,
+            4 => Self::Es419,
+            5 => Self::PtBr,
+            6 => Self::Vi,
+            7 => Self::Id,
+            8 => Self::Tr,
+            9 => Self::Ko,
+            10 => Self::Ja,
+            11 => Self::Ru,
+            12 => Self::Ar,
             _ => Self::System,
         }
     }
@@ -429,8 +604,141 @@ impl LanguagePreference {
             Self::System => 0,
             Self::En => 1,
             Self::ZhHans => 2,
+            Self::ZhHant => 3,
+            Self::Es419 => 4,
+            Self::PtBr => 5,
+            Self::Vi => 6,
+            Self::Id => 7,
+            Self::Tr => 8,
+            Self::Ko => 9,
+            Self::Ja => 10,
+            Self::Ru => 11,
+            Self::Ar => 12,
         }
     }
+
+    pub fn from_locale_tag(value: &str) -> Option<Self> {
+        language_preference_from_locale_tag(value)
+    }
+
+    pub const fn config_tag(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::En => "en",
+            Self::ZhHans => "zh-CN",
+            Self::ZhHant => "zh-TW",
+            Self::Es419 => "es-419",
+            Self::PtBr => "pt-BR",
+            Self::Vi => "vi",
+            Self::Id => "id",
+            Self::Tr => "tr",
+            Self::Ko => "ko",
+            Self::Ja => "ja",
+            Self::Ru => "ru",
+            Self::Ar => "ar",
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LanguagePreference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        language_preference_from_config_tag(&value)
+            .ok_or_else(|| de::Error::unknown_variant(&value, LANGUAGE_PREFERENCE_CONFIG_VARIANTS))
+    }
+}
+
+fn language_preference_from_config_tag(value: &str) -> Option<LanguagePreference> {
+    let (language, _subtags) = normalized_locale_tag_parts(value);
+    if language == "system" {
+        return Some(LanguagePreference::System);
+    }
+    language_preference_from_locale_tag(value)
+}
+
+fn language_preference_from_locale_tag(value: &str) -> Option<LanguagePreference> {
+    let (language, subtags) = normalized_locale_tag_parts(value);
+
+    match language.as_str() {
+        "en" => Some(LanguagePreference::En),
+        "zh" | "cmn" | "yue" => Some(chinese_language_preference(&language, &subtags)),
+        "es" if spanish_subtags_are_latin_american(&subtags) => Some(LanguagePreference::Es419),
+        "pt" if subtags.iter().any(|subtag| subtag == "br") => Some(LanguagePreference::PtBr),
+        "vi" => Some(LanguagePreference::Vi),
+        "id" | "in" => Some(LanguagePreference::Id),
+        "tr" => Some(LanguagePreference::Tr),
+        "ko" => Some(LanguagePreference::Ko),
+        "ja" => Some(LanguagePreference::Ja),
+        "ru" => Some(LanguagePreference::Ru),
+        "ar" => Some(LanguagePreference::Ar),
+        _ => None,
+    }
+}
+
+fn normalized_locale_tag_parts(value: &str) -> (String, Vec<String>) {
+    let normalized = value
+        .trim()
+        .split(['.', '@'])
+        .next()
+        .unwrap_or_default()
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    let mut parts = normalized.split('_');
+    let language = parts.next().unwrap_or_default().to_string();
+    let subtags = parts.map(str::to_string).collect::<Vec<_>>();
+    (language, subtags)
+}
+
+fn chinese_language_preference(language: &str, subtags: &[String]) -> LanguagePreference {
+    if subtags.iter().any(|subtag| subtag == "hans") {
+        return LanguagePreference::ZhHans;
+    }
+    if subtags.iter().any(|subtag| subtag == "hant") {
+        return LanguagePreference::ZhHant;
+    }
+    if language == "yue"
+        || subtags
+            .iter()
+            .any(|subtag| matches!(subtag.as_str(), "tw" | "hk" | "mo"))
+    {
+        LanguagePreference::ZhHant
+    } else {
+        LanguagePreference::ZhHans
+    }
+}
+
+fn spanish_subtags_are_latin_american(subtags: &[String]) -> bool {
+    subtags.iter().any(|subtag| {
+        matches!(
+            subtag.as_str(),
+            "419"
+                | "ar"
+                | "bo"
+                | "br"
+                | "bz"
+                | "cl"
+                | "co"
+                | "cr"
+                | "cu"
+                | "do"
+                | "ec"
+                | "gt"
+                | "hn"
+                | "mx"
+                | "ni"
+                | "pa"
+                | "pe"
+                | "pr"
+                | "py"
+                | "sv"
+                | "us"
+                | "uy"
+                | "ve"
+        )
+    })
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -484,8 +792,6 @@ pub struct AppSettings {
     pub refresh_interval_seconds: i32,
     #[serde(default = "default_market_symbols")]
     pub market_default_symbols: Vec<String>,
-    #[serde(default = "default_market_fallback_enabled")]
-    pub market_fallback_enabled: bool,
     #[serde(default)]
     pub auto_start_enabled: bool,
     #[serde(default = "default_show_main_window_on_startup")]
@@ -522,7 +828,6 @@ impl Default for AppSettings {
             market_hyperliquid_enabled: default_market_source_enabled(),
             refresh_interval_seconds: default_refresh_interval_seconds(),
             market_default_symbols: default_market_symbols(),
-            market_fallback_enabled: default_market_fallback_enabled(),
             auto_start_enabled: false,
             show_main_window_on_startup: default_show_main_window_on_startup(),
             shortcut: ShortcutPreference::default(),
@@ -575,7 +880,6 @@ impl AppSettings {
             ),
             refresh_interval_seconds: clamp_refresh_interval(self.refresh_interval_seconds),
             market_default_symbols: normalize_market_symbols(self.market_default_symbols),
-            market_fallback_enabled: self.market_fallback_enabled,
             auto_start_enabled: self.auto_start_enabled,
             show_main_window_on_startup: self.show_main_window_on_startup,
             shortcut: self.shortcut.normalized(),
@@ -619,10 +923,6 @@ pub fn default_refresh_interval_seconds() -> i32 {
 }
 
 pub fn default_market_source_enabled() -> bool {
-    true
-}
-
-pub fn default_market_fallback_enabled() -> bool {
     true
 }
 
@@ -728,6 +1028,48 @@ pub fn set_widget_display_config(
         WIDGET_CONFIG_HIDE_QUOTE_ASSET.to_string(),
         Value::Bool(hide_quote_asset),
     );
+}
+
+pub fn widget_integer_parameter(
+    instance: &WidgetInstance,
+    key: &str,
+    default: i32,
+    minimum: i32,
+    maximum: i32,
+) -> i32 {
+    instance
+        .config
+        .as_object()
+        .and_then(|config| config.get(WIDGET_CONFIG_PLUGIN_PARAMETERS))
+        .and_then(Value::as_object)
+        .and_then(|parameters| parameters.get(key))
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or(default)
+        .clamp(minimum, maximum)
+}
+
+pub fn set_widget_integer_parameter(
+    instance: &mut WidgetInstance,
+    key: &str,
+    value: i32,
+    minimum: i32,
+    maximum: i32,
+) {
+    let config = widget_config_object_mut(instance);
+    let parameters = config
+        .entry(WIDGET_CONFIG_PLUGIN_PARAMETERS.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !parameters.is_object() {
+        *parameters = Value::Object(Map::new());
+    }
+    parameters
+        .as_object_mut()
+        .expect("plugin parameters should be an object")
+        .insert(
+            key.to_string(),
+            Value::Number(value.clamp(minimum, maximum).into()),
+        );
 }
 
 fn widget_config_show_coin_logos(config: &serde_json::Value) -> bool {
@@ -886,10 +1228,35 @@ fn replace_file(source: &Path, destination: &Path) -> Result<()> {
         .with_context(|| format!("failed to replace {}", destination.display()))
 }
 
+pub fn try_load_persisted_layout_store(
+    path: &Path,
+) -> std::result::Result<Option<PersistedLayoutStore>, LayoutStoreReadError> {
+    let contents = match fs::read(path) {
+        Ok(contents) => contents,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(LayoutStoreReadError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    serde_json::from_slice::<PersistedLayoutStore>(&contents)
+        .map(Some)
+        .map_err(|source| LayoutStoreReadError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
 pub fn load_persisted_layout_store(path: &Path) -> Option<PersistedLayoutStore> {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|contents| serde_json::from_str::<PersistedLayoutStore>(&contents).ok())
+    match try_load_persisted_layout_store(path) {
+        Ok(persisted) => persisted,
+        Err(error) => {
+            eprintln!("{error}");
+            None
+        }
+    }
 }
 
 pub fn state_path() -> Result<PathBuf> {
@@ -922,36 +1289,196 @@ pub fn load_layout_store(
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
 ) -> LayoutStore {
-    let mut migrated_from_legacy_state = false;
-    let persisted = load_persisted_layout_store(path).or_else(|| {
-        for legacy_path in legacy_layout_store_paths(path) {
-            if legacy_path.as_path() == path {
-                continue;
-            }
-            if let Some(persisted) = load_persisted_layout_store(&legacy_path) {
-                migrated_from_legacy_state = true;
-                return Some(persisted);
-            }
-        }
-        None
-    });
+    let loaded =
+        load_layout_store_with_diagnostics(path, requested_widget_count, catalog, desktop_size);
+    if let Some(warning) = &loaded.warning {
+        eprintln!("layout state recovery warning: {warning}");
+    }
+    loaded.store
+}
 
-    let mut store = persisted
-        .map(|persisted| match persisted {
-            PersistedLayoutStore::Current(store) => store,
-            PersistedLayoutStore::Legacy(store) => migrate_legacy_store(store, desktop_size),
-        })
-        .unwrap_or_default();
-    normalize_store_with_catalog(&mut store, requested_widget_count, catalog, desktop_size);
-    if migrated_from_legacy_state {
-        if let Err(error) = save_layout_store(path, &store) {
-            eprintln!(
-                "failed to save migrated layout state to {}: {error:#}",
-                path.display()
+pub fn load_layout_store_with_diagnostics(
+    path: &Path,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+) -> LoadedLayoutStore {
+    load_layout_store_with_diagnostics_and_work_areas(
+        path,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn load_layout_store_with_diagnostics_and_work_areas(
+    path: &Path,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> LoadedLayoutStore {
+    match try_load_persisted_layout_store(path) {
+        Ok(Some(persisted)) => {
+            return finish_loaded_layout_store(
+                persisted,
+                LayoutStoreLoadSource::Current,
+                requested_widget_count,
+                catalog,
+                desktop_size,
+                work_areas,
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return default_layout_store_after_error(
+                error,
+                requested_widget_count,
+                catalog,
+                desktop_size,
+                work_areas,
             );
         }
     }
-    store
+
+    for legacy_path in legacy_layout_store_paths(path) {
+        if legacy_path.as_path() == path {
+            continue;
+        }
+        match try_load_persisted_layout_store(&legacy_path) {
+            Ok(Some(persisted)) => {
+                let loaded = finish_loaded_layout_store(
+                    persisted,
+                    LayoutStoreLoadSource::Legacy(legacy_path),
+                    requested_widget_count,
+                    catalog,
+                    desktop_size,
+                    work_areas,
+                );
+                if let Err(error) = save_layout_store(path, &loaded.store) {
+                    eprintln!(
+                        "failed to save migrated layout state to {}: {error:#}",
+                        path.display()
+                    );
+                }
+                return loaded;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return default_layout_store_after_error(
+                    error,
+                    requested_widget_count,
+                    catalog,
+                    desktop_size,
+                    work_areas,
+                );
+            }
+        }
+    }
+
+    let mut store = LayoutStore::default();
+    normalize_store_with_catalog_and_work_areas(
+        &mut store,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        work_areas,
+    );
+    LoadedLayoutStore {
+        store,
+        source: LayoutStoreLoadSource::Missing,
+        warning: None,
+    }
+}
+
+fn finish_loaded_layout_store(
+    persisted: PersistedLayoutStore,
+    source: LayoutStoreLoadSource,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> LoadedLayoutStore {
+    let mut store = match persisted {
+        PersistedLayoutStore::Current(store) => store,
+        PersistedLayoutStore::Legacy(store) => {
+            migrate_legacy_store_in_work_areas(store, desktop_size, work_areas)
+        }
+    };
+    normalize_store_with_catalog_and_work_areas(
+        &mut store,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        work_areas,
+    );
+    LoadedLayoutStore {
+        store,
+        source,
+        warning: None,
+    }
+}
+
+fn default_layout_store_after_error(
+    error: LayoutStoreReadError,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> LoadedLayoutStore {
+    let warning = layout_store_load_warning(&error);
+    let mut store = LayoutStore::default();
+    normalize_store_with_catalog_and_work_areas(
+        &mut store,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        work_areas,
+    );
+    LoadedLayoutStore {
+        store,
+        source: LayoutStoreLoadSource::DefaultsAfterError,
+        warning: Some(warning),
+    }
+}
+
+fn layout_store_load_warning(error: &LayoutStoreReadError) -> LayoutStoreLoadWarning {
+    let path = error.path().to_path_buf();
+    let preservation = preserve_unreadable_layout_store(&path);
+    LayoutStoreLoadWarning {
+        kind: error.kind(),
+        path,
+        error: error.to_string(),
+        preserved_path: preservation.as_ref().ok().cloned(),
+        preservation_error: preservation.err().map(|error| format!("{error:#}")),
+    }
+}
+
+fn preserve_unreadable_layout_store(path: &Path) -> Result<PathBuf> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .unwrap_or_else(|| OsStr::new("layout-store"));
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let counter = SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut backup_name = OsString::from(file_name);
+    backup_name.push(format!(
+        ".corrupt-{timestamp}-{}-{counter}",
+        std::process::id()
+    ));
+    let backup_path = parent.join(backup_name);
+    fs::copy(path, &backup_path).with_context(|| {
+        format!(
+            "failed to preserve unreadable state {} as {}",
+            path.display(),
+            backup_path.display()
+        )
+    })?;
+    Ok(backup_path)
 }
 
 fn legacy_layout_store_paths(path: &Path) -> Vec<PathBuf> {
@@ -979,6 +1506,18 @@ fn legacy_layout_store_paths(path: &Path) -> Vec<PathBuf> {
 }
 
 pub fn migrate_legacy_store(legacy: LegacyLayoutStore, desktop_size: (i32, i32)) -> LayoutStore {
+    migrate_legacy_store_in_work_areas(
+        legacy,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+fn migrate_legacy_store_in_work_areas(
+    legacy: LegacyLayoutStore,
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> LayoutStore {
     let settings = legacy.settings.clone().normalized();
     let symbols = normalized_symbols_for_type(WidgetKind::QuoteBoard, legacy.symbols);
     let mut widgets = legacy.widgets.into_iter().collect::<Vec<_>>();
@@ -1003,7 +1542,7 @@ pub fn migrate_legacy_store(legacy: LegacyLayoutStore, desktop_size: (i32, i32))
             })
             .collect(),
     };
-    normalize_store_with_catalog(&mut store, 0, &[], desktop_size);
+    normalize_store_with_catalog_and_work_areas(&mut store, 0, &[], desktop_size, work_areas);
     store
 }
 
@@ -1016,6 +1555,22 @@ pub fn normalize_store_with_catalog(
     requested_widget_count: usize,
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
+) {
+    normalize_store_with_catalog_and_work_areas(
+        store,
+        requested_widget_count,
+        catalog,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    );
+}
+
+pub fn normalize_store_with_catalog_and_work_areas(
+    store: &mut LayoutStore,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
 ) {
     store.settings = store.settings.clone().normalized();
     store.next_widget_number = store.next_widget_number.max(DEFAULT_NEXT_WIDGET_NUMBER);
@@ -1048,7 +1603,15 @@ pub fn normalize_store_with_catalog(
             .enumerate()
             .any(|(index, instance)| is_legacy_default_layout(&instance.layout, index));
 
-    let mut seen_ids = std::collections::HashSet::new();
+    let mut reserved_ids = store
+        .widgets
+        .iter()
+        .map(|instance| instance.id.trim())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    let mut seen_ids = HashSet::new();
+    let mut next_widget_number = store.next_widget_number;
     let mut max_suffix = 0;
     for (index, instance) in store.widgets.iter_mut().enumerate() {
         if let Some(legacy_widget_type) = instance.legacy_widget_type.take() {
@@ -1062,9 +1625,16 @@ pub fn normalize_store_with_catalog(
         }
 
         if instance.id.trim().is_empty() || seen_ids.contains(&instance.id) {
-            let number = store.next_widget_number;
-            store.next_widget_number += 1;
-            instance.id = format!("{}-{number}", instance.widget_type().id_prefix());
+            loop {
+                let number = next_widget_number;
+                next_widget_number += 1;
+                let candidate = format!("{}-{number}", instance.widget_type().id_prefix());
+                if !reserved_ids.contains(&candidate) {
+                    reserved_ids.insert(candidate.clone());
+                    instance.id = candidate;
+                    break;
+                }
+            }
         }
         seen_ids.insert(instance.id.clone());
         max_suffix = max_suffix.max(widget_id_suffix(&instance.id).unwrap_or(0));
@@ -1108,7 +1678,8 @@ pub fn normalize_store_with_catalog(
             instance.layout.x = layout.x;
             instance.layout.y = layout.y;
         }
-        if layout_needs_recovery_for_size(&instance.layout, instance_size, desktop_size) {
+        if layout_needs_recovery_for_size_in_work_areas(&instance.layout, instance_size, work_areas)
+        {
             let layout =
                 default_layout_for_size(index, instance_size, store.settings.clone(), desktop_size);
             instance.layout.x = layout.x;
@@ -1117,9 +1688,7 @@ pub fn normalize_store_with_catalog(
         instance.layout.opacity_percent = clamp_opacity(instance.layout.opacity_percent);
     }
 
-    if store.next_widget_number <= max_suffix {
-        store.next_widget_number = max_suffix + 1;
-    }
+    store.next_widget_number = next_widget_number.max(max_suffix + 1);
 
     let selected_is_valid = store
         .selected_widget_id
@@ -1223,8 +1792,26 @@ pub fn layout_for_instance(
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
 ) -> WidgetLayout {
+    layout_for_instance_in_work_areas(
+        instance,
+        index,
+        settings,
+        catalog,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn layout_for_instance_in_work_areas(
+    instance: &WidgetInstance,
+    index: usize,
+    settings: AppSettings,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> WidgetLayout {
     let size = widget_size_for_instance(instance, catalog);
-    if layout_needs_recovery_for_size(&instance.layout, size, desktop_size) {
+    if layout_needs_recovery_for_size_in_work_areas(&instance.layout, size, work_areas) {
         let mut layout = default_layout_for_size(index, size, settings.clone(), desktop_size);
         layout.scale_percent =
             widget_scale_percent_for_instance(instance, catalog, settings.widget_scale_percent);
@@ -1340,14 +1927,37 @@ pub fn layout_has_visible_area_for_size(
     size: WidgetSize,
     desktop_size: (i32, i32),
 ) -> bool {
-    let (desktop_width, desktop_height) = desktop_size;
-    let visible_left = layout.x.max(0);
-    let visible_top = layout.y.max(0);
-    let visible_right = (layout.x + size.width).min(desktop_width);
-    let visible_bottom = (layout.y + size.height).min(desktop_height);
+    layout_has_visible_area_for_size_in_work_areas(
+        layout,
+        size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
 
-    visible_right - visible_left >= MIN_VISIBLE_WIDGET_PX
-        && visible_bottom - visible_top >= MIN_VISIBLE_WIDGET_PX
+pub fn layout_has_visible_area_for_size_in_work_areas(
+    layout: &WidgetLayout,
+    size: WidgetSize,
+    work_areas: &[DesktopWorkArea],
+) -> bool {
+    let widget_left = i64::from(layout.x);
+    let widget_top = i64::from(layout.y);
+    let widget_right = widget_left + i64::from(size.width.max(0));
+    let widget_bottom = widget_top + i64::from(size.height.max(0));
+
+    work_areas.iter().any(|work_area| {
+        if work_area.width <= 0 || work_area.height <= 0 {
+            return false;
+        }
+        let work_left = i64::from(work_area.x);
+        let work_top = i64::from(work_area.y);
+        let work_right = work_left + i64::from(work_area.width);
+        let work_bottom = work_top + i64::from(work_area.height);
+        let visible_width = widget_right.min(work_right) - widget_left.max(work_left);
+        let visible_height = widget_bottom.min(work_bottom) - widget_top.max(work_top);
+
+        visible_width >= i64::from(MIN_VISIBLE_WIDGET_PX)
+            && visible_height >= i64::from(MIN_VISIBLE_WIDGET_PX)
+    })
 }
 
 pub fn clamp_widget_size(size: WidgetSize) -> WidgetSize {
@@ -1474,8 +2084,20 @@ pub fn layout_needs_recovery_for_size(
     size: WidgetSize,
     desktop_size: (i32, i32),
 ) -> bool {
+    layout_needs_recovery_for_size_in_work_areas(
+        layout,
+        size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn layout_needs_recovery_for_size_in_work_areas(
+    layout: &WidgetLayout,
+    size: WidgetSize,
+    work_areas: &[DesktopWorkArea],
+) -> bool {
     is_parked_position(layout.x, layout.y)
-        || !layout_has_visible_area_for_size(layout, size, desktop_size)
+        || !layout_has_visible_area_for_size_in_work_areas(layout, size, work_areas)
 }
 
 pub fn is_parked_position(x: i32, y: i32) -> bool {
@@ -1527,6 +2149,20 @@ pub fn remove_widget_from_store_by_id(
     widget_id: &str,
     desktop_size: (i32, i32),
 ) -> bool {
+    remove_widget_from_store_by_id_in_work_areas(
+        store,
+        widget_id,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn remove_widget_from_store_by_id_in_work_areas(
+    store: &mut LayoutStore,
+    widget_id: &str,
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> bool {
     let Some(index) = store
         .widgets
         .iter()
@@ -1543,7 +2179,7 @@ pub fn remove_widget_from_store_by_id(
         .widgets
         .get(next_index)
         .map(|widget| widget.id.clone());
-    normalize_store_with_catalog(store, 0, &[], desktop_size);
+    normalize_store_with_catalog_and_work_areas(store, 0, &[], desktop_size, work_areas);
     true
 }
 
@@ -2084,7 +2720,7 @@ mod tests {
     #[test]
     fn legacy_settings_json_defaults_new_fields() {
         let settings = serde_json::from_str::<AppSettings>(
-            r#"{"widgets_always_on_top":false,"opacity_percent":77}"#,
+            r#"{"widgets_always_on_top":false,"opacity_percent":77,"market_fallback_enabled":true}"#,
         )
         .unwrap()
         .normalized();
@@ -2103,7 +2739,6 @@ mod tests {
             DEFAULT_REFRESH_INTERVAL_SECONDS
         );
         assert_eq!(settings.market_default_symbols, default_market_symbols());
-        assert!(settings.market_fallback_enabled);
         assert!(!settings.auto_start_enabled);
         assert!(settings.show_main_window_on_startup);
         assert_eq!(settings.shortcut, ShortcutPreference::AltC);
@@ -2150,6 +2785,34 @@ mod tests {
         assert_eq!(
             widget.config[WIDGET_CONFIG_THEME],
             Value::String("light".to_string())
+        );
+    }
+
+    #[test]
+    fn widget_integer_parameters_default_persist_and_clamp() {
+        let mut widget = WidgetInstance {
+            id: "market-compass-1".to_string(),
+            plugin_id: "com.cryptohud.market-compass".to_string(),
+            legacy_widget_type: None,
+            name: "Market Compass 1".to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            config: default_widget_config(),
+        };
+
+        assert_eq!(
+            widget_integer_parameter(&widget, "switch-interval-seconds", 5, 1, 60),
+            5
+        );
+        set_widget_integer_parameter(&mut widget, "switch-interval-seconds", 90, 1, 60);
+        assert_eq!(
+            widget_integer_parameter(&widget, "switch-interval-seconds", 5, 1, 60),
+            60
+        );
+        assert_eq!(
+            widget.config[WIDGET_CONFIG_PLUGIN_PARAMETERS]["switch-interval-seconds"],
+            Value::Number(60.into())
         );
     }
 
@@ -2362,7 +3025,7 @@ mod tests {
     }
 
     #[test]
-    fn enum_serialization_is_stable_snake_case() {
+    fn enum_serialization_uses_stable_config_tags() {
         assert_eq!(
             serde_json::to_string(&MarketProviderPreference::Okx).unwrap(),
             r#""okx""#
@@ -2375,14 +3038,111 @@ mod tests {
             serde_json::to_string(&ShortcutPreference::CtrlShiftSpace).unwrap(),
             r#""ctrl_shift_space""#
         );
-        assert_eq!(
-            serde_json::to_string(&LanguagePreference::ZhHans).unwrap(),
-            r#""zh_hans""#
-        );
+        for (preference, serialized) in [
+            (LanguagePreference::System, "system"),
+            (LanguagePreference::En, "en"),
+            (LanguagePreference::ZhHans, "zh-CN"),
+            (LanguagePreference::ZhHant, "zh-TW"),
+            (LanguagePreference::Es419, "es-419"),
+            (LanguagePreference::PtBr, "pt-BR"),
+            (LanguagePreference::Vi, "vi"),
+            (LanguagePreference::Id, "id"),
+            (LanguagePreference::Tr, "tr"),
+            (LanguagePreference::Ko, "ko"),
+            (LanguagePreference::Ja, "ja"),
+            (LanguagePreference::Ru, "ru"),
+            (LanguagePreference::Ar, "ar"),
+        ] {
+            let json = format!(r#""{serialized}""#);
+            assert_eq!(serde_json::to_string(&preference).unwrap(), json);
+            assert_eq!(
+                serde_json::from_str::<LanguagePreference>(&json).unwrap(),
+                preference
+            );
+        }
         assert_eq!(
             serde_json::to_string(&ThemePreference::Dark).unwrap(),
             r#""dark""#
         );
+    }
+
+    #[test]
+    fn language_preference_deserializes_common_locale_tags() {
+        for (json_value, expected) in [
+            ("system", LanguagePreference::System),
+            ("zh_hans", LanguagePreference::ZhHans),
+            ("zh_hant", LanguagePreference::ZhHant),
+            ("es_419", LanguagePreference::Es419),
+            ("pt_br", LanguagePreference::PtBr),
+            ("en-US", LanguagePreference::En),
+            ("zh-CN", LanguagePreference::ZhHans),
+            ("zh", LanguagePreference::ZhHans),
+            ("cmn-Hans-SG", LanguagePreference::ZhHans),
+            ("zh-Hans-HK", LanguagePreference::ZhHans),
+            ("zh-Hans-SG", LanguagePreference::ZhHans),
+            ("zh-TW", LanguagePreference::ZhHant),
+            ("zh-HK", LanguagePreference::ZhHant),
+            ("zh-MO", LanguagePreference::ZhHant),
+            ("zh-Hant-CN", LanguagePreference::ZhHant),
+            ("zh_Hant_HK.UTF-8", LanguagePreference::ZhHant),
+            ("yue-HK", LanguagePreference::ZhHant),
+            ("es-419", LanguagePreference::Es419),
+            ("es-AR", LanguagePreference::Es419),
+            ("es-CO", LanguagePreference::Es419),
+            ("es-MX", LanguagePreference::Es419),
+            ("es-US", LanguagePreference::Es419),
+            ("es-PE", LanguagePreference::Es419),
+            ("pt-BR", LanguagePreference::PtBr),
+            ("pt_BR.UTF-8", LanguagePreference::PtBr),
+            ("pt_BR@calendar=gregorian", LanguagePreference::PtBr),
+            ("vi-VN", LanguagePreference::Vi),
+            ("id-ID", LanguagePreference::Id),
+            ("in_ID.UTF-8", LanguagePreference::Id),
+            ("tr-TR", LanguagePreference::Tr),
+            ("ko-KR", LanguagePreference::Ko),
+            ("ja-JP", LanguagePreference::Ja),
+            ("ru-KZ", LanguagePreference::Ru),
+            ("ar-SA", LanguagePreference::Ar),
+            ("ar_SA.UTF-8@calendar=gregorian", LanguagePreference::Ar),
+        ] {
+            let json = serde_json::to_string(json_value).unwrap();
+            assert_eq!(
+                serde_json::from_str::<LanguagePreference>(&json).unwrap(),
+                expected,
+                "{json_value} should map to {expected:?}"
+            );
+        }
+
+        assert!(
+            serde_json::from_str::<LanguagePreference>(r#""pt-PT""#).is_err(),
+            "pt-PT should not silently select Brazilian Portuguese"
+        );
+        assert!(
+            serde_json::from_str::<LanguagePreference>(r#""pt""#).is_err(),
+            "generic pt should not silently select Brazilian Portuguese"
+        );
+        assert!(
+            serde_json::from_str::<LanguagePreference>(r#""es-ES""#).is_err(),
+            "es-ES should not silently select Latin American Spanish"
+        );
+        assert!(
+            serde_json::from_str::<LanguagePreference>(r#""es""#).is_err(),
+            "generic es should not silently select Latin American Spanish"
+        );
+    }
+
+    #[test]
+    fn language_preference_error_lists_canonical_and_legacy_config_tags() {
+        let error = serde_json::from_str::<LanguagePreference>(r#""fr-FR""#)
+            .unwrap_err()
+            .to_string();
+
+        for expected in ["zh-CN", "zh-TW", "es-419", "pt-BR", "zh_hans", "es_419"] {
+            assert!(
+                error.contains(expected),
+                "unknown language preference error should list accepted config tag {expected}: {error}"
+            );
+        }
     }
 
     #[test]
@@ -2400,7 +3160,26 @@ mod tests {
             ShortcutPreference::Disabled
         );
         assert_eq!(LanguagePreference::from_index(1), LanguagePreference::En);
+        assert_eq!(
+            LanguagePreference::from_index(3),
+            LanguagePreference::ZhHant
+        );
+        assert_eq!(LanguagePreference::from_index(12), LanguagePreference::Ar);
+        assert_eq!(
+            LanguagePreference::from_index(99),
+            LanguagePreference::System
+        );
+        assert_eq!(LanguagePreference::PtBr.index(), 5);
         assert_eq!(ThemePreference::from_index(2), ThemePreference::Dark);
+    }
+
+    #[test]
+    fn language_preference_indices_round_trip_all_supported_languages() {
+        for (index, preference) in LanguagePreference::ALL.into_iter().enumerate() {
+            let index = index as i32;
+            assert_eq!(preference.index(), index);
+            assert_eq!(LanguagePreference::from_index(index), preference);
+        }
     }
 
     #[test]
@@ -2449,6 +3228,9 @@ mod tests {
                 "binance:spot:BTC/USDT",
                 "binance:spot:ETH/USDT",
                 "binance:spot:SOL/USDT",
+                "binance:spot:BNB/USDT",
+                "binance:spot:XRP/USDT",
+                "binance:spot:DOGE/USDT",
             ]
         );
 
@@ -2747,6 +3529,40 @@ mod tests {
     }
 
     #[test]
+    fn normalizing_duplicate_widget_ids_skips_all_reserved_ids() {
+        let widget = |id: &str| WidgetInstance {
+            id: id.to_string(),
+            plugin_id: WidgetKind::QuoteBoard.plugin_id().to_string(),
+            legacy_widget_type: None,
+            name: id.to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: default_market_symbols(),
+            config: default_widget_config(),
+        };
+        let mut store = LayoutStore {
+            next_widget_number: 1,
+            widgets: vec![
+                widget("quote-board-1"),
+                widget("quote-board-1"),
+                widget("quote-board-2"),
+            ],
+            ..LayoutStore::default()
+        };
+
+        normalize_store(&mut store, 0);
+
+        let ids = store
+            .widgets
+            .iter()
+            .map(|widget| widget.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["quote-board-1", "quote-board-3", "quote-board-2"]);
+        assert_eq!(ids.iter().copied().collect::<HashSet<_>>().len(), ids.len());
+        assert_eq!(store.next_widget_number, 4);
+    }
+
+    #[test]
     fn normalizes_widget_symbols_to_definition_bounds() {
         let mut store = LayoutStore {
             settings: AppSettings {
@@ -2890,5 +3706,135 @@ mod tests {
             .contains("\"opacity_percent\": 77"));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn persisted_layout_loader_distinguishes_missing_read_and_parse_failures() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-load-errors-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let missing_path = dir.join("missing.json");
+        fs::create_dir_all(&dir).unwrap();
+
+        assert!(try_load_persisted_layout_store(&missing_path)
+            .unwrap()
+            .is_none());
+
+        let unreadable_path = dir.join("directory.json");
+        fs::create_dir(&unreadable_path).unwrap();
+        let read_error = try_load_persisted_layout_store(&unreadable_path).unwrap_err();
+        assert_eq!(read_error.kind(), LayoutStoreReadErrorKind::Read);
+
+        let malformed_path = dir.join("malformed.json");
+        fs::write(&malformed_path, b"{not valid json").unwrap();
+        let parse_error = try_load_persisted_layout_store(&malformed_path).unwrap_err();
+        assert_eq!(parse_error.kind(), LayoutStoreReadErrorKind::Parse);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn malformed_current_state_is_preserved_without_falling_back_to_legacy() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-corrupt-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        let legacy_path = dir.join(LEGACY_LAYOUT_STATE_FILE_NAME);
+        let malformed_contents = b"{not valid json";
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, malformed_contents).unwrap();
+        fs::write(
+            &legacy_path,
+            r#"{
+              "settings": { "opacity_percent": 77 },
+              "widgets": []
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::DefaultsAfterError);
+        assert_eq!(
+            loaded.store.settings.opacity_percent,
+            DEFAULT_OPACITY_PERCENT
+        );
+        let warning = loaded.warning.expect("malformed state should be reported");
+        assert_eq!(warning.kind, LayoutStoreReadErrorKind::Parse);
+        assert_eq!(warning.path, path);
+        let preserved_path = warning
+            .preserved_path
+            .as_ref()
+            .expect("malformed state should be backed up");
+        assert_eq!(fs::read(preserved_path).unwrap(), malformed_contents);
+        assert_eq!(fs::read(&path).unwrap(), malformed_contents);
+        assert!(warning.to_string().contains("defaults were loaded"));
+        assert!(warning.to_string().contains("was preserved at"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn multi_monitor_work_areas_preserve_valid_secondary_screen_positions() {
+        let work_areas = [
+            DesktopWorkArea {
+                x: -1920,
+                y: 0,
+                width: 1920,
+                height: 1040,
+            },
+            DesktopWorkArea {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1040,
+            },
+            DesktopWorkArea {
+                x: 1920,
+                y: -200,
+                width: 2560,
+                height: 1440,
+            },
+        ];
+        let size = WidgetSize {
+            width: QUOTE_BOARD_WIDTH,
+            height: QUOTE_BOARD_HEIGHT,
+        };
+        let layout_at = |x, y| WidgetLayout {
+            x,
+            y,
+            width: size.width,
+            height: size.height,
+            ..WidgetLayout::default()
+        };
+
+        for layout in [layout_at(-1800, 100), layout_at(2200, -100)] {
+            assert!(layout_has_visible_area_for_size_in_work_areas(
+                &layout,
+                size,
+                &work_areas
+            ));
+            assert!(!layout_needs_recovery_for_size_in_work_areas(
+                &layout,
+                size,
+                &work_areas
+            ));
+        }
+
+        let truly_offscreen = layout_at(5000, 1600);
+        assert!(!layout_has_visible_area_for_size_in_work_areas(
+            &truly_offscreen,
+            size,
+            &work_areas
+        ));
+        assert!(layout_needs_recovery_for_size_in_work_areas(
+            &truly_offscreen,
+            size,
+            &work_areas
+        ));
     }
 }

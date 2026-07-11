@@ -33,8 +33,9 @@ use crypto_hud_market as market;
 use crypto_hud_runtime::QuoteCache;
 use crypto_hud_shell_state as settings;
 use desktop_shell::{
-    install_gui_smoke_timer, install_keepalive_window, install_single_instance_guard, install_tray,
-    parse_launch_options, refresh_tray_text, write_gui_smoke_ready_file,
+    install_gui_smoke_timer, install_instance_activation_timer, install_keepalive_window,
+    install_single_instance_guard, install_tray, parse_launch_options, refresh_tray_text,
+    write_gui_smoke_ready_file,
 };
 use runtime_bridge::{install_runtime_event_timer, sync_widget_runtimes, RuntimeEventTimerDeps};
 #[cfg(test)]
@@ -49,8 +50,8 @@ use settings_window::{
 };
 use slint::{ComponentHandle, Timer, TimerMode};
 use state_bridge::{
-    add_plugin_instance, load_layout_store, normalize_store_with_catalog, symbols_from_store,
-    widget_definitions_from_catalog,
+    add_plugin_instance, load_layout_store_with_diagnostics, normalize_store_with_catalog,
+    symbols_from_store, widget_definitions_from_catalog,
 };
 #[cfg(test)]
 use state_bridge::{
@@ -62,13 +63,21 @@ use widget_host::WidgetRuntime;
 use window_manager::{
     apply_tray_hover_display, enter_settings_mode, install_hotkey_poll_timer,
     install_tray_hover_display_timer, install_widget_shell_window_maintenance_timer,
-    schedule_settings_window_raise, schedule_widget_shell_window_configuration,
+    schedule_settings_window_configuration, schedule_widget_shell_window_configuration,
     TrayHoverDisplayState,
 };
 #[cfg(test)]
 use window_manager::{desktop_size, widget_pin_to_top};
 
 slint::include_modules!();
+
+fn shortcut_registration_status(
+    settings: &settings::AppSettings,
+    error: impl std::fmt::Display,
+) -> String {
+    let locale = i18n::resolve_locale(settings.language);
+    i18n::status_failure_message(locale, i18n::text(locale).status_shortcut_failed, error)
+}
 
 #[cfg(test)]
 const LEGACY_DEFAULT_POSITION_X: i32 = settings::DEFAULT_WIDGET_POSITION_X;
@@ -117,9 +126,7 @@ fn install_gui_smoke_settings_interaction_timer(
     layouts: Rc<RefCell<LayoutStore>>,
     settings_window_requested: bool,
 ) -> Option<Timer> {
-    if env::var_os("CRYPTO_HUD_GUI_SMOKE_SETTINGS_INTERACTION").is_none() {
-        return None;
-    }
+    env::var_os("CRYPTO_HUD_GUI_SMOKE_SETTINGS_INTERACTION")?;
 
     let timer = Timer::default();
     timer.start(
@@ -165,8 +172,9 @@ fn main() -> Result<()> {
         env::set_var("SLINT_BACKEND", "software");
     }
 
-    let single_instance = install_single_instance_guard()?;
+    let (single_instance, instance_activation) = install_single_instance_guard()?;
     if !single_instance.is_single() {
+        instance_activation.request_activation()?;
         return Ok(());
     }
 
@@ -186,8 +194,19 @@ fn main() -> Result<()> {
         eprintln!("plugin catalog warning: {error}");
     }
     let plugin_definitions = widget_definitions_from_catalog(&plugin_catalog);
-    let mut layout_store =
-        load_layout_store(&state_path, requested_widget_count, &plugin_definitions);
+    let loaded_layout_store = load_layout_store_with_diagnostics(
+        &state_path,
+        requested_widget_count,
+        &plugin_definitions,
+    );
+    let state_load_warning = loaded_layout_store
+        .warning
+        .as_ref()
+        .map(ToString::to_string);
+    if let Some(warning) = &state_load_warning {
+        eprintln!("layout state recovery warning: {warning}");
+    }
+    let mut layout_store = loaded_layout_store.store;
     seed_each_widget_on_empty_start(
         &mut layout_store,
         launch_options.each_widget,
@@ -207,18 +226,22 @@ fn main() -> Result<()> {
     ) {
         eprintln!("failed to refresh auto-start registration: {error}");
     }
-    let settings_status = Rc::new(RefCell::new(String::new()));
+    let settings_status = Rc::new(RefCell::new(state_load_warning.unwrap_or_default()));
     let shortcut_manager = Rc::new(RefCell::new(shortcuts::ShortcutManager::new()));
     let market_feed_config = Arc::new(Mutex::new(market::MarketFeedConfig {
         symbols: symbols_from_store(&layouts.borrow(), &plugin_catalog),
         provider: app_settings.market_provider,
         refresh_interval_seconds: app_settings.refresh_interval_seconds,
-        fallback_enabled: app_settings.market_fallback_enabled,
         enabled_sources: settings::enabled_market_sources(&app_settings),
         proxy_url: settings::effective_network_proxy_url(&app_settings),
     }));
     if let Err(error) = shortcut_manager.borrow_mut().apply(app_settings.shortcut) {
-        *settings_status.borrow_mut() = error;
+        let shortcut_status = shortcut_registration_status(&app_settings, error);
+        let mut status = settings_status.borrow_mut();
+        if !status.is_empty() {
+            status.push_str(" | ");
+        }
+        status.push_str(&shortcut_status);
     }
 
     let quote_cache = Rc::new(RefCell::new(QuoteCache::new()));
@@ -283,7 +306,7 @@ fn main() -> Result<()> {
         settings_window
             .show()
             .context("failed to show settings window on startup")?;
-        schedule_settings_window_raise();
+        schedule_settings_window_configuration();
     }
     let gui_smoke_settings_interaction_timer = install_gui_smoke_settings_interaction_timer(
         settings_window.as_weak(),
@@ -312,6 +335,15 @@ fn main() -> Result<()> {
         tray_hover_state.clone(),
     );
     let widget_shell_window_maintenance_timer = install_widget_shell_window_maintenance_timer();
+    let instance_activation_timer = install_instance_activation_timer(
+        instance_activation,
+        settings_window.as_weak(),
+        widgets.clone(),
+        layouts.clone(),
+        state_path.clone(),
+        settings_mode_active.clone(),
+        plugin_catalog.clone(),
+    );
 
     let market_updates = market::spawn_market_feed(market_feed_config);
     let update_events = if launch_options.gui_smoke_exit_after.is_some() {
@@ -336,6 +368,7 @@ fn main() -> Result<()> {
 
     let event_loop_result = slint::run_event_loop_until_quit().context("Slint event loop failed");
     drop(runtime_event_timer);
+    drop(instance_activation_timer);
     drop(widget_shell_window_maintenance_timer);
     drop(gui_smoke_settings_interaction_timer);
     drop(preview_carousel_timer);
@@ -406,6 +439,7 @@ mod tests {
             data_requirements: vec![plugin::PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
+            parameters: Vec::new(),
             status: plugin::PluginStatus::Available,
         }
     }
@@ -416,6 +450,19 @@ mod tests {
         assert_eq!(settings::clamp_opacity(12), settings::MIN_OPACITY_PERCENT);
         assert_eq!(settings::clamp_opacity(70), 70);
         assert_eq!(settings::clamp_opacity(140), settings::MAX_OPACITY_PERCENT);
+    }
+
+    #[test]
+    fn startup_shortcut_failure_status_uses_selected_language() {
+        let settings = AppSettings {
+            language: settings::LanguagePreference::Ar,
+            ..AppSettings::default()
+        };
+
+        assert_eq!(
+            shortcut_registration_status(&settings, "denied"),
+            "فشل تسجيل الاختصار: \u{2066}denied\u{2069}"
+        );
     }
 
     #[test]
@@ -575,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_mode_preserves_pinned_widgets_topmost() {
+    fn settings_mode_temporarily_suspends_pinned_widgets_topmost() {
         let instance = WidgetInstance {
             id: "quote-board-1".to_string(),
             plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
@@ -591,7 +638,7 @@ mod tests {
         };
 
         assert!(widget_pin_to_top(&instance, false));
-        assert!(widget_pin_to_top(&instance, true));
+        assert!(!widget_pin_to_top(&instance, true));
     }
 
     #[test]
@@ -679,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_market_item_uses_local_plugin_metadata() {
+    fn plugin_market_item_preserves_local_plugin_metadata_in_every_locale() {
         let store = LayoutStore {
             widgets: vec![WidgetInstance {
                 id: "plugin-card-1".to_string(),
@@ -695,17 +742,31 @@ mod tests {
         };
         let plugin = local_test_plugin_definition();
 
-        let item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::En);
+        for locale in i18n::Locale::ALL {
+            let item = settings_window::plugin_market_item(&plugin, &store, locale);
 
-        assert_eq!(item.title.as_str(), "Stage 3 Price Card");
+            assert_eq!(
+                item.title.as_str(),
+                "Stage 3 Price Card",
+                "local plugin manifest names should stay exact for {locale:?}"
+            );
+            assert_eq!(item.status.as_str(), "");
+            assert!(item.available);
+            assert!(!item.builtin);
+            assert_eq!(item.symbol_limit, 2);
+            assert_eq!(item.preview_kind, 0);
+            assert_eq!(item.preview_image_count, 0);
+            assert!(item.description.as_str().contains("260x170"));
+            assert!(!item.description.as_str().contains("market.price"));
+        }
+
+        let item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::En);
         assert_eq!(item.usage.as_str(), "Used 1");
-        assert_eq!(item.status.as_str(), "");
-        assert!(item.available);
-        assert!(!item.builtin);
-        assert_eq!(item.symbol_limit, 2);
-        assert_eq!(item.preview_kind, 0);
-        assert_eq!(item.preview_image_count, 0);
-        assert!(item.description.as_str().contains("260x170"));
+        assert!(item.description.as_str().contains("prices"));
+
+        let ar_item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::Ar);
+        assert!(ar_item.description.as_str().contains("الأسعار"));
+        assert!(!ar_item.description.as_str().contains("market.price"));
     }
 
     #[test]
@@ -725,6 +786,34 @@ mod tests {
 
             assert_eq!(item.preview_kind, expected_preview_kind);
         }
+    }
+
+    #[test]
+    fn builtin_slint_plugin_market_titles_follow_locale() {
+        let store = LayoutStore::default();
+        let mut plugin = local_test_plugin_definition();
+        plugin.id = "com.cryptohud.market-compass".to_string();
+        plugin.name = "Market Compass".to_string();
+        plugin.source = plugin::PluginSource::Builtin;
+
+        let zh_item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::ZhHans);
+        assert_eq!(zh_item.title.as_str(), "市场罗盘");
+        assert_eq!(
+            zh_item.description.as_str(),
+            "环形多交易对视图，方便快速观察市场轮动。"
+        );
+
+        let ar_item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::Ar);
+        assert_eq!(ar_item.title.as_str(), "بوصلة السوق");
+        assert_eq!(
+            ar_item.description.as_str(),
+            "عرض دائري لعدة أزواج لرصد دوران السوق بسرعة."
+        );
+
+        plugin.source = plugin::PluginSource::LocalUnsigned;
+        let local_item = settings_window::plugin_market_item(&plugin, &store, i18n::Locale::ZhHans);
+        assert_eq!(local_item.title.as_str(), "Market Compass");
+        assert!(local_item.description.as_str().contains("260x170"));
     }
 
     #[test]
@@ -797,6 +886,24 @@ mod tests {
                 WidgetType::QuoteBoard,
                 7,
                 i18n::Locale::ZhHans
+            ),
+            "Quote Board 7"
+        );
+        assert_eq!(
+            settings_window::normalize_widget_name(
+                "行情面板 9",
+                WidgetType::QuoteBoard,
+                7,
+                i18n::Locale::En
+            ),
+            "Quote Board 9"
+        );
+        assert_eq!(
+            settings_window::normalize_widget_name(
+                "لوحة الأسعار \u{2066}7\u{2069}",
+                WidgetType::QuoteBoard,
+                7,
+                i18n::Locale::Ar
             ),
             "Quote Board 7"
         );

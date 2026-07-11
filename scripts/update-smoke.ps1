@@ -13,6 +13,7 @@ $ZipPath = "$PackageRoot.zip"
 $ChecksumPath = "$ZipPath.sha256"
 $InstallDir = Join-Path $RepoRoot "target\tmp\update-smoke-install"
 $ExtractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "crypto-hud-update-smoke-$PID"
+$RejectedExtractRoot = "$ExtractRoot-rejected"
 
 function Assert-UnderDirectory {
     param(
@@ -60,6 +61,7 @@ function Assert-Hash {
 
 Assert-UnderRepo -Path $InstallDir
 Assert-UnderTemp -Path $ExtractRoot
+Assert-UnderTemp -Path $RejectedExtractRoot
 if (Test-Path -LiteralPath $InstallDir) {
     Remove-Item -LiteralPath $InstallDir -Recurse -Force
 }
@@ -69,7 +71,10 @@ try {
     $packageArgs = @(
         "-ExecutionPolicy", "Bypass",
         "-File", ".\scripts\package-windows.ps1",
-        "-Version", $Version
+        "-Version", $Version,
+        "-AllowDirty",
+        "-AllowDevelopmentVersion",
+        "-AllowUnsignedPackage"
     )
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"
@@ -83,8 +88,23 @@ try {
         -PackageZip $ZipPath `
         -ChecksumPath $ChecksumPath `
         -InstallDir $InstallDir `
-        -ExtractRoot $ExtractRoot `
+        -ExtractRoot $RejectedExtractRoot `
         -SkipShellIntegration
+    if ($LASTEXITCODE -eq 0) {
+        throw "Update helper accepted an unsigned development package without an explicit override"
+    }
+    if (Test-Path -LiteralPath $RejectedExtractRoot) {
+        Assert-UnderTemp -Path $RejectedExtractRoot
+        Remove-Item -LiteralPath $RejectedExtractRoot -Recurse -Force
+    }
+
+    powershell -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
+        -PackageZip $ZipPath `
+        -ChecksumPath $ChecksumPath `
+        -InstallDir $InstallDir `
+        -ExtractRoot $ExtractRoot `
+        -SkipShellIntegration `
+        -AllowUnsignedPackage
     if ($LASTEXITCODE -ne 0) {
         throw "Update install smoke failed with code $LASTEXITCODE"
     }
@@ -123,6 +143,10 @@ try {
     if (Test-Path -LiteralPath $ExtractRoot) {
         Assert-UnderTemp -Path $ExtractRoot
         Remove-Item -LiteralPath $ExtractRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $RejectedExtractRoot) {
+        Assert-UnderTemp -Path $RejectedExtractRoot
+        Remove-Item -LiteralPath $RejectedExtractRoot -Recurse -Force
     }
     if (-not $KeepPackage) {
         foreach ($path in @($PackageRoot, $ZipPath, $ChecksumPath)) {

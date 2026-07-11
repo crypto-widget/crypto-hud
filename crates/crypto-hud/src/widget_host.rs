@@ -3,10 +3,13 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 use anyhow::{Context, Result};
 use crypto_hud_runtime as widget_runtime;
 use crypto_hud_runtime::QuoteRowView;
-use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, Timer, VecModel};
+use slint::{
+    ComponentHandle, Image, LogicalSize, Model, ModelRc, PhysicalSize, SharedString, Timer,
+    VecModel,
+};
 use slint_interpreter::{ComponentInstance, Struct as SlintStruct, Value};
 
-use crate::{plugin, PriceCardWindow, QuoteRow};
+use crate::{i18n, plugin, PriceCardWindow, QuoteRow};
 
 const STATUS_STRIP_DEFAULT_CELL_WIDTH: i32 = 122;
 const STATUS_STRIP_MIN_CELL_WIDTH: i32 = 112;
@@ -24,6 +27,7 @@ pub(crate) struct WidgetRuntime {
     pub(crate) display_options: widget_runtime::WidgetDisplayOptions,
     pub(crate) widget_scale: f32,
     pub(crate) theme_name: String,
+    pub(crate) locale: i18n::Locale,
 }
 
 pub(crate) enum WidgetUi {
@@ -134,6 +138,12 @@ impl WidgetUi {
         }
     }
 
+    pub(crate) fn set_integer_parameter(&self, key: &str, value: i32) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property(&format!("config-{key}"), Value::Number(value.into()));
+        }
+    }
+
     fn set_quote_icon_ready(&self, values: &[bool]) {
         if let Self::DynamicSlint(ui) = self {
             ui.set_optional_property("quote-icon-ready", bool_model_value(values));
@@ -236,6 +246,13 @@ impl WidgetUi {
         match self {
             Self::BuiltinPriceCard(ui) => ui.set_empty_text(value),
             Self::DynamicSlint(ui) => ui.set_required_property("empty-text", Value::from(value)),
+        }
+    }
+
+    pub(crate) fn set_rtl_layout(&self, value: bool) {
+        match self {
+            Self::BuiltinPriceCard(ui) => ui.set_rtl_layout(value),
+            Self::DynamicSlint(ui) => ui.set_optional_property("rtl-layout", Value::Bool(value)),
         }
     }
 
@@ -376,7 +393,7 @@ fn bail_plugin_unavailable(plugin: &plugin::PluginDefinition) -> Result<WidgetUi
     let reason = match &plugin.status {
         plugin::PluginStatus::Disabled(reason) => reason.as_str(),
         plugin::PluginStatus::Unavailable(reason) => reason.as_str(),
-        plugin::PluginStatus::Available => "Slint renderer is not compiled",
+        plugin::PluginStatus::Available => plugin::SLINT_RENDERER_UNCOMPILED_REASON,
     };
     anyhow::bail!("plugin {} is unavailable: {reason}", plugin.id)
 }
@@ -511,6 +528,18 @@ fn quote_price_width_weight(price: &str) -> i32 {
     (price.chars().count() as i32 - 3).clamp(1, 6)
 }
 
+pub(crate) fn logical_size_from_physical(
+    physical_size: PhysicalSize,
+    scale_factor: f32,
+) -> LogicalSize {
+    let scale_factor = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
+    physical_size.to_logical(scale_factor)
+}
+
 pub(crate) fn apply_runtime_view_to_widget(
     ui: &WidgetUi,
     view: &widget_runtime::WidgetRuntimeView,
@@ -520,10 +549,13 @@ pub(crate) fn apply_runtime_view_to_widget(
     display_options: widget_runtime::WidgetDisplayOptions,
     widget_scale: f32,
 ) {
+    let window = ui.window();
+    let logical_window_width =
+        logical_size_from_physical(window.size(), window.scale_factor()).width;
     let cell_width_basis = if widget_scale.is_finite() && widget_scale > 0.0 {
-        (ui.window().size().width as f32 / widget_scale).round() as i32
+        (logical_window_width / widget_scale).round() as i32
     } else {
-        ui.window().size().width as i32
+        logical_window_width.round() as i32
     };
     ui.set_quote_rows(quote_rows_model(&view.quote_rows));
     ui.set_quote_icons(quote_icons_model(quote_icons));
@@ -567,6 +599,46 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_dynamic_widget_uses_localizable_renderer_reason() {
+        let plugin = plugin::PluginDefinition {
+            id: "local.missing-definition".to_string(),
+            name: "Missing Definition".to_string(),
+            version: semver::Version::new(0, 1, 0),
+            source: plugin::PluginSource::LocalUnsigned,
+            renderer: plugin::PluginRendererDefinition::Slint {
+                root_dir: std::path::PathBuf::from("."),
+                entry: std::path::PathBuf::from("ui/main.slint"),
+                component: "MissingDefinition".to_string(),
+                definition: None,
+            },
+            default_size: plugin::PluginSize {
+                width: 120,
+                height: 80,
+            },
+            size_policy: plugin::PluginSizePolicy::Fixed,
+            min_symbol_limit: plugin::MIN_SYMBOL_LIMIT,
+            symbol_limit: 1,
+            default_symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            preview_images: Vec::new(),
+            themes: Vec::new(),
+            data_requirements: Vec::new(),
+            parameters: Vec::new(),
+            status: plugin::PluginStatus::Available,
+        };
+
+        let error = match WidgetUi::from_plugin(&plugin) {
+            Ok(_) => panic!("missing Slint definition should make the plugin unavailable"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(error.contains(plugin::SLINT_RENDERER_UNCOMPILED_REASON));
+        assert!(
+            !error.contains("Slint renderer is not compiled"),
+            "fallback reason should match the i18n status reason key"
+        );
+    }
+
+    #[test]
     fn quote_cell_widths_sum_to_available_width() {
         let widths = quote_cell_widths(&[row("59800"), row("1594"), row("100250")], 408);
 
@@ -581,9 +653,40 @@ mod tests {
     }
 
     #[test]
+    fn physical_window_size_is_converted_to_logical_pixels() {
+        let at_150_percent = logical_size_from_physical(PhysicalSize::new(429, 216), 1.5);
+        assert_eq!(at_150_percent, LogicalSize::new(286.0, 144.0));
+
+        let at_200_percent = logical_size_from_physical(PhysicalSize::new(572, 288), 2.0);
+        assert_eq!(at_200_percent, LogicalSize::new(286.0, 144.0));
+
+        let invalid_scale = logical_size_from_physical(PhysicalSize::new(286, 144), 0.0);
+        assert_eq!(invalid_scale, LogicalSize::new(286.0, 144.0));
+    }
+
+    #[test]
     fn mini_ticker_compact_layout_does_not_reserve_quote_board_header() {
         let source = include_str!("../ui/price-card-window.slint");
 
+        assert!(
+            !source.contains(r#""Pairs""#) && !source.contains(r#""Source""#),
+            "runtime labels should come from the localized host text, not English Slint fallbacks"
+        );
+        assert!(
+            source.contains("in property <bool> rtl-layout: false;"),
+            "builtin widgets should receive text direction from the host"
+        );
+        assert!(
+            source.contains("x: root.rtl-layout ? parent.width - root.s(64px) : root.s(14px);")
+                && source.contains("x: root.rtl-layout ? root.s(36px) : root.s(68px);")
+                && source.contains("horizontal-alignment: root.rtl-layout ? left : right;"),
+            "quote board header should mirror localized labels in RTL locales"
+        );
+        assert!(
+            source.contains("x: root.rtl-layout ? parent.width / 2 : root.s(14px);")
+                && source.contains("x: root.rtl-layout ? root.s(14px) : parent.width / 2;"),
+            "compact mini ticker footer labels should swap sides in RTL locales"
+        );
         assert!(
             source.contains("visible: !root.compact-mode;"),
             "compact mini ticker should not reserve the quote board header"

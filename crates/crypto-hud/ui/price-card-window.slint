@@ -78,6 +78,7 @@ export component PriceCardWindow inherits Window {
     in property <string> source-name-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 286;
@@ -238,28 +239,29 @@ export component PriceCardWindow inherits Window {
         }
 
         Text {
-            x: root.s(14px);
+            x: root.rtl-layout ? parent.width - root.s(64px) : root.s(14px);
             y: root.s(9px);
             width: root.s(50px);
             height: root.s(17px);
-            text: root.pairs-heading-text == "" ? "Pairs" : root.pairs-heading-text;
+            text: root.pairs-heading-text;
             color: root.card-primary-text-color;
             font-size: root.s(13px);
             font-weight: 800;
+            horizontal-alignment: root.rtl-layout ? right : left;
             visible: !root.compact-mode;
             overflow: elide;
         }
 
         Text {
-            x: root.s(68px);
+            x: root.rtl-layout ? root.s(36px) : root.s(68px);
             y: root.s(10px);
             width: parent.width - root.s(104px);
             height: root.s(15px);
-            text: root.source-name-text == "" ? (root.source-text == "" ? "Source" : root.source-text) : root.source-name-text + " · " + root.updated-text;
+            text: root.source-name-text == "" ? root.source-text : root.source-name-text + " · " + root.updated-text;
             color: root.card-source-text-color;
             font-size: root.s(11px);
             font-weight: 700;
-            horizontal-alignment: right;
+            horizontal-alignment: root.rtl-layout ? left : right;
             visible: !root.compact-mode;
             overflow: elide;
         }
@@ -361,25 +363,25 @@ export component PriceCardWindow inherits Window {
         }
 
         Text {
-            x: root.s(14px);
+            x: root.rtl-layout ? parent.width / 2 : root.s(14px);
             y: parent.height - root.s(root.compact-mode ? 36px : 24px);
             width: parent.width / 2 - root.s(18px);
             text: root.source-text;
             color: root.card-source-text-color;
             font-size: root.s(11px);
-            horizontal-alignment: left;
+            horizontal-alignment: root.rtl-layout ? right : left;
             visible: root.compact-mode;
             overflow: elide;
         }
 
         Text {
-            x: parent.width / 2;
+            x: root.rtl-layout ? root.s(14px) : parent.width / 2;
             y: parent.height - root.s(root.compact-mode ? 36px : 24px);
             width: parent.width / 2 - root.s(14px);
             text: root.updated-text;
             color: root.card-updated-text-color;
             font-size: root.s(11px);
-            horizontal-alignment: right;
+            horizontal-alignment: root.rtl-layout ? left : right;
             visible: root.compact-mode;
             overflow: elide;
         }

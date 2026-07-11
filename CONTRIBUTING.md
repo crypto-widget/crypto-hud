@@ -45,6 +45,7 @@ mise run run-app
 - Prefer native Slint windows and Rust helpers over browser or WebView
   dependencies.
 - Keep public state migrations backward compatible.
+- For UI text, locale routing, or RTL behavior, follow `LOCALIZATION.md`.
 - Run `mise run format` before sending larger code changes.
 
 ## Tests

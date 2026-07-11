@@ -14,6 +14,7 @@ export component MarketBoard inherits Window {
     in property <string> source-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 300;
@@ -149,6 +150,7 @@ export component MarketBoard inherits Window {
             color: root.card-primary-text-color;
             font-size: 13px;
             font-weight: 800;
+            horizontal-alignment: root.rtl-layout ? right : left;
             overflow: elide;
         }
 

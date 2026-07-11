@@ -18,7 +18,7 @@ use crate::{
     widget_host::WidgetRuntime,
     window_manager::{
         effective_tray_icon_enabled, enter_settings_mode, remove_native_tray_icon,
-        restore_native_tray_icon, schedule_settings_window_raise,
+        restore_native_tray_icon, schedule_settings_window_configuration,
         schedule_widget_shell_window_configuration, show_widgets,
     },
     AppTray, KeepAliveWindow, SettingsWindow,
@@ -26,6 +26,82 @@ use crate::{
 
 const DEFAULT_WIDGET_COUNT: usize = 1;
 const DEFAULT_SINGLE_INSTANCE_ID: &str = "com.crypto-hud";
+const INSTANCE_ACTIVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+pub(crate) struct InstanceActivationSignal {
+    #[cfg(windows)]
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+impl InstanceActivationSignal {
+    fn new(instance_id: &str) -> Result<Self> {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Threading::CreateEventW;
+
+            let name = wide_null_str(&instance_activation_event_name(instance_id));
+            let handle = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
+            if handle.is_null() {
+                return Err(std::io::Error::last_os_error())
+                    .context("failed to create single-instance activation event");
+            }
+            Ok(Self { handle })
+        }
+
+        #[cfg(not(windows))]
+        {
+            let _ = instance_id;
+            Ok(Self {})
+        }
+    }
+
+    pub(crate) fn request_activation(&self) -> Result<()> {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Threading::SetEvent;
+
+            if unsafe { SetEvent(self.handle) } == 0 {
+                return Err(std::io::Error::last_os_error())
+                    .context("failed to signal the running Crypto HUD instance");
+            }
+        }
+        Ok(())
+    }
+
+    fn take_activation_request(&self) -> bool {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::{
+                Foundation::WAIT_OBJECT_0, System::Threading::WaitForSingleObject,
+            };
+
+            unsafe { WaitForSingleObject(self.handle, 0) == WAIT_OBJECT_0 }
+        }
+
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for InstanceActivationSignal {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.handle);
+        }
+    }
+}
+
+fn instance_activation_event_name(instance_id: &str) -> String {
+    let hash = instance_id
+        .bytes()
+        .fold(0xcbf29ce484222325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        });
+    format!("Local\\CryptoHud.Activation.{hash:016x}")
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct LaunchOptions {
@@ -35,13 +111,88 @@ pub(crate) struct LaunchOptions {
     pub(crate) gui_smoke_exit_after: Option<Duration>,
 }
 
-pub(crate) fn install_single_instance_guard() -> Result<SingleInstance> {
+pub(crate) fn install_single_instance_guard() -> Result<(SingleInstance, InstanceActivationSignal)>
+{
     let instance_id = env_var_with_legacy(
         "CRYPTO_HUD_INSTANCE_ID",
         &["CRYPTO_WIDGET_SLINT_INSTANCE_ID"],
     )
     .unwrap_or_else(|_| DEFAULT_SINGLE_INSTANCE_ID.to_string());
-    SingleInstance::new(&instance_id).context("failed to create single-instance guard")
+    let instance =
+        SingleInstance::new(&instance_id).context("failed to create single-instance guard")?;
+    let activation = InstanceActivationSignal::new(&instance_id)?;
+    Ok((instance, activation))
+}
+
+pub(crate) fn install_instance_activation_timer(
+    activation: InstanceActivationSignal,
+    settings_window: slint::Weak<SettingsWindow>,
+    widgets: Rc<RefCell<Vec<WidgetRuntime>>>,
+    layouts: Rc<RefCell<LayoutStore>>,
+    state_path: PathBuf,
+    settings_mode_active: Rc<RefCell<bool>>,
+    plugin_catalog: Rc<plugin::PluginCatalog>,
+) -> Timer {
+    let timer = Timer::default();
+    timer.start(
+        TimerMode::Repeated,
+        INSTANCE_ACTIVATION_POLL_INTERVAL,
+        move || {
+            if !activation.take_activation_request() {
+                return;
+            }
+            let Some(ui) = settings_window.upgrade() else {
+                return;
+            };
+            show_settings_window(
+                &ui,
+                &widgets,
+                &layouts,
+                &state_path,
+                &settings_mode_active,
+                &plugin_catalog,
+            );
+            write_instance_activation_marker();
+        },
+    );
+    timer
+}
+
+fn write_instance_activation_marker() {
+    let Some(path) = env::var_os("CRYPTO_HUD_GUI_SMOKE_ACTIVATION_FILE") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    if let Some(parent) = path.parent() {
+        if let Err(error) = fs::create_dir_all(parent) {
+            eprintln!("failed to create activation marker directory: {error:#}");
+            return;
+        }
+    }
+    if let Err(error) = fs::write(&path, "activated\n") {
+        eprintln!(
+            "failed to write single-instance activation marker {}: {error:#}",
+            path.display()
+        );
+    }
+}
+
+fn show_settings_window(
+    ui: &SettingsWindow,
+    widgets: &Rc<RefCell<Vec<WidgetRuntime>>>,
+    layouts: &Rc<RefCell<LayoutStore>>,
+    state_path: &Path,
+    settings_mode_active: &Rc<RefCell<bool>>,
+    plugin_catalog: &plugin::PluginCatalog,
+) {
+    refresh_settings_window(ui, layouts, state_path, plugin_catalog, None);
+    request_symbol_catalog_refresh_from_store(ui, &layouts.borrow(), plugin_catalog);
+    enter_settings_mode(widgets, layouts, settings_mode_active);
+    if let Err(error) = ui.show() {
+        eprintln!("failed to show settings window: {error:#}");
+    }
+    schedule_settings_window_configuration();
+    schedule_widget_shell_window_configuration();
 }
 
 pub(crate) fn parse_launch_options() -> LaunchOptions {
@@ -285,14 +436,14 @@ pub(crate) fn install_tray(
         let plugin_catalog = plugin_catalog.clone();
         move || {
             if let Some(ui) = settings_window.upgrade() {
-                refresh_settings_window(&ui, &layouts, &state_path, &plugin_catalog, None);
-                request_symbol_catalog_refresh_from_store(&ui, &layouts.borrow(), &plugin_catalog);
-                enter_settings_mode(&widgets, &layouts, &settings_mode_active);
-                if let Err(error) = ui.show() {
-                    eprintln!("failed to show settings window from tray: {error:#}");
-                }
-                schedule_settings_window_raise();
-                schedule_widget_shell_window_configuration();
+                show_settings_window(
+                    &ui,
+                    &widgets,
+                    &layouts,
+                    &state_path,
+                    &settings_mode_active,
+                    &plugin_catalog,
+                );
             }
         }
     });
@@ -334,6 +485,7 @@ pub(crate) fn refresh_tray_text(tray: &AppTray, settings: AppSettings) {
     let text = i18n::text(i18n::resolve_locale(settings.language));
     tray.set_tray_tooltip_text(text.tray_tooltip.into());
     tray.set_tray_settings_text(text.tray_settings.into());
+    tray.set_tray_show_widgets_text(text.tray_show_widgets.into());
     tray.set_tray_quit_text(text.tray_quit.into());
     let tray_enabled = effective_tray_icon_enabled(&settings);
     tray.set_tray_visible(tray_enabled);
@@ -341,5 +493,60 @@ pub(crate) fn refresh_tray_text(tray: &AppTray, settings: AppSettings) {
         restore_native_tray_icon(tray);
     } else {
         remove_native_tray_icon();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activation_event_names_are_stable_and_instance_specific() {
+        assert_eq!(
+            instance_activation_event_name("com.crypto-hud"),
+            instance_activation_event_name("com.crypto-hud")
+        );
+        assert_ne!(
+            instance_activation_event_name("com.crypto-hud"),
+            instance_activation_event_name("com.crypto-hud.test")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn activation_signal_is_shared_between_process_handles() {
+        let instance_id = format!("com.crypto-hud.activation-test.{}", std::process::id());
+        let receiver = InstanceActivationSignal::new(&instance_id).unwrap();
+        let sender = InstanceActivationSignal::new(&instance_id).unwrap();
+
+        sender.request_activation().unwrap();
+
+        assert!(receiver.take_activation_request());
+        assert!(!receiver.take_activation_request());
+    }
+
+    #[test]
+    fn refresh_tray_text_sets_every_localized_tray_label() {
+        let source = include_str!("desktop_shell.rs");
+        let refresh_fn = source
+            .split("pub(crate) fn refresh_tray_text(")
+            .nth(1)
+            .unwrap()
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+
+        for required in [
+            "let text = i18n::text(i18n::resolve_locale(settings.language));",
+            "tray.set_tray_tooltip_text(text.tray_tooltip.into());",
+            "tray.set_tray_settings_text(text.tray_settings.into());",
+            "tray.set_tray_show_widgets_text(text.tray_show_widgets.into());",
+            "tray.set_tray_quit_text(text.tray_quit.into());",
+        ] {
+            assert!(
+                refresh_fn.contains(required),
+                "tray text refresh should set localized tray label: {required}"
+            );
+        }
     }
 }

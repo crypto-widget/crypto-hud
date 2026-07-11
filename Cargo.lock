@@ -996,9 +996,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -1017,7 +1017,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto-hud"
-version = "0.9.1"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "auto-launch",
@@ -1042,14 +1042,14 @@ dependencies = [
 
 [[package]]
 name = "crypto-hud-core"
-version = "0.9.1"
+version = "0.9.7"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "crypto-hud-market"
-version = "0.9.1"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "crypto-hud-core",
@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "crypto-hud-runtime"
-version = "0.9.1"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "crypto-hud-core",
@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "crypto-hud-shell-state"
-version = "0.9.1"
+version = "0.9.7"
 dependencies = [
  "anyhow",
  "crypto-hud-core",
