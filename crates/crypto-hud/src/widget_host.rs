@@ -3,7 +3,10 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 use anyhow::{Context, Result};
 use crypto_hud_runtime as widget_runtime;
 use crypto_hud_runtime::QuoteRowView;
-use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, Timer, VecModel};
+use slint::{
+    ComponentHandle, Image, LogicalSize, Model, ModelRc, PhysicalSize, SharedString, Timer,
+    VecModel,
+};
 use slint_interpreter::{ComponentInstance, Struct as SlintStruct, Value};
 
 use crate::{i18n, plugin, PriceCardWindow, QuoteRow};
@@ -519,6 +522,18 @@ fn quote_price_width_weight(price: &str) -> i32 {
     (price.chars().count() as i32 - 3).clamp(1, 6)
 }
 
+pub(crate) fn logical_size_from_physical(
+    physical_size: PhysicalSize,
+    scale_factor: f32,
+) -> LogicalSize {
+    let scale_factor = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
+    physical_size.to_logical(scale_factor)
+}
+
 pub(crate) fn apply_runtime_view_to_widget(
     ui: &WidgetUi,
     view: &widget_runtime::WidgetRuntimeView,
@@ -528,10 +543,13 @@ pub(crate) fn apply_runtime_view_to_widget(
     display_options: widget_runtime::WidgetDisplayOptions,
     widget_scale: f32,
 ) {
+    let window = ui.window();
+    let logical_window_width =
+        logical_size_from_physical(window.size(), window.scale_factor()).width;
     let cell_width_basis = if widget_scale.is_finite() && widget_scale > 0.0 {
-        (ui.window().size().width as f32 / widget_scale).round() as i32
+        (logical_window_width / widget_scale).round() as i32
     } else {
-        ui.window().size().width as i32
+        logical_window_width.round() as i32
     };
     ui.set_quote_rows(quote_rows_model(&view.quote_rows));
     ui.set_quote_icons(quote_icons_model(quote_icons));
@@ -625,6 +643,18 @@ mod tests {
     #[test]
     fn quote_cell_widths_handle_empty_rows() {
         assert_eq!(quote_cell_widths(&[], 408), vec![408]);
+    }
+
+    #[test]
+    fn physical_window_size_is_converted_to_logical_pixels() {
+        let at_150_percent = logical_size_from_physical(PhysicalSize::new(429, 216), 1.5);
+        assert_eq!(at_150_percent, LogicalSize::new(286.0, 144.0));
+
+        let at_200_percent = logical_size_from_physical(PhysicalSize::new(572, 288), 2.0);
+        assert_eq!(at_200_percent, LogicalSize::new(286.0, 144.0));
+
+        let invalid_scale = logical_size_from_physical(PhysicalSize::new(286, 144), 0.0);
+        assert_eq!(invalid_scale, LogicalSize::new(286.0, 144.0));
     }
 
     #[test]

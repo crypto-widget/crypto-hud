@@ -18,8 +18,8 @@ use settings::{
     WidgetKind as WidgetType, WidgetSize,
 };
 use slint::{
-    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition, SharedString, Timer, TimerMode,
-    WindowPosition,
+    CloseRequestResponse, ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition,
+    SharedString, Timer, TimerMode, WindowPosition,
 };
 
 use crate::{
@@ -1804,6 +1804,16 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             if let Some(ui) = weak.upgrade() {
                 ui.window().set_minimized(true);
             }
+        }
+    });
+
+    ui.window().on_close_requested({
+        let widgets = widgets.clone();
+        let layouts = layouts.clone();
+        let settings_mode_active = settings_mode_active.clone();
+        move || {
+            leave_settings_mode(&widgets, &layouts, &settings_mode_active);
+            CloseRequestResponse::HideWindow
         }
     });
 
@@ -4456,6 +4466,22 @@ mod tests {
                 "settings refresh should preserve and relocalize the open symbol picker: {required}"
             );
         }
+    }
+
+    #[test]
+    fn system_close_leaves_settings_mode_before_hiding_window() {
+        let source = settings_window_rs_source();
+        let close_handler = source
+            .split("ui.window().on_close_requested({")
+            .nth(1)
+            .unwrap()
+            .split("ui.on_close_settings({")
+            .next()
+            .unwrap();
+
+        assert!(close_handler
+            .contains("leave_settings_mode(&widgets, &layouts, &settings_mode_active);"));
+        assert!(close_handler.contains("CloseRequestResponse::HideWindow"));
     }
 
     #[test]

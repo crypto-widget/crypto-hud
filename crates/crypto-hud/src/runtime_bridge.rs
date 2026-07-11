@@ -30,7 +30,9 @@ use crate::{
         widget_definitions_from_catalog,
     },
     theme, updater,
-    widget_host::{apply_runtime_view_to_widget, WidgetRuntime, WidgetUi},
+    widget_host::{
+        apply_runtime_view_to_widget, logical_size_from_physical, WidgetRuntime, WidgetUi,
+    },
     window_manager::schedule_widget_shell_window_configuration,
 };
 
@@ -482,9 +484,9 @@ fn move_widget_window_and_schedule_save(
             instance.layout.y = y;
             instance.layout.always_on_top = always_on_top;
             instance.layout.opacity_percent = opacity_percent;
-            let size = window.size();
-            instance.layout.width = size.width as i32;
-            instance.layout.height = size.height as i32;
+            let size = logical_size_from_physical(window.size(), scale);
+            instance.layout.width = size.width.round().max(1.0) as i32;
+            instance.layout.height = size.height.round().max(1.0) as i32;
             instance.layout.scale_percent = 0;
             let definitions = widget_definitions_from_catalog(plugin_catalog);
             instance.layout.scale_percent = settings::widget_scale_percent_for_instance(
