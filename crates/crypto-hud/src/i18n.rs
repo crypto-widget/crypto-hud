@@ -2108,6 +2108,24 @@ pub fn localized_status_failure_message(locale: Locale, summary: &str, detail: &
     }
 }
 
+pub fn save_failure_message(locale: Locale, error: impl std::fmt::Display) -> String {
+    let summary = match locale {
+        Locale::En => "Could not save settings",
+        Locale::ZhHans => "无法保存设置",
+        Locale::ZhHant => "無法儲存設定",
+        Locale::Es419 => "No se pudo guardar la configuración",
+        Locale::PtBr => "Não foi possível salvar as configurações",
+        Locale::Vi => "Không thể lưu cài đặt",
+        Locale::Id => "Tidak dapat menyimpan pengaturan",
+        Locale::Tr => "Ayarlar kaydedilemedi",
+        Locale::Ko => "설정을 저장할 수 없습니다",
+        Locale::Ja => "設定を保存できませんでした",
+        Locale::Ru => "Не удалось сохранить настройки",
+        Locale::Ar => "تعذر حفظ الإعدادات",
+    };
+    status_failure_message(locale, summary, error)
+}
+
 pub fn network_proxy_empty_address_detail(locale: Locale) -> &'static str {
     match locale {
         Locale::En => "Enter a proxy address",
@@ -4286,6 +4304,22 @@ mod tests {
                 "denied"
             ),
             "فشل تسجيل الاختصار: \u{2066}denied\u{2069}"
+        );
+    }
+
+    #[test]
+    fn save_failure_message_is_localized_and_isolates_rtl_details() {
+        assert_eq!(
+            save_failure_message(Locale::En, "access denied"),
+            "Could not save settings: access denied"
+        );
+        assert_eq!(
+            save_failure_message(Locale::ZhHans, "access denied"),
+            "无法保存设置：access denied"
+        );
+        assert_eq!(
+            save_failure_message(Locale::Ar, "C:\\state\\layouts.json"),
+            "تعذر حفظ الإعدادات: \u{2066}C:\\state\\layouts.json\u{2069}"
         );
     }
 

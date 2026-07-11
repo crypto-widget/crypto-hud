@@ -1635,11 +1635,8 @@ pub fn normalize_store_with_catalog_and_work_areas(
             instance.layout.x = layout.x;
             instance.layout.y = layout.y;
         }
-        if layout_needs_recovery_for_size_in_work_areas(
-            &instance.layout,
-            instance_size,
-            work_areas,
-        ) {
+        if layout_needs_recovery_for_size_in_work_areas(&instance.layout, instance_size, work_areas)
+        {
             let layout =
                 default_layout_for_size(index, instance_size, store.settings.clone(), desktop_size);
             instance.layout.x = layout.x;

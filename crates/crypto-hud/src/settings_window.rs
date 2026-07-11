@@ -3,7 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Condvar, Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -75,6 +75,7 @@ const PREVIEW_CAROUSEL_TICK_MS: u64 = 160;
 const PREVIEW_CAROUSEL_BASE_INTERVAL_MS: u64 = 2_200;
 const PREVIEW_CAROUSEL_JITTER_MS: u64 = 1_200;
 const PREVIEW_CAROUSEL_INITIAL_OFFSET_MS: u64 = 400;
+const SYMBOL_CATALOG_REFRESH_DEBOUNCE: Duration = Duration::from_millis(350);
 const SYMBOL_PICKER_MODE_WIDGET: i32 = 0;
 const SYMBOL_PICKER_MODE_DEFAULT: i32 = 1;
 const SYMBOL_PICKER_MODE_WIDGET_REPLACE: i32 = 2;
@@ -741,7 +742,16 @@ impl SettingsCommitContext {
     }
 
     fn set_saved_status(&self, settings: AppSettings) {
-        *self.settings_status.borrow_mut() = status_saved(settings);
+        self.set_persisted_status(settings.clone(), status_saved(settings));
+    }
+
+    fn set_persisted_status(&self, settings: AppSettings, success_status: String) {
+        let save_result = save_layout_store(&self.state_path, &self.layouts.borrow());
+        if let Err(error) = &save_result {
+            eprintln!("failed to save settings: {error:#}");
+        }
+        *self.settings_status.borrow_mut() =
+            persistence_status(&settings, success_status, &save_result);
     }
 
     fn refresh_settings_window(&self, weak: &slint::Weak<SettingsWindow>) {
@@ -794,9 +804,63 @@ struct SymbolCatalogState {
 }
 
 static SYMBOL_CATALOG_STATE: OnceLock<Arc<Mutex<SymbolCatalogState>>> = OnceLock::new();
+static SYMBOL_CATALOG_COORDINATOR: OnceLock<Arc<SymbolCatalogCoordinator>> = OnceLock::new();
+
+struct SymbolCatalogRequest {
+    weak: slint::Weak<SettingsWindow>,
+    proxy_url: Option<String>,
+    fallback_symbols: Vec<String>,
+    locale: i18n::Locale,
+}
+
+struct LatestRequestSlot<T> {
+    latest_generation: u64,
+    pending: Option<(u64, T)>,
+}
+
+impl<T> Default for LatestRequestSlot<T> {
+    fn default() -> Self {
+        Self {
+            latest_generation: 0,
+            pending: None,
+        }
+    }
+}
+
+impl<T> LatestRequestSlot<T> {
+    fn replace(&mut self, request: T) -> u64 {
+        self.latest_generation = self.latest_generation.wrapping_add(1).max(1);
+        let generation = self.latest_generation;
+        self.pending = Some((generation, request));
+        generation
+    }
+
+    fn take(&mut self) -> Option<(u64, T)> {
+        self.pending.take()
+    }
+
+    const fn is_current(&self, generation: u64) -> bool {
+        self.latest_generation == generation
+    }
+}
+
+#[derive(Default)]
+struct SymbolCatalogCoordinator {
+    requests: Mutex<LatestRequestSlot<SymbolCatalogRequest>>,
+    ready: Condvar,
+}
 
 fn shared_symbol_catalog_state() -> &'static Arc<Mutex<SymbolCatalogState>> {
     SYMBOL_CATALOG_STATE.get_or_init(|| Arc::new(Mutex::new(SymbolCatalogState::default())))
+}
+
+fn shared_symbol_catalog_coordinator() -> &'static Arc<SymbolCatalogCoordinator> {
+    SYMBOL_CATALOG_COORDINATOR.get_or_init(|| {
+        let coordinator = Arc::new(SymbolCatalogCoordinator::default());
+        let worker = coordinator.clone();
+        thread::spawn(move || run_symbol_catalog_worker(worker));
+        coordinator
+    })
 }
 
 pub(crate) fn request_symbol_catalog_refresh_from_store(
@@ -820,8 +884,7 @@ fn request_symbol_catalog_refresh(
     fallback_symbols: Vec<String>,
     locale: i18n::Locale,
 ) {
-    let state = shared_symbol_catalog_state().clone();
-    if let Ok(mut state) = state.lock() {
+    if let Ok(mut state) = shared_symbol_catalog_state().lock() {
         state.loading = true;
         state.last_error = None;
         state.fallback_symbols = sorted_symbol_values(
@@ -834,8 +897,31 @@ fn request_symbol_catalog_refresh(
         );
     }
 
-    thread::spawn(move || {
-        let result = market::fetch_symbol_catalog(proxy_url.as_deref());
+    let coordinator = shared_symbol_catalog_coordinator();
+    if let Ok(mut requests) = coordinator.requests.lock() {
+        requests.replace(SymbolCatalogRequest {
+            weak,
+            proxy_url,
+            fallback_symbols,
+            locale,
+        });
+        coordinator.ready.notify_one();
+    }
+}
+
+fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
+    loop {
+        let Some((generation, request)) = next_symbol_catalog_request(&coordinator) else {
+            return;
+        };
+        let result = market::fetch_symbol_catalog(request.proxy_url.as_deref());
+
+        let Ok(requests) = coordinator.requests.lock() else {
+            return;
+        };
+        if !requests.is_current(generation) {
+            continue;
+        }
         let fallback_message = result.is_err();
         if let Ok(mut state) = shared_symbol_catalog_state().lock() {
             state.loading = false;
@@ -856,19 +942,52 @@ fn request_symbol_catalog_refresh(
                     .fallback_symbols
                     .iter()
                     .cloned()
-                    .chain(fallback_symbols)
+                    .chain(request.fallback_symbols)
                     .collect(),
             );
         }
 
+        let weak = request.weak;
+        let locale = request.locale;
         let _ = weak.upgrade_in_event_loop(move |ui| {
+            if !symbol_catalog_generation_is_current(generation) {
+                return;
+            }
             let state = symbol_catalog_snapshot();
             refresh_symbol_selector_models_from_ui(&ui, &state, locale);
             if fallback_message {
                 ui.set_status_text(i18n::text(locale).status_symbol_catalog_fallback.into());
             }
         });
-    });
+    }
+}
+
+fn next_symbol_catalog_request(
+    coordinator: &SymbolCatalogCoordinator,
+) -> Option<(u64, SymbolCatalogRequest)> {
+    let mut requests = coordinator.requests.lock().ok()?;
+    while requests.pending.is_none() {
+        requests = coordinator.ready.wait(requests).ok()?;
+    }
+    let mut observed_generation = requests.latest_generation;
+    loop {
+        let (next_requests, timeout) = coordinator
+            .ready
+            .wait_timeout(requests, SYMBOL_CATALOG_REFRESH_DEBOUNCE)
+            .ok()?;
+        requests = next_requests;
+        if timeout.timed_out() && requests.latest_generation == observed_generation {
+            return requests.take();
+        }
+        observed_generation = requests.latest_generation;
+    }
+}
+
+fn symbol_catalog_generation_is_current(generation: u64) -> bool {
+    shared_symbol_catalog_coordinator()
+        .requests
+        .lock()
+        .is_ok_and(|requests| requests.is_current(generation))
 }
 
 fn symbol_catalog_snapshot() -> SymbolCatalogState {
@@ -1011,7 +1130,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             commit.apply_settings_to_widgets();
             commit.apply_widget_pinning_for_settings_mode();
             commit.update_market_feed_config_from_store();
-            *commit.settings_status.borrow_mut() = status;
+            commit.set_persisted_status(settings.clone(), status);
             if let Some(tray) = tray_handle
                 .borrow()
                 .as_ref()
@@ -1890,6 +2009,25 @@ fn status_saved(_: AppSettings) -> String {
     String::new()
 }
 
+fn persistence_status(
+    settings: &AppSettings,
+    success_status: String,
+    save_result: &Result<()>,
+) -> String {
+    match save_result {
+        Ok(()) => success_status,
+        Err(error) => {
+            let locale = i18n::resolve_locale(settings.language);
+            let failure = i18n::save_failure_message(locale, error);
+            if success_status.is_empty() {
+                failure
+            } else {
+                format!("{success_status} | {failure}")
+            }
+        }
+    }
+}
+
 fn status_icon_cache_cleared(deleted: usize, locale: i18n::Locale) -> String {
     i18n::icon_cache_cleared(locale, deleted)
 }
@@ -1939,14 +2077,11 @@ impl NetworkProxyInputError {
 
 fn apply_settings_to_store(
     layouts: &Rc<RefCell<LayoutStore>>,
-    state_path: &std::path::Path,
+    _state_path: &std::path::Path,
     settings: AppSettings,
 ) {
     let mut store = layouts.borrow_mut();
     store.settings = settings;
-    if let Err(error) = save_layout_store(state_path, &store) {
-        eprintln!("failed to save widget settings: {error:#}");
-    }
 }
 
 fn apply_default_widget_scale_to_instances(
@@ -4839,6 +4974,25 @@ mod tests {
     }
 
     #[test]
+    fn failed_persistence_never_reports_saved_status() {
+        let english = AppSettings::default();
+        let failed: Result<()> = Err(anyhow::anyhow!("access denied"));
+        assert_eq!(
+            persistence_status(&english, status_saved(english.clone()), &failed),
+            "Could not save settings: access denied"
+        );
+
+        let chinese = AppSettings {
+            language: LanguagePreference::ZhHans,
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            persistence_status(&chinese, "快捷键注册失败".to_string(), &failed),
+            "快捷键注册失败 | 无法保存设置：access denied"
+        );
+    }
+
+    #[test]
     fn add_plugin_widget_action_uses_plugin_defaults_and_selects_new_widget() {
         let catalog = plugin::PluginCatalog::builtins();
         let plugin = catalog.find(WidgetType::QuoteBoard.plugin_id()).unwrap();
@@ -5100,6 +5254,22 @@ mod tests {
         assert_eq!(store.widgets.len(), 1);
         assert_eq!(store.widgets[0].id, "mini-ticker-2");
         assert_eq!(store.selected_widget_id.as_deref(), Some("mini-ticker-2"));
+    }
+
+    #[test]
+    fn symbol_catalog_request_slot_keeps_only_the_latest_pending_request() {
+        let mut requests = LatestRequestSlot::default();
+        let first = requests.replace("first");
+        let second = requests.replace("second");
+
+        assert!(!requests.is_current(first));
+        assert!(requests.is_current(second));
+        assert_eq!(requests.take(), Some((second, "second")));
+        assert!(requests.take().is_none());
+
+        let third = requests.replace("third");
+        assert!(requests.is_current(third));
+        assert_eq!(requests.take(), Some((third, "third")));
     }
 
     #[test]
