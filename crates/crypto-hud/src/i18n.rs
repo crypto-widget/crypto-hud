@@ -2071,24 +2071,6 @@ pub fn default_widget_name(locale: Locale, widget: WidgetText, number: u64) -> S
     format!("{} {number}", widget_title(locale, widget))
 }
 
-pub fn market_error_notification_body(locale: Locale, error: &str) -> String {
-    let error = ltr_isolate_for_locale(locale, error);
-    match locale {
-        Locale::En => format!("Market data update failed: {error}"),
-        Locale::ZhHans => format!("行情更新失败：{error}"),
-        Locale::ZhHant => format!("行情更新失敗：{error}"),
-        Locale::Es419 => format!("Falló la actualización de mercado: {error}"),
-        Locale::PtBr => format!("Falha ao atualizar dados de mercado: {error}"),
-        Locale::Vi => format!("Cập nhật dữ liệu thị trường thất bại: {error}"),
-        Locale::Id => format!("Pembaruan data pasar gagal: {error}"),
-        Locale::Tr => format!("Piyasa verisi güncellenemedi: {error}"),
-        Locale::Ko => format!("시장 데이터 업데이트 실패: {error}"),
-        Locale::Ja => format!("マーケットデータの更新に失敗しました: {error}"),
-        Locale::Ru => format!("Не удалось обновить рыночные данные: {error}"),
-        Locale::Ar => format!("فشل تحديث بيانات السوق: {error}"),
-    }
-}
-
 pub fn status_failure_message(
     locale: Locale,
     summary: &str,
@@ -2106,6 +2088,24 @@ pub fn localized_status_failure_message(locale: Locale, summary: &str, detail: &
         Locale::ZhHans | Locale::ZhHant | Locale::Ja => format!("{summary}：{detail}"),
         _ => format!("{summary}: {detail}"),
     }
+}
+
+pub fn save_failure_message(locale: Locale, error: impl std::fmt::Display) -> String {
+    let summary = match locale {
+        Locale::En => "Could not save settings",
+        Locale::ZhHans => "无法保存设置",
+        Locale::ZhHant => "無法儲存設定",
+        Locale::Es419 => "No se pudo guardar la configuración",
+        Locale::PtBr => "Não foi possível salvar as configurações",
+        Locale::Vi => "Không thể lưu cài đặt",
+        Locale::Id => "Tidak dapat menyimpan pengaturan",
+        Locale::Tr => "Ayarlar kaydedilemedi",
+        Locale::Ko => "설정을 저장할 수 없습니다",
+        Locale::Ja => "設定を保存できませんでした",
+        Locale::Ru => "Не удалось сохранить настройки",
+        Locale::Ar => "تعذر حفظ الإعدادات",
+    };
+    status_failure_message(locale, summary, error)
 }
 
 pub fn network_proxy_empty_address_detail(locale: Locale) -> &'static str {
@@ -3852,7 +3852,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(
-            readme_en.contains(&format!("{supported_language_count} UI languages")),
+            ["UI languages", "interface languages"]
+                .into_iter()
+                .any(|label| readme_en.contains(&format!("{supported_language_count} {label}"))),
             "README.md should advertise the current supported language count"
         );
         assert!(
@@ -4290,6 +4292,22 @@ mod tests {
     }
 
     #[test]
+    fn save_failure_message_is_localized_and_isolates_rtl_details() {
+        assert_eq!(
+            save_failure_message(Locale::En, "access denied"),
+            "Could not save settings: access denied"
+        );
+        assert_eq!(
+            save_failure_message(Locale::ZhHans, "access denied"),
+            "无法保存设置：access denied"
+        );
+        assert_eq!(
+            save_failure_message(Locale::Ar, "C:\\state\\layouts.json"),
+            "تعذر حفظ الإعدادات: \u{2066}C:\\state\\layouts.json\u{2069}"
+        );
+    }
+
+    #[test]
     fn icon_cache_cleared_status_is_localized_for_every_non_english_locale() {
         let english_status = icon_cache_cleared(Locale::En, 3);
 
@@ -4705,7 +4723,7 @@ mod tests {
         for entry in ALLOWED_IDENTICAL_TECHNICAL_UI_FIELDS {
             let Some(english) = english_fields
                 .iter()
-                .find(|(field_name, _)| field_name == &entry.field_name)
+                .find(|(field_name, _)| field_name == entry.field_name)
                 .map(|(_, value)| value)
             else {
                 panic!("EN_TEXT should include {}", entry.field_name);
@@ -5668,10 +5686,6 @@ mod tests {
                 "denied"
             ),
             "فشل تسجيل الاختصار: \u{2066}denied\u{2069}"
-        );
-        assert_eq!(
-            market_error_notification_body(Locale::Ar, "HTTP 429 api.binance.com"),
-            "فشل تحديث بيانات السوق: \u{2066}HTTP 429 api.binance.com\u{2069}"
         );
     }
 }

@@ -295,7 +295,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ReportPath) | Out
 Push-Location $RepoRoot
 try {
     if (-not $SkipBuild) {
-        cargo build --release -p crypto-hud
+        cargo build --locked --release -p crypto-hud
         if ($LASTEXITCODE -ne 0) {
             throw "Release build failed with code $LASTEXITCODE"
         }

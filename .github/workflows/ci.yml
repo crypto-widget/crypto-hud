@@ -24,7 +24,19 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --workspace --all-targets --no-fail-fast
+        run: cargo test --locked --workspace --all-targets --no-fail-fast
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: Audit locked dependencies
+        run: cargo audit

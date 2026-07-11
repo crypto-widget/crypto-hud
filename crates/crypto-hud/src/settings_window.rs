@@ -3,7 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Condvar, Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -18,8 +18,8 @@ use settings::{
     WidgetKind as WidgetType, WidgetSize,
 };
 use slint::{
-    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition, SharedString, Timer, TimerMode,
-    WindowPosition,
+    CloseRequestResponse, ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition,
+    SharedString, Timer, TimerMode, WindowPosition,
 };
 
 use crate::{
@@ -42,7 +42,7 @@ use crate::{
     widget_host::WidgetRuntime,
     window_manager::{
         apply_tray_hover_display, apply_widget_pinning_for_settings_mode, desktop_size,
-        leave_settings_mode, schedule_settings_window_raise,
+        leave_settings_mode, schedule_settings_window_configuration,
         schedule_widget_shell_window_configuration, TrayHoverDisplayState,
     },
 };
@@ -51,16 +51,17 @@ mod settings_actions;
 mod settings_models;
 mod settings_theme;
 use settings_actions::{
-    add_plugin_widget_to_store, apply_widget_scale_to_store, apply_widget_settings_to_store,
-    delete_widget_from_store_at_index, WidgetSettingsUpdate,
+    add_plugin_widget_to_store, apply_widget_integer_parameter_to_store,
+    apply_widget_scale_to_store, apply_widget_settings_to_store, delete_widget_from_store_at_index,
+    WidgetSettingsUpdate,
 };
 pub(crate) use settings_models::widget_type_usage_text;
 use settings_models::{
     bool_model, image_model, int_model, owned_string_model, plugin_market_items_model,
     string_model, widget_instance_detail_options, widget_instance_options,
-    widget_preview_image_options, widget_preview_kind_options, widget_scale_max_options,
-    widget_scale_min_options, widget_scale_options, widget_theme_index, widget_theme_options,
-    widget_visibility_options,
+    widget_integer_parameter_options, widget_preview_image_options, widget_preview_kind_options,
+    widget_scale_max_options, widget_scale_min_options, widget_scale_options, widget_theme_index,
+    widget_theme_options, widget_visibility_options,
 };
 use settings_theme::apply_theme_to_settings_window;
 
@@ -75,6 +76,7 @@ const PREVIEW_CAROUSEL_TICK_MS: u64 = 160;
 const PREVIEW_CAROUSEL_BASE_INTERVAL_MS: u64 = 2_200;
 const PREVIEW_CAROUSEL_JITTER_MS: u64 = 1_200;
 const PREVIEW_CAROUSEL_INITIAL_OFFSET_MS: u64 = 400;
+const SYMBOL_CATALOG_REFRESH_DEBOUNCE: Duration = Duration::from_millis(350);
 const SYMBOL_PICKER_MODE_WIDGET: i32 = 0;
 const SYMBOL_PICKER_MODE_DEFAULT: i32 = 1;
 const SYMBOL_PICKER_MODE_WIDGET_REPLACE: i32 = 2;
@@ -741,7 +743,16 @@ impl SettingsCommitContext {
     }
 
     fn set_saved_status(&self, settings: AppSettings) {
-        *self.settings_status.borrow_mut() = status_saved(settings);
+        self.set_persisted_status(settings.clone(), status_saved(settings));
+    }
+
+    fn set_persisted_status(&self, settings: AppSettings, success_status: String) {
+        let save_result = save_layout_store(&self.state_path, &self.layouts.borrow());
+        if let Err(error) = &save_result {
+            eprintln!("failed to save settings: {error:#}");
+        }
+        *self.settings_status.borrow_mut() =
+            persistence_status(&settings, success_status, &save_result);
     }
 
     fn refresh_settings_window(&self, weak: &slint::Weak<SettingsWindow>) {
@@ -794,9 +805,63 @@ struct SymbolCatalogState {
 }
 
 static SYMBOL_CATALOG_STATE: OnceLock<Arc<Mutex<SymbolCatalogState>>> = OnceLock::new();
+static SYMBOL_CATALOG_COORDINATOR: OnceLock<Arc<SymbolCatalogCoordinator>> = OnceLock::new();
+
+struct SymbolCatalogRequest {
+    weak: slint::Weak<SettingsWindow>,
+    proxy_url: Option<String>,
+    fallback_symbols: Vec<String>,
+    locale: i18n::Locale,
+}
+
+struct LatestRequestSlot<T> {
+    latest_generation: u64,
+    pending: Option<(u64, T)>,
+}
+
+impl<T> Default for LatestRequestSlot<T> {
+    fn default() -> Self {
+        Self {
+            latest_generation: 0,
+            pending: None,
+        }
+    }
+}
+
+impl<T> LatestRequestSlot<T> {
+    fn replace(&mut self, request: T) -> u64 {
+        self.latest_generation = self.latest_generation.wrapping_add(1).max(1);
+        let generation = self.latest_generation;
+        self.pending = Some((generation, request));
+        generation
+    }
+
+    fn take(&mut self) -> Option<(u64, T)> {
+        self.pending.take()
+    }
+
+    const fn is_current(&self, generation: u64) -> bool {
+        self.latest_generation == generation
+    }
+}
+
+#[derive(Default)]
+struct SymbolCatalogCoordinator {
+    requests: Mutex<LatestRequestSlot<SymbolCatalogRequest>>,
+    ready: Condvar,
+}
 
 fn shared_symbol_catalog_state() -> &'static Arc<Mutex<SymbolCatalogState>> {
     SYMBOL_CATALOG_STATE.get_or_init(|| Arc::new(Mutex::new(SymbolCatalogState::default())))
+}
+
+fn shared_symbol_catalog_coordinator() -> &'static Arc<SymbolCatalogCoordinator> {
+    SYMBOL_CATALOG_COORDINATOR.get_or_init(|| {
+        let coordinator = Arc::new(SymbolCatalogCoordinator::default());
+        let worker = coordinator.clone();
+        thread::spawn(move || run_symbol_catalog_worker(worker));
+        coordinator
+    })
 }
 
 pub(crate) fn request_symbol_catalog_refresh_from_store(
@@ -820,8 +885,7 @@ fn request_symbol_catalog_refresh(
     fallback_symbols: Vec<String>,
     locale: i18n::Locale,
 ) {
-    let state = shared_symbol_catalog_state().clone();
-    if let Ok(mut state) = state.lock() {
+    if let Ok(mut state) = shared_symbol_catalog_state().lock() {
         state.loading = true;
         state.last_error = None;
         state.fallback_symbols = sorted_symbol_values(
@@ -834,8 +898,31 @@ fn request_symbol_catalog_refresh(
         );
     }
 
-    thread::spawn(move || {
-        let result = market::fetch_symbol_catalog(proxy_url.as_deref());
+    let coordinator = shared_symbol_catalog_coordinator();
+    if let Ok(mut requests) = coordinator.requests.lock() {
+        requests.replace(SymbolCatalogRequest {
+            weak,
+            proxy_url,
+            fallback_symbols,
+            locale,
+        });
+        coordinator.ready.notify_one();
+    }
+}
+
+fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
+    loop {
+        let Some((generation, request)) = next_symbol_catalog_request(&coordinator) else {
+            return;
+        };
+        let result = market::fetch_symbol_catalog(request.proxy_url.as_deref());
+
+        let Ok(requests) = coordinator.requests.lock() else {
+            return;
+        };
+        if !requests.is_current(generation) {
+            continue;
+        }
         let fallback_message = result.is_err();
         if let Ok(mut state) = shared_symbol_catalog_state().lock() {
             state.loading = false;
@@ -856,19 +943,52 @@ fn request_symbol_catalog_refresh(
                     .fallback_symbols
                     .iter()
                     .cloned()
-                    .chain(fallback_symbols)
+                    .chain(request.fallback_symbols)
                     .collect(),
             );
         }
 
+        let weak = request.weak;
+        let locale = request.locale;
         let _ = weak.upgrade_in_event_loop(move |ui| {
+            if !symbol_catalog_generation_is_current(generation) {
+                return;
+            }
             let state = symbol_catalog_snapshot();
             refresh_symbol_selector_models_from_ui(&ui, &state, locale);
             if fallback_message {
                 ui.set_status_text(i18n::text(locale).status_symbol_catalog_fallback.into());
             }
         });
-    });
+    }
+}
+
+fn next_symbol_catalog_request(
+    coordinator: &SymbolCatalogCoordinator,
+) -> Option<(u64, SymbolCatalogRequest)> {
+    let mut requests = coordinator.requests.lock().ok()?;
+    while requests.pending.is_none() {
+        requests = coordinator.ready.wait(requests).ok()?;
+    }
+    let mut observed_generation = requests.latest_generation;
+    loop {
+        let (next_requests, timeout) = coordinator
+            .ready
+            .wait_timeout(requests, SYMBOL_CATALOG_REFRESH_DEBOUNCE)
+            .ok()?;
+        requests = next_requests;
+        if timeout.timed_out() && requests.latest_generation == observed_generation {
+            return requests.take();
+        }
+        observed_generation = requests.latest_generation;
+    }
+}
+
+fn symbol_catalog_generation_is_current(generation: u64) -> bool {
+    shared_symbol_catalog_coordinator()
+        .requests
+        .lock()
+        .is_ok_and(|requests| requests.is_current(generation))
 }
 
 fn symbol_catalog_snapshot() -> SymbolCatalogState {
@@ -1011,7 +1131,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             commit.apply_settings_to_widgets();
             commit.apply_widget_pinning_for_settings_mode();
             commit.update_market_feed_config_from_store();
-            *commit.settings_status.borrow_mut() = status;
+            commit.set_persisted_status(settings.clone(), status);
             if let Some(tray) = tray_handle
                 .borrow()
                 .as_ref()
@@ -1037,6 +1157,12 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         let weak = ui.as_weak();
         move |network_proxy_enabled, network_proxy_url_input_text| {
             let previous = commit.current_settings();
+            if network_proxy_enabled && network_proxy_url_input_text.trim().is_empty() {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_network_proxy_error_text("".into());
+                }
+                return;
+            }
             let network_proxy_url = match normalized_network_proxy_input(
                 network_proxy_enabled,
                 network_proxy_url_input_text.as_str(),
@@ -1044,15 +1170,18 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 Ok(network_proxy_url) => network_proxy_url,
                 Err(error) => {
                     let locale = i18n::resolve_locale(previous.language);
-                    *commit.settings_status.borrow_mut() = error.status_message(locale);
+                    let status = error.status_message(locale);
+                    *commit.settings_status.borrow_mut() = status.clone();
                     if let Some(ui) = weak.upgrade() {
-                        let status = commit.settings_status.borrow().clone();
-                        ui.set_status_text(status.as_str().into());
+                        ui.set_network_proxy_error_text(status.into());
                     }
                     return;
                 }
             };
 
+            if let Some(ui) = weak.upgrade() {
+                ui.set_network_proxy_error_text("".into());
+            }
             let mut settings = previous;
             settings.network_proxy_enabled = network_proxy_enabled;
             settings.network_proxy_url = network_proxy_url;
@@ -1574,6 +1703,35 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.on_move_widget({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |selected_index, direction| {
+            let next_index = {
+                let mut store = commit.layouts.borrow_mut();
+                let Some(next_index) = move_widget_in_store(&mut store, selected_index, direction)
+                else {
+                    return;
+                };
+                if let Err(error) = save_layout_store(&commit.state_path, &store) {
+                    eprintln!("failed to save widget order: {error:#}");
+                }
+                next_index as i32
+            };
+
+            commit.sync_widget_runtimes(false, "failed to reorder widget windows");
+            commit.apply_widget_pinning_for_settings_mode();
+            commit.set_saved_status(commit.current_settings());
+            commit.refresh_settings_window(&weak);
+            if let Some(ui) = weak.upgrade() {
+                ui.set_widget_reorder_active(false);
+                ui.set_widget_reorder_index(-1);
+                ui.set_selected_widget_index(next_index);
+            }
+            schedule_widget_shell_window_configuration();
+        }
+    });
+
     ui.on_add_widget({
         let commit = commit_context.clone();
         let weak = ui.as_weak();
@@ -1608,7 +1766,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 true,
                 "failed to add widget window",
             );
-            schedule_settings_window_raise();
+            schedule_settings_window_configuration();
         }
     });
 
@@ -1725,6 +1883,51 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.on_apply_widget_integer_parameter({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |selected_index, parameter_index, value| {
+            let settings = commit.current_settings();
+            let changed = {
+                let mut store = commit.layouts.borrow_mut();
+                let changed = apply_widget_integer_parameter_to_store(
+                    &mut store,
+                    selected_index,
+                    parameter_index,
+                    value,
+                    &commit.plugin_catalog,
+                );
+                if changed {
+                    if let Err(error) = save_layout_store(&commit.state_path, &store) {
+                        eprintln!("failed to save widget parameter: {error:#}");
+                    }
+                }
+                changed
+            };
+            if !changed {
+                return;
+            }
+            commit.sync_widget_runtimes(false, "failed to apply widget parameter");
+            commit.apply_widget_pinning_for_settings_mode();
+            commit.set_saved_status(settings.clone());
+            if let Some(ui) = weak.upgrade() {
+                let locale = i18n::resolve_locale(settings.language);
+                let options = commit
+                    .layouts
+                    .borrow()
+                    .widgets
+                    .get(selected_index.max(0) as usize)
+                    .map(|widget| {
+                        widget_integer_parameter_options(widget, &commit.plugin_catalog, locale)
+                    })
+                    .unwrap_or_default();
+                ui.set_widget_parameter_values(int_model(options.values));
+                let status = commit.settings_status.borrow().clone();
+                ui.set_status_text(status.as_str().into());
+            }
+        }
+    });
+
     ui.on_delete_widget({
         let commit = commit_context.clone();
         let weak = ui.as_weak();
@@ -1807,6 +2010,16 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.window().on_close_requested({
+        let widgets = widgets.clone();
+        let layouts = layouts.clone();
+        let settings_mode_active = settings_mode_active.clone();
+        move || {
+            leave_settings_mode(&widgets, &layouts, &settings_mode_active);
+            CloseRequestResponse::HideWindow
+        }
+    });
+
     ui.on_close_settings({
         let widgets = widgets.clone();
         let layouts = layouts.clone();
@@ -1849,6 +2062,25 @@ fn schedule_widget_layout_lock_sync(
 
 fn status_saved(_: AppSettings) -> String {
     String::new()
+}
+
+fn persistence_status(
+    settings: &AppSettings,
+    success_status: String,
+    save_result: &Result<()>,
+) -> String {
+    match save_result {
+        Ok(()) => success_status,
+        Err(error) => {
+            let locale = i18n::resolve_locale(settings.language);
+            let failure = i18n::save_failure_message(locale, error);
+            if success_status.is_empty() {
+                failure
+            } else {
+                format!("{success_status} | {failure}")
+            }
+        }
+    }
 }
 
 fn status_icon_cache_cleared(deleted: usize, locale: i18n::Locale) -> String {
@@ -1900,14 +2132,11 @@ impl NetworkProxyInputError {
 
 fn apply_settings_to_store(
     layouts: &Rc<RefCell<LayoutStore>>,
-    state_path: &std::path::Path,
+    _state_path: &std::path::Path,
     settings: AppSettings,
 ) {
     let mut store = layouts.borrow_mut();
     store.settings = settings;
-    if let Err(error) = save_layout_store(state_path, &store) {
-        eprintln!("failed to save widget settings: {error:#}");
-    }
 }
 
 fn apply_default_widget_scale_to_instances(
@@ -3028,6 +3257,16 @@ pub(crate) fn refresh_settings_window(
             .map(settings::widget_hide_quote_asset)
             .unwrap_or(false),
     );
+    let parameter_options = selected_widget
+        .map(|widget| widget_integer_parameter_options(widget, plugin_catalog, locale))
+        .unwrap_or_default();
+    ui.set_widget_parameter_labels(owned_string_model(parameter_options.labels));
+    ui.set_widget_parameter_helps(owned_string_model(parameter_options.helps));
+    ui.set_widget_parameter_units(owned_string_model(parameter_options.units));
+    ui.set_widget_parameter_values(int_model(parameter_options.values));
+    ui.set_widget_parameter_minimums(int_model(parameter_options.minimums));
+    ui.set_widget_parameter_maximums(int_model(parameter_options.maximums));
+    ui.set_widget_parameter_steps(int_model(parameter_options.steps));
     ui.set_default_widgets_always_on_top(settings.widgets_always_on_top);
     ui.set_default_opacity_percent(settings.opacity_percent);
     ui.set_default_widget_scale_percent(settings.widget_scale_percent);
@@ -3711,6 +3950,126 @@ mod tests {
     }
 
     #[test]
+    fn widget_list_wires_pointer_and_keyboard_reordering_to_persistent_backend() {
+        let source = settings_window_ui_source();
+        let row_start = source.find("row_focus := FocusScope {").unwrap();
+        let row_end = source[row_start..]
+            .find("action_menu := Rectangle {")
+            .unwrap();
+        let row = &source[row_start..row_start + row_end];
+
+        for contract in [
+            "root.widget-list-press(index);",
+            "root.widget-list-drag(self.mouse-y - self.pressed-y);",
+            "root.widget-list-release();",
+            "event.modifiers.control && event.text == Key.UpArrow",
+            "root.move-widget(index, -1);",
+            "event.modifiers.control && event.text == Key.DownArrow",
+            "root.move-widget(index, 1);",
+        ] {
+            assert!(
+                row.contains(contract),
+                "widget row should expose reorder contract: {contract}"
+            );
+        }
+
+        let backend = settings_window_rs_source();
+        let handler_start = backend.find("ui.on_move_widget({").unwrap();
+        let handler_end = backend[handler_start..].find("ui.on_add_widget({").unwrap();
+        let handler = &backend[handler_start..handler_start + handler_end];
+        assert!(handler.contains("move_widget_in_store(&mut store, selected_index, direction)"));
+        assert!(handler.contains("save_layout_store(&commit.state_path, &store)"));
+        assert!(handler.contains("commit.sync_widget_runtimes"));
+        assert!(handler.contains("commit.refresh_settings_window(&weak)"));
+    }
+
+    #[test]
+    fn widget_reorder_move_is_serialized_in_new_order() {
+        let state_path = temp_state_path("widget-reorder");
+        let mut store = LayoutStore {
+            widgets: vec![
+                test_widget("widget-a", "plugin-a", vec!["BTCUSDT"]),
+                test_widget("widget-b", "plugin-b", vec!["ETHUSDT"]),
+                test_widget("widget-c", "plugin-c", vec!["SOLUSDT"]),
+            ],
+            ..LayoutStore::default()
+        };
+
+        assert_eq!(move_widget_in_store(&mut store, 0, 1), Some(1));
+        save_layout_store(&state_path, &store).unwrap();
+
+        let persisted: LayoutStore =
+            serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap();
+        assert_eq!(
+            persisted
+                .widgets
+                .iter()
+                .map(|widget| widget.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["widget-b", "widget-a", "widget-c"]
+        );
+        assert_eq!(persisted.selected_widget_id.as_deref(), Some("widget-a"));
+
+        let _ = std::fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn settings_primary_custom_controls_are_keyboard_and_accessibility_enabled() {
+        let settings_source = settings_window_ui_source();
+        let shared_source = ui_source("shared-controls.slint");
+
+        for contract in [
+            "accessible-role: switch;",
+            "accessible-checkable: true;",
+            "accessible-checked: root.checked;",
+            "switch_focus := FocusScope {",
+            "accessible-role: tab;",
+            "accessible-item-selected: root.selected;",
+            "nav_focus := FocusScope {",
+        ] {
+            assert!(
+                shared_source.contains(contract),
+                "shared settings controls should expose accessibility contract: {contract}"
+            );
+        }
+
+        for contract in [
+            "accessible-role: slider;",
+            "accessible-action-increment => { root.commit-value(root.value + 1); }",
+            "slider_focus := FocusScope {",
+            "accessible-role: spinbox;",
+            "accessible-action-increment => { root.apply-step(root.step-size); }",
+            "stepper_focus := FocusScope {",
+            "component CompactSwitch inherits Rectangle {",
+            "accessible-role: list-item;",
+            "accessible-item-selected: root.selected-widget-index == index;",
+            "accessible-label: root.close-text;",
+            "close_focus := FocusScope {",
+        ] {
+            assert!(
+                settings_source.contains(contract),
+                "settings window should expose accessibility contract: {contract}"
+            );
+        }
+
+        let window_component = settings_source
+            .find("export component SettingsWindow inherits Window {")
+            .map(|start| &settings_source[start..])
+            .unwrap();
+        for (index, (start, _)) in window_component
+            .match_indices("SettingSwitch {")
+            .enumerate()
+        {
+            let block = &window_component[start..window_component.len().min(start + 420)];
+            assert!(
+                block.contains("accessible-label-text:"),
+                "SettingSwitch instance {} should have a localized accessible label",
+                index + 1
+            );
+        }
+    }
+
+    #[test]
     fn settings_window_shared_text_controls_follow_rtl_layout() {
         let source = settings_window_ui_source();
         assert!(
@@ -3918,6 +4277,63 @@ mod tests {
     }
 
     #[test]
+    fn plugin_market_image_thumbnails_open_delayed_natural_size_hover_previews() {
+        let source = settings_window_ui_source();
+
+        let carousel_start = source
+            .find("component PluginPreviewCarousel inherits Rectangle {")
+            .unwrap();
+        let carousel_end = source
+            .find("component WidgetListPreviewCarousel inherits Rectangle {")
+            .unwrap();
+        let carousel = &source[carousel_start..carousel_end];
+        assert!(
+            carousel.contains("property <image> active-image:")
+                && carousel.contains("root.plugin.preview_image_1")
+                && carousel.contains("root.plugin.preview_image_5"),
+            "the hover preview should follow every image in the thumbnail carousel"
+        );
+        assert!(
+            carousel.contains("preview_touch := TouchArea {")
+                && carousel.contains("mouse-cursor: pointer;")
+                && carousel.contains("changed has-hover => {")
+                && carousel.contains("root.preview-hover-changed(false, root.active-image);"),
+            "leaving the thumbnail should close the hover preview immediately"
+        );
+        assert!(
+            carousel.contains("hover_preview_delay := Timer {")
+                && carousel.contains("interval: 250ms;")
+                && carousel.contains("running: root.preview-hovered && !root.preview-ready;")
+                && carousel.contains("root.preview-hover-changed(true, root.active-image);"),
+            "hover previews should open after a short intentional-hover delay"
+        );
+
+        let overlay_start = source.find("plugin_preview_hover := Rectangle {").unwrap();
+        let overlay = &source[overlay_start..];
+        assert!(
+            source.contains("root.hovered-plugin-preview-image.width * 1px * root.hovered-plugin-preview-scale")
+                && source.contains("root.hovered-plugin-preview-image.height * 1px * root.hovered-plugin-preview-scale")
+                && source.contains("min(1.0, min(1000.0 / root.hovered-plugin-preview-image.width, 600.0 / root.hovered-plugin-preview-image.height))"),
+            "the overlay should use 1:1 source dimensions and only shrink oversized previews"
+        );
+        assert!(
+            overlay.contains("source: root.hovered-plugin-preview-image;")
+                && overlay.contains("image-fit: contain;")
+                && overlay.contains("root.settings-tab-index == 1")
+                && overlay.contains("root.hovered-plugin-preview-visible"),
+            "the enlarged image should be a component-library-only top-level overlay"
+        );
+        assert!(
+            overlay_start > source.find("system_tab := Rectangle {").unwrap()
+                && overlay_start
+                    < source
+                        .find("y: parent.height - 1px;\n            width: parent.width;")
+                        .unwrap(),
+            "the hover preview must be above every settings tab rather than inside a hidden tab"
+        );
+    }
+
+    #[test]
     fn plugin_market_text_rows_follow_rtl_layout() {
         let source = settings_window_ui_source();
 
@@ -4104,7 +4520,7 @@ mod tests {
         assert!(
             source.contains("property <int> widget-display-section-y: root.widget-symbol-status-y + 10;")
                 && source.contains(
-                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset) * 1px;"
+                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset + root.widget-parameter-settings-offset) * 1px;"
                 ),
             "removing pair limit help should tighten the spacing below the pair chips"
         );
@@ -4125,11 +4541,16 @@ mod tests {
         ));
         assert!(proxy_section.contains("x: parent.width - 54px;"));
         assert!(proxy_section.contains("text: root.network-proxy-example-hint-text;"));
+        assert!(proxy_section.contains("text: root.network-proxy-error-text;"));
+        assert!(proxy_section.contains(
+            "visible: root.network-proxy-enabled && root.network-proxy-error-text == \"\";"
+        ));
+        assert!(source.contains("in-out property <string> network-proxy-error-text;"));
         assert!(
             proxy_section
                 .matches("visible: root.network-proxy-enabled;")
                 .count()
-                >= 4
+                >= 3
         );
         assert!(!source.contains("network-proxy-http-example-text"));
         assert!(!source.contains("network-proxy-socks-example-text"));
@@ -4199,7 +4620,7 @@ mod tests {
     }
 
     #[test]
-    fn advanced_options_row_is_disabled_until_options_exist() {
+    fn advanced_options_row_hosts_plugin_integer_parameters() {
         let source = settings_window_ui_source();
         let advanced_label =
             block_before_anchor(&source, "Text {", "text: root.advanced-options-text;");
@@ -4209,14 +4630,18 @@ mod tests {
             "Text {",
         );
 
-        assert!(
-            advanced_label.contains("color: root.settings-muted-color;"),
-            "advanced options label should look disabled while it has no content"
-        );
+        assert!(advanced_label.contains(
+            "color: root.widget-parameter-labels.length > 0 ? root.settings-heading-color : root.settings-muted-color;"
+        ));
         assert!(
             advanced_arrow.contains("text: \">\";") && advanced_arrow.contains("visible: false;"),
-            "advanced options should not show an affordance to enter an empty section"
+            "inline plugin options should not show a navigation affordance"
         );
+        assert!(source
+            .contains("for parameter-label[index] in root.widget-parameter-labels : Rectangle {"));
+        assert!(source.contains(
+            "root.apply-widget-integer-parameter(root.selected-widget-index, index, value);"
+        ));
     }
 
     #[test]
@@ -4456,6 +4881,22 @@ mod tests {
                 "settings refresh should preserve and relocalize the open symbol picker: {required}"
             );
         }
+    }
+
+    #[test]
+    fn system_close_leaves_settings_mode_before_hiding_window() {
+        let source = settings_window_rs_source();
+        let close_handler = source
+            .split("ui.window().on_close_requested({")
+            .nth(1)
+            .unwrap()
+            .split("ui.on_close_settings({")
+            .next()
+            .unwrap();
+
+        assert!(close_handler
+            .contains("leave_settings_mode(&widgets, &layouts, &settings_mode_active);"));
+        assert!(close_handler.contains("CloseRequestResponse::HideWindow"));
     }
 
     #[test]
@@ -4928,6 +5369,22 @@ mod tests {
     }
 
     #[test]
+    fn symbol_catalog_request_slot_keeps_only_the_latest_pending_request() {
+        let mut requests = LatestRequestSlot::default();
+        let first = requests.replace("first");
+        let second = requests.replace("second");
+
+        assert!(!requests.is_current(first));
+        assert!(requests.is_current(second));
+        assert_eq!(requests.take(), Some((second, "second")));
+        assert!(requests.take().is_none());
+
+        let third = requests.replace("third");
+        assert!(requests.is_current(third));
+        assert_eq!(requests.take(), Some((third, "third")));
+    }
+
+    #[test]
     fn symbol_options_follow_enabled_sources() {
         let state = SymbolCatalogState {
             catalog: market::SymbolCatalog {
@@ -5339,6 +5796,63 @@ mod tests {
     }
 
     #[test]
+    fn failed_persistence_never_reports_saved_status() {
+        let english = AppSettings::default();
+        let failed: Result<()> = Err(anyhow::anyhow!("access denied"));
+        assert_eq!(
+            persistence_status(&english, status_saved(english.clone()), &failed),
+            "Could not save settings: access denied"
+        );
+
+        let chinese = AppSettings {
+            language: LanguagePreference::ZhHans,
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            persistence_status(&chinese, "快捷键注册失败".to_string(), &failed),
+            "快捷键注册失败 | 无法保存设置：access denied"
+        );
+    }
+
+    #[test]
+    fn market_compass_integer_parameter_is_localized_saved_and_clamped() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = plugin::PluginCatalog::discover(vec![root]);
+        let widget = test_widget(
+            "plugin-compass-1",
+            "com.cryptohud.market-compass",
+            vec!["BTC", "ETH"],
+        );
+
+        let options = widget_integer_parameter_options(&widget, &catalog, i18n::Locale::ZhHans);
+        assert_eq!(options.labels, vec!["切换时间"]);
+        assert_eq!(options.helps, vec!["币种自动切换的时间间隔。"]);
+        assert_eq!(options.units, vec!["秒"]);
+        assert_eq!(options.values, vec![5]);
+        assert_eq!(options.minimums, vec![1]);
+        assert_eq!(options.maximums, vec![60]);
+
+        let mut store = LayoutStore {
+            selected_widget_id: Some(widget.id.clone()),
+            widgets: vec![widget],
+            ..LayoutStore::default()
+        };
+        assert!(apply_widget_integer_parameter_to_store(
+            &mut store, 0, 0, 90, &catalog
+        ));
+        assert_eq!(
+            settings::widget_integer_parameter(
+                &store.widgets[0],
+                "switch-interval-seconds",
+                5,
+                1,
+                60
+            ),
+            60
+        );
+    }
+
+    #[test]
     fn widget_scale_options_follow_each_instance_size() {
         let catalog = plugin::PluginCatalog::builtins();
         let definitions = widget_definitions_from_catalog(&catalog);
@@ -5603,6 +6117,7 @@ mod tests {
             preview_images: Vec::new(),
             themes: plugin::single_default_theme(),
             data_requirements: Vec::new(),
+            parameters: Vec::new(),
             status: plugin::PluginStatus::Available,
         }])
     }

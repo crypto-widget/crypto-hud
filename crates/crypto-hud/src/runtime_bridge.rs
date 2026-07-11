@@ -30,7 +30,9 @@ use crate::{
         widget_definitions_from_catalog,
     },
     theme, updater,
-    widget_host::{apply_runtime_view_to_widget, WidgetRuntime, WidgetUi},
+    widget_host::{
+        apply_runtime_view_to_widget, logical_size_from_physical, WidgetRuntime, WidgetUi,
+    },
     window_manager::schedule_widget_shell_window_configuration,
 };
 
@@ -119,12 +121,25 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
                             let mut cache = quote_cache.borrow_mut();
                             cache.insert(
                                 snapshot.symbol.clone(),
-                                QuoteState::new(
+                                QuoteState::new_with_chart_status(
                                     snapshot.price,
                                     snapshot.change_percent_24h,
                                     snapshot.chart_closes_24h.clone(),
+                                    snapshot
+                                        .chart_candles_24h
+                                        .iter()
+                                        .map(|candle| widget_runtime::ChartCandle {
+                                            open_time_millis: candle.open_time_millis,
+                                            open: candle.open,
+                                            high: candle.high,
+                                            low: candle.low,
+                                            close: candle.close,
+                                        })
+                                        .collect(),
                                     snapshot.source,
                                     updated_at,
+                                    snapshot.chart_updated_at,
+                                    snapshot.chart_error.clone(),
                                 ),
                             );
                         }
@@ -469,9 +484,9 @@ fn move_widget_window_and_schedule_save(
             instance.layout.y = y;
             instance.layout.always_on_top = always_on_top;
             instance.layout.opacity_percent = opacity_percent;
-            let size = window.size();
-            instance.layout.width = size.width as i32;
-            instance.layout.height = size.height as i32;
+            let size = logical_size_from_physical(window.size(), scale);
+            instance.layout.width = size.width.round().max(1.0) as i32;
+            instance.layout.height = size.height.round().max(1.0) as i32;
             instance.layout.scale_percent = 0;
             let definitions = widget_definitions_from_catalog(plugin_catalog);
             instance.layout.scale_percent = settings::widget_scale_percent_for_instance(
@@ -670,6 +685,7 @@ fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
     ui.set_pin_to_top(instance.layout.always_on_top);
     ui.set_layout_locked(instance.layout.locked);
     ui.set_theme_name(widget_theme_name(instance, plugin_catalog).into());
+    apply_plugin_parameters(ui, instance, plugin_catalog);
     ui.set_red_up_enabled(settings.red_up_enabled);
     ui.set_content_opacity(instance.layout.opacity_percent);
     ui.set_compact_mode(instance.widget_type() == WidgetType::MiniTicker);
@@ -703,6 +719,27 @@ fn widget_scale_for_instance(
         height: layout.height,
     };
     settings::widget_content_scale_percent_for_size(size, base_size) as f32 / 100.0
+}
+
+fn apply_plugin_parameters(
+    ui: &WidgetUi,
+    instance: &WidgetInstance,
+    plugin_catalog: &plugin::PluginCatalog,
+) {
+    let Some(definition) = plugin_catalog.find(&instance.plugin_id) else {
+        return;
+    };
+    for parameter in &definition.parameters {
+        let plugin::PluginParameter::Integer {
+            key,
+            default,
+            minimum,
+            maximum,
+            ..
+        } = parameter;
+        let value = settings::widget_integer_parameter(instance, key, *default, *minimum, *maximum);
+        ui.set_integer_parameter(key, value);
+    }
 }
 
 fn apply_widget_visibility(ui: &WidgetUi, visible: bool) -> Result<()> {
@@ -940,31 +977,6 @@ fn normalized_feed_symbols(symbols: Vec<String>) -> Vec<String> {
         })
 }
 
-fn notify_market_error(
-    throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
-    locale: i18n::Locale,
-    error: &str,
-) {
-    if let Some(body) =
-        market_error_notification_body_for_throttle(throttle, locale, error, Instant::now())
-    {
-        notifications::show(i18n::text(locale).tray_tooltip, &body);
-    }
-}
-
-fn market_error_notification_body_for_throttle(
-    throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
-    locale: i18n::Locale,
-    error: &str,
-    now: Instant,
-) -> Option<String> {
-    let body = i18n::market_error_notification_body(locale, error);
-    throttle
-        .borrow_mut()
-        .should_notify("market-feed", &body, now)
-        .then_some(body)
-}
-
 fn notify_alerts(
     throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
     locale: i18n::Locale,
@@ -1128,43 +1140,6 @@ mod tests {
                 "initial widget apply should set locale-sensitive widget label: {required}"
             );
         }
-    }
-
-    #[test]
-    fn market_error_notification_throttle_uses_localized_body() {
-        let throttle = Rc::new(RefCell::new(notifications::NotificationThrottle::new(
-            Duration::from_secs(60),
-        )));
-        let now = Instant::now();
-        let error = "HTTP 429 api.binance.com";
-
-        let english_body =
-            market_error_notification_body_for_throttle(&throttle, i18n::Locale::En, error, now)
-                .expect("first market error should notify");
-        assert_eq!(
-            english_body,
-            "Market data update failed: HTTP 429 api.binance.com"
-        );
-
-        let zh_body = market_error_notification_body_for_throttle(
-            &throttle,
-            i18n::Locale::ZhHans,
-            error,
-            now + Duration::from_secs(1),
-        )
-        .expect("same market error should notify after language changes");
-        assert_eq!(zh_body, "行情更新失败：HTTP 429 api.binance.com");
-
-        assert!(
-            market_error_notification_body_for_throttle(
-                &throttle,
-                i18n::Locale::ZhHans,
-                error,
-                now + Duration::from_secs(2),
-            )
-            .is_none(),
-            "same localized market error should still be throttled"
-        );
     }
 
     #[test]

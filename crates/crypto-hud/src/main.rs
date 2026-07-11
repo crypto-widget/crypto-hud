@@ -50,8 +50,8 @@ use settings_window::{
 };
 use slint::{ComponentHandle, Timer, TimerMode};
 use state_bridge::{
-    add_plugin_instance, load_layout_store, normalize_store_with_catalog, symbols_from_store,
-    widget_definitions_from_catalog,
+    add_plugin_instance, load_layout_store_with_diagnostics, normalize_store_with_catalog,
+    symbols_from_store, widget_definitions_from_catalog,
 };
 #[cfg(test)]
 use state_bridge::{
@@ -63,7 +63,7 @@ use widget_host::WidgetRuntime;
 use window_manager::{
     apply_tray_hover_display, enter_settings_mode, install_hotkey_poll_timer,
     install_tray_hover_display_timer, install_widget_shell_window_maintenance_timer,
-    schedule_settings_window_raise, schedule_widget_shell_window_configuration,
+    schedule_settings_window_configuration, schedule_widget_shell_window_configuration,
     TrayHoverDisplayState,
 };
 #[cfg(test)]
@@ -194,8 +194,19 @@ fn main() -> Result<()> {
         eprintln!("plugin catalog warning: {error}");
     }
     let plugin_definitions = widget_definitions_from_catalog(&plugin_catalog);
-    let mut layout_store =
-        load_layout_store(&state_path, requested_widget_count, &plugin_definitions);
+    let loaded_layout_store = load_layout_store_with_diagnostics(
+        &state_path,
+        requested_widget_count,
+        &plugin_definitions,
+    );
+    let state_load_warning = loaded_layout_store
+        .warning
+        .as_ref()
+        .map(ToString::to_string);
+    if let Some(warning) = &state_load_warning {
+        eprintln!("layout state recovery warning: {warning}");
+    }
+    let mut layout_store = loaded_layout_store.store;
     seed_each_widget_on_empty_start(
         &mut layout_store,
         launch_options.each_widget,
@@ -215,7 +226,7 @@ fn main() -> Result<()> {
     ) {
         eprintln!("failed to refresh auto-start registration: {error}");
     }
-    let settings_status = Rc::new(RefCell::new(String::new()));
+    let settings_status = Rc::new(RefCell::new(state_load_warning.unwrap_or_default()));
     let shortcut_manager = Rc::new(RefCell::new(shortcuts::ShortcutManager::new()));
     let market_feed_config = Arc::new(Mutex::new(market::MarketFeedConfig {
         symbols: symbols_from_store(&layouts.borrow(), &plugin_catalog),
@@ -225,7 +236,12 @@ fn main() -> Result<()> {
         proxy_url: settings::effective_network_proxy_url(&app_settings),
     }));
     if let Err(error) = shortcut_manager.borrow_mut().apply(app_settings.shortcut) {
-        *settings_status.borrow_mut() = shortcut_registration_status(&app_settings, error);
+        let shortcut_status = shortcut_registration_status(&app_settings, error);
+        let mut status = settings_status.borrow_mut();
+        if !status.is_empty() {
+            status.push_str(" | ");
+        }
+        status.push_str(&shortcut_status);
     }
 
     let quote_cache = Rc::new(RefCell::new(QuoteCache::new()));
@@ -290,7 +306,7 @@ fn main() -> Result<()> {
         settings_window
             .show()
             .context("failed to show settings window on startup")?;
-        schedule_settings_window_raise();
+        schedule_settings_window_configuration();
     }
     let gui_smoke_settings_interaction_timer = install_gui_smoke_settings_interaction_timer(
         settings_window.as_weak(),
@@ -423,6 +439,7 @@ mod tests {
             data_requirements: vec![plugin::PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
+            parameters: Vec::new(),
             status: plugin::PluginStatus::Available,
         }
     }
@@ -605,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_mode_preserves_pinned_widgets_topmost() {
+    fn settings_mode_temporarily_suspends_pinned_widgets_topmost() {
         let instance = WidgetInstance {
             id: "quote-board-1".to_string(),
             plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
@@ -621,7 +638,7 @@ mod tests {
         };
 
         assert!(widget_pin_to_top(&instance, false));
-        assert!(widget_pin_to_top(&instance, true));
+        assert!(!widget_pin_to_top(&instance, true));
     }
 
     #[test]

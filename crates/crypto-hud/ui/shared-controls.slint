@@ -1,5 +1,7 @@
 export component SettingSwitch inherits Rectangle {
     in-out property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> accessible-label-text;
     in property <color> accent-color;
     in property <color> track-color;
     in property <color> knob-color;
@@ -9,6 +11,24 @@ export component SettingSwitch inherits Rectangle {
     height: 20px;
     border-radius: 10px;
     background: root.checked ? root.accent-color : root.track-color;
+    opacity: root.enabled ? 1 : 0.55;
+    border-width: switch_focus.has-focus ? 2px : 0px;
+    border-color: root.accent-color;
+    forward-focus: switch_focus;
+
+    accessible-role: switch;
+    accessible-label: root.accessible-label-text;
+    accessible-enabled: root.enabled;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.toggle(); }
+
+    function toggle() {
+        if root.enabled {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
 
     Rectangle {
         x: root.checked ? 19px : 2px;
@@ -22,10 +42,24 @@ export component SettingSwitch inherits Rectangle {
     TouchArea {
         width: parent.width;
         height: parent.height;
-        mouse-cursor: pointer;
-        clicked => {
-            root.checked = !root.checked;
-            root.toggled();
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.toggle(); }
+    }
+
+    switch_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: root.enabled;
+
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                root.toggle();
+                return accept;
+            }
+            return reject;
         }
     }
 }
@@ -46,7 +80,14 @@ export component SettingsNavItem inherits Rectangle {
     width: 165px;
     height: 40px;
     border-radius: 4px;
-    background: root.selected ? root.selected-background : nav_touch.has-hover ? root.hover-background : transparent;
+    background: root.selected ? root.selected-background : nav_touch.has-hover || nav_focus.has-focus ? root.hover-background : transparent;
+    forward-focus: nav_focus;
+
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
 
     Rectangle {
         x: root.rtl-layout ? parent.width - 4px : 0px;
@@ -144,6 +185,21 @@ export component SettingsNavItem inherits Rectangle {
         height: parent.height;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+
+    nav_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
     }
 }
 

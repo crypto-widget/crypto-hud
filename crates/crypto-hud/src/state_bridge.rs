@@ -8,7 +8,10 @@ use settings::{
     WidgetSizePolicy,
 };
 
-use crate::{feature_flags, plugin, window_manager::desktop_size};
+use crate::{
+    feature_flags, plugin,
+    window_manager::{desktop_size, desktop_work_areas},
+};
 
 const WIDGET_REORDER_ROW_HEIGHT: f32 = 72.0;
 
@@ -80,7 +83,15 @@ pub(crate) fn layout_for_instance(
     plugin_catalog: Option<&plugin::PluginCatalog>,
 ) -> WidgetLayout {
     let definitions = widget_definitions_from_optional_catalog(plugin_catalog);
-    settings::layout_for_instance(instance, index, settings, &definitions, desktop_size())
+    let desktop_size = desktop_size();
+    settings::layout_for_instance_in_work_areas(
+        instance,
+        index,
+        settings,
+        &definitions,
+        desktop_size,
+        &desktop_work_areas(),
+    )
 }
 
 #[cfg(test)]
@@ -90,7 +101,11 @@ pub(crate) fn layout_has_visible_area(layout: &WidgetLayout, widget_type: Widget
 
 #[cfg(test)]
 pub(crate) fn layout_has_visible_area_for_size(layout: &WidgetLayout, size: (i32, i32)) -> bool {
-    settings::layout_has_visible_area_for_size(layout, WidgetSize::from(size), desktop_size())
+    settings::layout_has_visible_area_for_size_in_work_areas(
+        layout,
+        WidgetSize::from(size),
+        &desktop_work_areas(),
+    )
 }
 
 #[cfg(test)]
@@ -116,16 +131,18 @@ pub(crate) fn default_layout_for_size(
     settings::default_layout_for_size(slot, WidgetSize::from(size), settings, desktop_size())
 }
 
-pub(crate) fn load_layout_store(
+pub(crate) fn load_layout_store_with_diagnostics(
     path: &std::path::Path,
     requested_widget_count: usize,
     plugin_definitions: &[WidgetDefinition],
-) -> LayoutStore {
-    settings::load_layout_store(
+) -> settings::LoadedLayoutStore {
+    let desktop_size = desktop_size();
+    settings::load_layout_store_with_diagnostics_and_work_areas(
         path,
         requested_widget_count,
         plugin_definitions,
-        desktop_size(),
+        desktop_size,
+        &desktop_work_areas(),
     )
 }
 
@@ -145,11 +162,13 @@ pub(crate) fn normalize_store_with_catalog(
     plugin_catalog: Option<&plugin::PluginCatalog>,
 ) {
     let definitions = widget_definitions_from_optional_catalog(plugin_catalog);
-    settings::normalize_store_with_catalog(
+    let desktop_size = desktop_size();
+    settings::normalize_store_with_catalog_and_work_areas(
         store,
         requested_widget_count,
         &definitions,
-        desktop_size(),
+        desktop_size,
+        &desktop_work_areas(),
     );
 }
 
@@ -188,7 +207,13 @@ pub(crate) fn move_widget_in_store(
 }
 
 pub(crate) fn remove_widget_from_store_by_id(store: &mut LayoutStore, widget_id: &str) -> bool {
-    settings::remove_widget_from_store_by_id(store, widget_id, desktop_size())
+    let desktop_size = desktop_size();
+    settings::remove_widget_from_store_by_id_in_work_areas(
+        store,
+        widget_id,
+        desktop_size,
+        &desktop_work_areas(),
+    )
 }
 
 pub(crate) fn widget_reorder_steps(delta_y: f32) -> i32 {

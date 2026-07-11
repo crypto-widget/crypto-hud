@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Crypto HUD is currently in the `0.1.x` alpha line. Security fixes are expected
+Crypto HUD is currently in the `0.9.x` alpha line. Security fixes are expected
 to target the latest alpha release and the main development branch.
 
 ## Reporting a Vulnerability

@@ -6,7 +6,7 @@ use std::{
 };
 
 use crypto_hud_shell_state as settings;
-use settings::{AppSettings, LayoutStore, WidgetInstance};
+use settings::{AppSettings, DesktopWorkArea, LayoutStore, WidgetInstance};
 use slint::{PhysicalPosition, Timer, TimerMode, WindowPosition};
 
 use crate::{
@@ -38,6 +38,8 @@ pub(crate) fn show_widgets(
     widgets_hidden: &Rc<RefCell<bool>>,
     settings_mode_active: &Rc<RefCell<bool>>,
 ) {
+    let desktop_size = desktop_size();
+    let work_areas = desktop_work_areas();
     let store = layouts.borrow();
     for (index, runtime) in widgets.borrow().iter().enumerate() {
         if let Some(instance) = store
@@ -51,12 +53,13 @@ pub(crate) fn show_widgets(
                 }
                 continue;
             }
-            let layout = settings::layout_for_instance(
+            let layout = settings::layout_for_instance_in_work_areas(
                 instance,
                 index,
                 store.settings.clone().normalized(),
                 &[],
-                desktop_size(),
+                desktop_size,
+                &work_areas,
             );
             runtime
                 .ui
@@ -135,8 +138,8 @@ pub(crate) fn apply_widget_pinning_for_settings_mode(
     }
 }
 
-pub(crate) fn widget_pin_to_top(instance: &WidgetInstance, _settings_mode_active: bool) -> bool {
-    instance.layout.always_on_top
+pub(crate) fn widget_pin_to_top(instance: &WidgetInstance, settings_mode_active: bool) -> bool {
+    !settings_mode_active && instance.layout.always_on_top
 }
 
 pub(crate) fn install_tray_hover_display_timer(
@@ -321,24 +324,25 @@ pub(crate) fn schedule_widget_shell_window_configuration() {
     );
 }
 
-pub(crate) fn schedule_settings_window_raise() {
-    raise_settings_window();
-    Timer::single_shot(Duration::from_millis(50), raise_settings_window);
-    Timer::single_shot(Duration::from_millis(250), raise_settings_window);
+pub(crate) fn schedule_settings_window_configuration() {
+    configure_settings_window();
+    bring_settings_window_to_front();
+    Timer::single_shot(Duration::from_millis(50), configure_settings_window);
+    Timer::single_shot(Duration::from_millis(250), configure_settings_window);
 }
 
 fn maintain_shell_window_configuration() {
     configure_windows_for_widget_shell();
-    raise_settings_window();
+    configure_settings_window();
 }
 
 #[cfg(windows)]
-fn raise_settings_window() {
+fn configure_settings_window() {
     use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-        SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+        SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_NOTOPMOST, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     };
 
     unsafe extern "system" fn enum_window(hwnd: HWND, lparam: LPARAM) -> i32 {
@@ -357,17 +361,7 @@ fn raise_settings_window() {
                 return 0;
             }
             unsafe {
-                let style_changed = ensure_taskbar_window_style(hwnd);
-                let current_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-                let should_raise =
-                    !is_topmost_style(current_style) || visible_topmost_window_above(hwnd, false);
-                if should_raise {
-                    let mut flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
-                    if style_changed {
-                        flags |= SWP_FRAMECHANGED;
-                    }
-                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
-                }
+                ensure_normal_settings_window_style(hwnd);
             }
             return 0;
         }
@@ -375,25 +369,24 @@ fn raise_settings_window() {
         1
     }
 
-    unsafe fn ensure_taskbar_window_style(hwnd: HWND) -> bool {
+    unsafe fn ensure_normal_settings_window_style(hwnd: HWND) {
         let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 };
         let taskbar_style = settings_taskbar_ex_style(style);
         if style == taskbar_style {
-            return false;
+            return;
         }
         unsafe {
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, taskbar_style as isize);
             SetWindowPos(
                 hwnd,
-                std::ptr::null_mut(),
+                HWND_NOTOPMOST,
                 0,
                 0,
                 0,
                 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
             );
         }
-        true
     }
 
     unsafe {
@@ -402,10 +395,66 @@ fn raise_settings_window() {
 }
 
 #[cfg(not(windows))]
-fn raise_settings_window() {}
+fn configure_settings_window() {}
+
+#[cfg(windows)]
+fn bring_settings_window_to_front() {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetWindowPos, HWND_TOP,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+    };
+
+    unsafe extern "system" fn enum_window(hwnd: HWND, lparam: LPARAM) -> i32 {
+        let target_pid = lparam as u32;
+        let mut pid = 0_u32;
+        unsafe {
+            GetWindowThreadProcessId(hwnd, &mut pid);
+        }
+        if pid != target_pid {
+            return 1;
+        }
+
+        let title = read_window_title(hwnd);
+        if is_settings_window_title(&title) {
+            if unsafe { IsWindowVisible(hwnd) } != 0 && unsafe { IsIconic(hwnd) } == 0 {
+                unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        HWND_TOP,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                    );
+                }
+            }
+            return 0;
+        }
+
+        1
+    }
+
+    unsafe {
+        EnumWindows(Some(enum_window), std::process::id() as LPARAM);
+    }
+}
+
+#[cfg(not(windows))]
+fn bring_settings_window_to_front() {}
 
 pub(crate) fn desktop_size() -> (i32, i32) {
     platform_desktop_size()
+}
+
+pub(crate) fn desktop_work_areas() -> Vec<DesktopWorkArea> {
+    let work_areas = platform_desktop_work_areas();
+    if work_areas.is_empty() {
+        vec![DesktopWorkArea::from_desktop_size(desktop_size())]
+    } else {
+        work_areas
+    }
 }
 
 #[cfg(windows)]
@@ -421,9 +470,62 @@ fn platform_desktop_size() -> (i32, i32) {
     }
 }
 
+#[cfg(windows)]
+fn platform_desktop_work_areas() -> Vec<DesktopWorkArea> {
+    use windows_sys::Win32::Foundation::{LPARAM, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+    };
+
+    unsafe extern "system" fn enum_monitor(
+        monitor: HMONITOR,
+        _device_context: HDC,
+        _monitor_rect: *mut RECT,
+        data: LPARAM,
+    ) -> i32 {
+        let work_areas = unsafe { &mut *(data as *mut Vec<DesktopWorkArea>) };
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..MONITORINFO::default()
+        };
+        if unsafe { GetMonitorInfoW(monitor, &mut info) } != 0 {
+            let rect = info.rcWork;
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            if width > 0 && height > 0 {
+                work_areas.push(DesktopWorkArea {
+                    x: rect.left,
+                    y: rect.top,
+                    width,
+                    height,
+                });
+            }
+        }
+        1
+    }
+
+    let mut work_areas: Vec<DesktopWorkArea> = Vec::new();
+    unsafe {
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            Some(enum_monitor),
+            (&mut work_areas as *mut Vec<DesktopWorkArea>) as LPARAM,
+        );
+    }
+    work_areas.sort_by_key(|area| (area.x, area.y, area.width, area.height));
+    work_areas.dedup();
+    work_areas
+}
+
 #[cfg(not(windows))]
 fn platform_desktop_size() -> (i32, i32) {
     (DEFAULT_DESKTOP_WIDTH, DEFAULT_DESKTOP_HEIGHT)
+}
+
+#[cfg(not(windows))]
+fn platform_desktop_work_areas() -> Vec<DesktopWorkArea> {
+    Vec::new()
 }
 
 #[cfg(windows)]
@@ -431,7 +533,7 @@ fn configure_windows_for_widget_shell() {
     use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, SetWindowLongPtrW,
-        SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+        SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_NOTOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
         SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE,
     };
 
@@ -467,22 +569,16 @@ fn configure_windows_for_widget_shell() {
                 if style_changed {
                     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, widget_style as isize);
                 }
-                let topmost_window_above =
-                    !settings_mode_active && visible_topmost_window_above(hwnd, true);
-                let should_change_z_order = widget_shell_should_change_z_order(
-                    widget_style,
-                    settings_mode_active,
-                    topmost_window_above,
-                );
-                if style_changed || should_change_z_order {
+                let should_remove_topmost = settings_mode_active && is_topmost_style(style);
+                if style_changed || should_remove_topmost {
                     let mut flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
                     if style_changed {
                         flags |= SWP_FRAMECHANGED;
                     }
-                    if !should_change_z_order {
+                    if !should_remove_topmost {
                         flags |= SWP_NOZORDER;
                     }
-                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+                    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
                 }
             }
         }
@@ -519,21 +615,26 @@ fn is_settings_window_title(title: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn widget_shell_ex_style(style: u32, _settings_mode_active: bool) -> u32 {
+fn widget_shell_ex_style(style: u32, settings_mode_active: bool) -> u32 {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     };
 
-    (style & !WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+    let widget_style = (style & !WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    if settings_mode_active {
+        widget_style & !WS_EX_TOPMOST
+    } else {
+        widget_style
+    }
 }
 
 #[cfg(windows)]
 fn settings_taskbar_ex_style(style: u32) -> u32 {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     };
 
-    (style & !(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) | WS_EX_APPWINDOW
+    (style & !(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST)) | WS_EX_APPWINDOW
 }
 
 #[cfg(windows)]
@@ -541,56 +642,6 @@ fn is_topmost_style(style: u32) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST;
 
     style & WS_EX_TOPMOST != 0
-}
-
-#[cfg(windows)]
-fn widget_shell_should_change_z_order(
-    widget_style: u32,
-    settings_mode_active: bool,
-    visible_topmost_above: bool,
-) -> bool {
-    if settings_mode_active {
-        return false;
-    }
-
-    !is_topmost_style(widget_style) || visible_topmost_above
-}
-
-#[cfg(windows)]
-fn visible_topmost_window_above(
-    hwnd: windows_sys::Win32::Foundation::HWND,
-    ignore_own_shell: bool,
-) -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetTopWindow, GetWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible,
-        GWL_EXSTYLE, GW_HWNDNEXT,
-    };
-
-    let mut current = unsafe { GetTopWindow(std::ptr::null_mut()) };
-    while !current.is_null() && current != hwnd {
-        let title = read_window_title(current);
-        let mut pid = 0_u32;
-        unsafe {
-            GetWindowThreadProcessId(current, &mut pid);
-        }
-        if !title.trim().is_empty()
-            && unsafe { IsWindowVisible(current) } != 0
-            && (!ignore_own_shell || pid != std::process::id() || !is_shell_window_title(&title))
-        {
-            let style = unsafe { GetWindowLongPtrW(current, GWL_EXSTYLE) as u32 };
-            if is_topmost_style(style) {
-                return true;
-            }
-        }
-        current = unsafe { GetWindow(current, GW_HWNDNEXT) };
-    }
-
-    false
-}
-
-#[cfg(windows)]
-fn is_shell_window_title(title: &str) -> bool {
-    is_settings_window_title(title) || is_widget_shell_window_title(title)
 }
 
 #[cfg(windows)]
@@ -715,49 +766,27 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn widget_shell_style_preserves_topmost_during_settings_mode() {
+    fn widget_shell_style_temporarily_drops_topmost_during_settings_mode() {
         use windows_sys::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_TOPMOST};
 
         let normal_style = widget_shell_ex_style(WS_EX_APPWINDOW | WS_EX_TOPMOST, false);
         assert_ne!(normal_style & WS_EX_TOPMOST, 0);
 
         let settings_mode_style = widget_shell_ex_style(WS_EX_APPWINDOW | WS_EX_TOPMOST, true);
-        assert_ne!(settings_mode_style & WS_EX_TOPMOST, 0);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn widget_shell_z_order_is_not_changed_during_settings_mode() {
-        use windows_sys::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST;
-
-        assert!(!widget_shell_should_change_z_order(
-            WS_EX_TOPMOST,
-            true,
-            true
-        ));
-        assert!(widget_shell_should_change_z_order(0, false, false));
-        assert!(widget_shell_should_change_z_order(
-            WS_EX_TOPMOST,
-            false,
-            true
-        ));
-        assert!(!widget_shell_should_change_z_order(
-            WS_EX_TOPMOST,
-            false,
-            false
-        ));
+        assert_eq!(settings_mode_style & WS_EX_TOPMOST, 0);
     }
 
     #[cfg(windows)]
     #[test]
     fn settings_window_style_uses_taskbar_app_window() {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+            WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
         };
 
-        let style = settings_taskbar_ex_style(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+        let style = settings_taskbar_ex_style(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST);
         assert_ne!(style & WS_EX_APPWINDOW, 0);
         assert_eq!(style & WS_EX_TOOLWINDOW, 0);
         assert_eq!(style & WS_EX_NOACTIVATE, 0);
+        assert_eq!(style & WS_EX_TOPMOST, 0);
     }
 }

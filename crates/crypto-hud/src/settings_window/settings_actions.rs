@@ -111,6 +111,35 @@ pub(super) fn apply_widget_scale_to_store(
     changed
 }
 
+pub(super) fn apply_widget_integer_parameter_to_store(
+    store: &mut LayoutStore,
+    selected_index: i32,
+    parameter_index: i32,
+    value: i32,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> bool {
+    select_widget_by_index(store, selected_index);
+    let index = selected_index.max(0) as usize;
+    let Some(instance) = store.widgets.get_mut(index) else {
+        return false;
+    };
+    let Some(parameter) = plugin_catalog
+        .find(&instance.plugin_id)
+        .and_then(|definition| definition.parameters.get(parameter_index.max(0) as usize))
+    else {
+        return false;
+    };
+    let plugin::PluginParameter::Integer {
+        key,
+        minimum,
+        maximum,
+        ..
+    } = parameter;
+    settings::set_widget_integer_parameter(instance, key, value, *minimum, *maximum);
+    normalize_store_with_catalog(store, 0, Some(plugin_catalog));
+    true
+}
+
 pub(super) fn delete_widget_from_store_at_index(
     store: &mut LayoutStore,
     selected_index: i32,

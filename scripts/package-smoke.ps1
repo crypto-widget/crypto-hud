@@ -56,7 +56,14 @@ if (Test-Path $InstallDir) {
 
 Push-Location $RepoRoot
 try {
-    $packageArgs = @("-ExecutionPolicy", "Bypass", "-File", ".\scripts\package-windows.ps1", "-Version", $Version)
+    $packageArgs = @(
+        "-ExecutionPolicy", "Bypass",
+        "-File", ".\scripts\package-windows.ps1",
+        "-Version", $Version,
+        "-AllowDirty",
+        "-AllowDevelopmentVersion",
+        "-AllowUnsignedPackage"
+    )
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"
     }
@@ -89,6 +96,9 @@ try {
     }
     if (-not (@($manifest.files).path -contains "install-update-package.ps1")) {
         throw "Package manifest is missing install-update-package.ps1"
+    }
+    if (-not (@($manifest.files).path -contains "LICENSE")) {
+        throw "Package manifest is missing LICENSE"
     }
     if (-not $manifest.codeSigning) {
         throw "Package manifest is missing codeSigning metadata"
@@ -130,8 +140,11 @@ try {
     if (-not (Test-Path (Join-Path $InstallDir "install-update-package.ps1"))) {
         throw "Installed update handoff script was not copied"
     }
+    if (-not (Test-Path (Join-Path $InstallDir "LICENSE"))) {
+        throw "Installed license was not copied"
+    }
 
-    powershell -ExecutionPolicy Bypass -File (Join-Path $PackageRoot "uninstall.ps1") -InstallDir $InstallDir -SkipShellIntegration
+    powershell -ExecutionPolicy Bypass -File (Join-Path $InstallDir "uninstall.ps1") -InstallDir $InstallDir -SkipShellIntegration
     if ($LASTEXITCODE -ne 0) {
         throw "Uninstall smoke failed with code $LASTEXITCODE"
     }

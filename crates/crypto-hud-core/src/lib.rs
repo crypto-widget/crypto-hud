@@ -6,6 +6,7 @@ pub const DEFAULT_MARKET_SYMBOLS: &[&str] = &[
     "binance:spot:ETH/USDT",
     "binance:spot:SOL/USDT",
 ];
+pub const MAX_MARKET_SYMBOLS: usize = 20;
 pub const MIN_REFRESH_INTERVAL_SECONDS: i32 = 5;
 pub const MAX_REFRESH_INTERVAL_SECONDS: i32 = 60;
 pub const DEFAULT_REFRESH_INTERVAL_SECONDS: i32 = 5;
@@ -170,11 +171,7 @@ pub fn clamp_refresh_interval(value: i32) -> i32 {
 }
 
 pub fn normalize_market_symbols(symbols: Vec<String>) -> Vec<String> {
-    normalize_symbols_with_limit(
-        symbols,
-        DEFAULT_MARKET_SYMBOLS.len(),
-        default_market_symbols(),
-    )
+    normalize_symbols_with_limit(symbols, MAX_MARKET_SYMBOLS, default_market_symbols())
 }
 
 pub fn normalize_symbols_with_limit(
@@ -425,12 +422,21 @@ fn default_quote_for_source(source: MarketDataSource) -> &'static str {
 }
 
 pub fn format_price(price: f64) -> String {
-    if price >= 1_000.0 {
+    let magnitude = price.abs();
+    if magnitude >= 1_000.0 {
         format!("{price:.0}")
-    } else if price >= 10.0 {
+    } else if magnitude >= 10.0 {
         format!("{price:.2}")
-    } else {
+    } else if magnitude >= 0.0001 || magnitude == 0.0 || !magnitude.is_finite() {
         format!("{price:.4}")
+    } else {
+        let decimal_places = ((-magnitude.log10()).ceil() as usize + 3).min(12);
+        let formatted = format!("{price:.decimal_places$}");
+        if formatted.bytes().any(|byte| matches!(byte, b'1'..=b'9')) {
+            formatted
+        } else {
+            format!("{price:.3e}")
+        }
     }
 }
 
@@ -560,7 +566,29 @@ mod tests {
                 "binance:spot:BTC/USDT",
                 "binance:spot:ETH/USDT",
                 "binance:spot:SOL/USDT",
+                "binance:spot:BNB/USDT",
+                "binance:spot:XRP/USDT",
+                "binance:spot:DOGE/USDT",
             ]
+        );
+    }
+
+    #[test]
+    fn normalizes_market_symbols_up_to_the_explicit_limit() {
+        let symbols = (0..MAX_MARKET_SYMBOLS + 5)
+            .map(|index| format!("ASSET{index}/USDT"))
+            .collect();
+
+        let normalized = normalize_market_symbols(symbols);
+
+        assert_eq!(normalized.len(), MAX_MARKET_SYMBOLS);
+        assert_eq!(
+            normalized.first().map(String::as_str),
+            Some("binance:spot:ASSET0/USDT")
+        );
+        assert_eq!(
+            normalized.last().map(String::as_str),
+            Some("binance:spot:ASSET19/USDT")
         );
     }
 
@@ -595,6 +623,10 @@ mod tests {
         assert_eq!(format_price(3420.5), "3420");
         assert_eq!(format_price(42.125), "42.12");
         assert_eq!(format_price(0.123456), "0.1235");
+        assert_eq!(format_price(0.0000123456), "0.00001235");
+        assert_eq!(format_price(0.00000000123456), "0.000000001235");
+        assert_eq!(format_price(0.000000000000123456), "1.235e-13");
+        assert_eq!(format_price(-0.0000123456), "-0.00001235");
     }
 
     #[test]
