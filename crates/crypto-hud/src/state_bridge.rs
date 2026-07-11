@@ -116,12 +116,12 @@ pub(crate) fn default_layout_for_size(
     settings::default_layout_for_size(slot, WidgetSize::from(size), settings, desktop_size())
 }
 
-pub(crate) fn load_layout_store(
+pub(crate) fn load_layout_store_with_diagnostics(
     path: &std::path::Path,
     requested_widget_count: usize,
     plugin_definitions: &[WidgetDefinition],
-) -> LayoutStore {
-    settings::load_layout_store(
+) -> settings::LoadedLayoutStore {
+    settings::load_layout_store_with_diagnostics(
         path,
         requested_widget_count,
         plugin_definitions,

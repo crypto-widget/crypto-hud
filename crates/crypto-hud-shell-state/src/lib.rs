@@ -4,10 +4,12 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::{OsStr, OsString},
+    fmt,
     fs::{self, File},
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
@@ -19,7 +21,7 @@ pub use crypto_hud_core::{
     format_market_pair_display, format_market_pair_source, format_market_pair_symbol,
     market_pair_source, normalize_market_pair_key, normalize_market_symbols,
     normalize_symbol_token, AlertCondition, AlertRule, MarketDataSource, MarketPair,
-    MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS,
+    MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS, MAX_MARKET_SYMBOLS,
     MAX_REFRESH_INTERVAL_SECONDS, MIN_REFRESH_INTERVAL_SECONDS,
 };
 
@@ -62,7 +64,7 @@ pub const DEFAULT_WIDGET_SCALE_PERCENT: i32 = 100;
 pub const PARKED_WIDGET_X: i32 = -32_000;
 pub const PARKED_WIDGET_Y: i32 = -32_000;
 pub const MIN_SYMBOLS_PER_WIDGET: usize = 1;
-pub const MAX_SYMBOLS_PER_WIDGET: usize = 20;
+pub const MAX_SYMBOLS_PER_WIDGET: usize = MAX_MARKET_SYMBOLS;
 pub const MINI_TICKER_SYMBOL_LIMIT: usize = 1;
 pub const BUILTIN_QUOTE_BOARD_PLUGIN_ID: &str = "builtin.quote-board";
 pub const BUILTIN_MINI_TICKER_PLUGIN_ID: &str = "builtin.mini-ticker";
@@ -370,6 +372,110 @@ pub struct LegacyLayoutStore {
 pub enum PersistedLayoutStore {
     Current(LayoutStore),
     Legacy(LegacyLayoutStore),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutStoreReadErrorKind {
+    Read,
+    Parse,
+}
+
+#[derive(Debug)]
+pub enum LayoutStoreReadError {
+    Read {
+        path: PathBuf,
+        source: io::Error,
+    },
+    Parse {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+}
+
+impl LayoutStoreReadError {
+    pub const fn kind(&self) -> LayoutStoreReadErrorKind {
+        match self {
+            Self::Read { .. } => LayoutStoreReadErrorKind::Read,
+            Self::Parse { .. } => LayoutStoreReadErrorKind::Parse,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Read { path, .. } | Self::Parse { path, .. } => path,
+        }
+    }
+}
+
+impl fmt::Display for LayoutStoreReadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { path, source } => {
+                write!(formatter, "failed to read {}: {source}", path.display())
+            }
+            Self::Parse { path, source } => {
+                write!(formatter, "failed to parse {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for LayoutStoreReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } => Some(source),
+            Self::Parse { source, .. } => Some(source),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LayoutStoreLoadSource {
+    Current,
+    Legacy(PathBuf),
+    Missing,
+    DefaultsAfterError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayoutStoreLoadWarning {
+    pub kind: LayoutStoreReadErrorKind,
+    pub path: PathBuf,
+    pub error: String,
+    pub preserved_path: Option<PathBuf>,
+    pub preservation_error: Option<String>,
+}
+
+impl fmt::Display for LayoutStoreLoadWarning {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "saved state could not be loaded from {} ({}); defaults were loaded",
+            self.path.display(),
+            self.error
+        )?;
+        if let Some(path) = &self.preserved_path {
+            write!(
+                formatter,
+                "; the unreadable file was preserved at {}",
+                path.display()
+            )
+        } else if let Some(error) = &self.preservation_error {
+            write!(
+                formatter,
+                "; the original file remains in place, but creating a backup failed: {error}"
+            )
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct LoadedLayoutStore {
+    pub store: LayoutStore,
+    pub source: LayoutStoreLoadSource,
+    pub warning: Option<LayoutStoreLoadWarning>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1060,10 +1166,35 @@ fn replace_file(source: &Path, destination: &Path) -> Result<()> {
         .with_context(|| format!("failed to replace {}", destination.display()))
 }
 
+pub fn try_load_persisted_layout_store(
+    path: &Path,
+) -> std::result::Result<Option<PersistedLayoutStore>, LayoutStoreReadError> {
+    let contents = match fs::read(path) {
+        Ok(contents) => contents,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(LayoutStoreReadError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    serde_json::from_slice::<PersistedLayoutStore>(&contents)
+        .map(Some)
+        .map_err(|source| LayoutStoreReadError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
 pub fn load_persisted_layout_store(path: &Path) -> Option<PersistedLayoutStore> {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|contents| serde_json::from_str::<PersistedLayoutStore>(&contents).ok())
+    match try_load_persisted_layout_store(path) {
+        Ok(persisted) => persisted,
+        Err(error) => {
+            eprintln!("{error}");
+            None
+        }
+    }
 }
 
 pub fn state_path() -> Result<PathBuf> {
@@ -1096,36 +1227,154 @@ pub fn load_layout_store(
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
 ) -> LayoutStore {
-    let mut migrated_from_legacy_state = false;
-    let persisted = load_persisted_layout_store(path).or_else(|| {
-        for legacy_path in legacy_layout_store_paths(path) {
-            if legacy_path.as_path() == path {
-                continue;
-            }
-            if let Some(persisted) = load_persisted_layout_store(&legacy_path) {
-                migrated_from_legacy_state = true;
-                return Some(persisted);
-            }
-        }
-        None
-    });
+    let loaded =
+        load_layout_store_with_diagnostics(path, requested_widget_count, catalog, desktop_size);
+    if let Some(warning) = &loaded.warning {
+        eprintln!("layout state recovery warning: {warning}");
+    }
+    loaded.store
+}
 
-    let mut store = persisted
-        .map(|persisted| match persisted {
-            PersistedLayoutStore::Current(store) => store,
-            PersistedLayoutStore::Legacy(store) => migrate_legacy_store(store, desktop_size),
-        })
-        .unwrap_or_default();
-    normalize_store_with_catalog(&mut store, requested_widget_count, catalog, desktop_size);
-    if migrated_from_legacy_state {
-        if let Err(error) = save_layout_store(path, &store) {
-            eprintln!(
-                "failed to save migrated layout state to {}: {error:#}",
-                path.display()
+pub fn load_layout_store_with_diagnostics(
+    path: &Path,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+) -> LoadedLayoutStore {
+    match try_load_persisted_layout_store(path) {
+        Ok(Some(persisted)) => {
+            return finish_loaded_layout_store(
+                persisted,
+                LayoutStoreLoadSource::Current,
+                requested_widget_count,
+                catalog,
+                desktop_size,
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return default_layout_store_after_error(
+                error,
+                requested_widget_count,
+                catalog,
+                desktop_size,
             );
         }
     }
-    store
+
+    for legacy_path in legacy_layout_store_paths(path) {
+        if legacy_path.as_path() == path {
+            continue;
+        }
+        match try_load_persisted_layout_store(&legacy_path) {
+            Ok(Some(persisted)) => {
+                let loaded = finish_loaded_layout_store(
+                    persisted,
+                    LayoutStoreLoadSource::Legacy(legacy_path),
+                    requested_widget_count,
+                    catalog,
+                    desktop_size,
+                );
+                if let Err(error) = save_layout_store(path, &loaded.store) {
+                    eprintln!(
+                        "failed to save migrated layout state to {}: {error:#}",
+                        path.display()
+                    );
+                }
+                return loaded;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return default_layout_store_after_error(
+                    error,
+                    requested_widget_count,
+                    catalog,
+                    desktop_size,
+                );
+            }
+        }
+    }
+
+    let mut store = LayoutStore::default();
+    normalize_store_with_catalog(&mut store, requested_widget_count, catalog, desktop_size);
+    LoadedLayoutStore {
+        store,
+        source: LayoutStoreLoadSource::Missing,
+        warning: None,
+    }
+}
+
+fn finish_loaded_layout_store(
+    persisted: PersistedLayoutStore,
+    source: LayoutStoreLoadSource,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+) -> LoadedLayoutStore {
+    let mut store = match persisted {
+        PersistedLayoutStore::Current(store) => store,
+        PersistedLayoutStore::Legacy(store) => migrate_legacy_store(store, desktop_size),
+    };
+    normalize_store_with_catalog(&mut store, requested_widget_count, catalog, desktop_size);
+    LoadedLayoutStore {
+        store,
+        source,
+        warning: None,
+    }
+}
+
+fn default_layout_store_after_error(
+    error: LayoutStoreReadError,
+    requested_widget_count: usize,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+) -> LoadedLayoutStore {
+    let warning = layout_store_load_warning(&error);
+    let mut store = LayoutStore::default();
+    normalize_store_with_catalog(&mut store, requested_widget_count, catalog, desktop_size);
+    LoadedLayoutStore {
+        store,
+        source: LayoutStoreLoadSource::DefaultsAfterError,
+        warning: Some(warning),
+    }
+}
+
+fn layout_store_load_warning(error: &LayoutStoreReadError) -> LayoutStoreLoadWarning {
+    let path = error.path().to_path_buf();
+    let preservation = preserve_unreadable_layout_store(&path);
+    LayoutStoreLoadWarning {
+        kind: error.kind(),
+        path,
+        error: error.to_string(),
+        preserved_path: preservation.as_ref().ok().cloned(),
+        preservation_error: preservation.err().map(|error| format!("{error:#}")),
+    }
+}
+
+fn preserve_unreadable_layout_store(path: &Path) -> Result<PathBuf> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .unwrap_or_else(|| OsStr::new("layout-store"));
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let counter = SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut backup_name = OsString::from(file_name);
+    backup_name.push(format!(
+        ".corrupt-{timestamp}-{}-{counter}",
+        std::process::id()
+    ));
+    let backup_path = parent.join(backup_name);
+    fs::copy(path, &backup_path).with_context(|| {
+        format!(
+            "failed to preserve unreadable state {} as {}",
+            path.display(),
+            backup_path.display()
+        )
+    })?;
+    Ok(backup_path)
 }
 
 fn legacy_layout_store_paths(path: &Path) -> Vec<PathBuf> {
@@ -1222,7 +1471,15 @@ pub fn normalize_store_with_catalog(
             .enumerate()
             .any(|(index, instance)| is_legacy_default_layout(&instance.layout, index));
 
-    let mut seen_ids = std::collections::HashSet::new();
+    let mut reserved_ids = store
+        .widgets
+        .iter()
+        .map(|instance| instance.id.trim())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect::<HashSet<_>>();
+    let mut seen_ids = HashSet::new();
+    let mut next_widget_number = store.next_widget_number;
     let mut max_suffix = 0;
     for (index, instance) in store.widgets.iter_mut().enumerate() {
         if let Some(legacy_widget_type) = instance.legacy_widget_type.take() {
@@ -1236,9 +1493,16 @@ pub fn normalize_store_with_catalog(
         }
 
         if instance.id.trim().is_empty() || seen_ids.contains(&instance.id) {
-            let number = store.next_widget_number;
-            store.next_widget_number += 1;
-            instance.id = format!("{}-{number}", instance.widget_type().id_prefix());
+            loop {
+                let number = next_widget_number;
+                next_widget_number += 1;
+                let candidate = format!("{}-{number}", instance.widget_type().id_prefix());
+                if !reserved_ids.contains(&candidate) {
+                    reserved_ids.insert(candidate.clone());
+                    instance.id = candidate;
+                    break;
+                }
+            }
         }
         seen_ids.insert(instance.id.clone());
         max_suffix = max_suffix.max(widget_id_suffix(&instance.id).unwrap_or(0));
@@ -1291,9 +1555,7 @@ pub fn normalize_store_with_catalog(
         instance.layout.opacity_percent = clamp_opacity(instance.layout.opacity_percent);
     }
 
-    if store.next_widget_number <= max_suffix {
-        store.next_widget_number = max_suffix + 1;
-    }
+    store.next_widget_number = next_widget_number.max(max_suffix + 1);
 
     let selected_is_valid = store
         .selected_widget_id
@@ -2738,6 +3000,9 @@ mod tests {
                 "binance:spot:BTC/USDT",
                 "binance:spot:ETH/USDT",
                 "binance:spot:SOL/USDT",
+                "binance:spot:BNB/USDT",
+                "binance:spot:XRP/USDT",
+                "binance:spot:DOGE/USDT",
             ]
         );
 
@@ -3036,6 +3301,40 @@ mod tests {
     }
 
     #[test]
+    fn normalizing_duplicate_widget_ids_skips_all_reserved_ids() {
+        let widget = |id: &str| WidgetInstance {
+            id: id.to_string(),
+            plugin_id: WidgetKind::QuoteBoard.plugin_id().to_string(),
+            legacy_widget_type: None,
+            name: id.to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: default_market_symbols(),
+            config: default_widget_config(),
+        };
+        let mut store = LayoutStore {
+            next_widget_number: 1,
+            widgets: vec![
+                widget("quote-board-1"),
+                widget("quote-board-1"),
+                widget("quote-board-2"),
+            ],
+            ..LayoutStore::default()
+        };
+
+        normalize_store(&mut store, 0);
+
+        let ids = store
+            .widgets
+            .iter()
+            .map(|widget| widget.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["quote-board-1", "quote-board-3", "quote-board-2"]);
+        assert_eq!(ids.iter().copied().collect::<HashSet<_>>().len(), ids.len());
+        assert_eq!(store.next_widget_number, 4);
+    }
+
+    #[test]
     fn normalizes_widget_symbols_to_definition_bounds() {
         let mut store = LayoutStore {
             settings: AppSettings {
@@ -3177,6 +3476,76 @@ mod tests {
         assert!(fs::read_to_string(&path)
             .unwrap()
             .contains("\"opacity_percent\": 77"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn persisted_layout_loader_distinguishes_missing_read_and_parse_failures() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-load-errors-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let missing_path = dir.join("missing.json");
+        fs::create_dir_all(&dir).unwrap();
+
+        assert!(try_load_persisted_layout_store(&missing_path)
+            .unwrap()
+            .is_none());
+
+        let unreadable_path = dir.join("directory.json");
+        fs::create_dir(&unreadable_path).unwrap();
+        let read_error = try_load_persisted_layout_store(&unreadable_path).unwrap_err();
+        assert_eq!(read_error.kind(), LayoutStoreReadErrorKind::Read);
+
+        let malformed_path = dir.join("malformed.json");
+        fs::write(&malformed_path, b"{not valid json").unwrap();
+        let parse_error = try_load_persisted_layout_store(&malformed_path).unwrap_err();
+        assert_eq!(parse_error.kind(), LayoutStoreReadErrorKind::Parse);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn malformed_current_state_is_preserved_without_falling_back_to_legacy() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-corrupt-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        let legacy_path = dir.join(LEGACY_LAYOUT_STATE_FILE_NAME);
+        let malformed_contents = b"{not valid json";
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, malformed_contents).unwrap();
+        fs::write(
+            &legacy_path,
+            r#"{
+              "settings": { "opacity_percent": 77 },
+              "widgets": []
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::DefaultsAfterError);
+        assert_eq!(
+            loaded.store.settings.opacity_percent,
+            DEFAULT_OPACITY_PERCENT
+        );
+        let warning = loaded.warning.expect("malformed state should be reported");
+        assert_eq!(warning.kind, LayoutStoreReadErrorKind::Parse);
+        assert_eq!(warning.path, path);
+        let preserved_path = warning
+            .preserved_path
+            .as_ref()
+            .expect("malformed state should be backed up");
+        assert_eq!(fs::read(preserved_path).unwrap(), malformed_contents);
+        assert_eq!(fs::read(&path).unwrap(), malformed_contents);
+        assert!(warning.to_string().contains("defaults were loaded"));
+        assert!(warning.to_string().contains("was preserved at"));
 
         let _ = fs::remove_dir_all(&dir);
     }
