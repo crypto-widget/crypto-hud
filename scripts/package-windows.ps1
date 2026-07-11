@@ -1,6 +1,8 @@
 param(
     [string]$Version = "",
     [switch]$SkipBuild,
+    [switch]$AllowDirty,
+    [switch]$AllowDevelopmentVersion,
     [switch]$Sign,
     [string]$CertificatePath = "",
     [string]$CertificatePassword = "",
@@ -12,16 +14,25 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $WorkspaceManifest = Join-Path $RepoRoot "Cargo.toml"
+$workspaceCargo = Get-Content -LiteralPath $WorkspaceManifest -Raw
+$versionMatch = [regex]::Match(
+    $workspaceCargo,
+    '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"'
+)
+if (-not $versionMatch.Success) {
+    throw "Could not read workspace package version from $WorkspaceManifest"
+}
+$workspaceVersion = $versionMatch.Groups[1].Value
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    $workspaceCargo = Get-Content -LiteralPath $WorkspaceManifest -Raw
-    $versionMatch = [regex]::Match(
-        $workspaceCargo,
-        '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"'
-    )
-    if (-not $versionMatch.Success) {
-        throw "Could not read workspace package version from $WorkspaceManifest"
+    $Version = "v$workspaceVersion"
+}
+if (-not $AllowDevelopmentVersion) {
+    if ($Version -notmatch '^v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$') {
+        throw "Release version must use v-prefixed SemVer: $Version"
     }
-    $Version = "v$($versionMatch.Groups[1].Value)"
+    if ($Matches[1] -ne $workspaceVersion) {
+        throw "Release version $Version does not match workspace version $workspaceVersion"
+    }
 }
 $DistDir = Join-Path $RepoRoot "dist"
 $PackageRoot = Join-Path $DistDir "crypto-hud-$Version-windows-x64"
@@ -155,8 +166,20 @@ function Get-SignatureInfo {
 
 Push-Location $RepoRoot
 try {
+    $sourceStatus = @(git status --porcelain --untracked-files=normal)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect Git worktree status"
+    }
+    $sourceDirty = $sourceStatus.Count -gt 0
+    if ($sourceDirty -and -not $AllowDirty) {
+        throw "Refusing to create a release package from a dirty worktree. Commit or stash changes first."
+    }
+
     if (-not $SkipBuild) {
-        cargo build --release -p crypto-hud
+        cargo build --locked --release -p crypto-hud
+        if ($LASTEXITCODE -ne 0) {
+            throw "Release build failed with code $LASTEXITCODE"
+        }
     }
 
     if (-not (Test-Path $Exe)) {
@@ -213,6 +236,7 @@ try {
         version = $Version
         target = "windows-x64"
         commit = $commit
+        sourceDirty = $sourceDirty
         builtAt = (Get-Date).ToUniversalTime().ToString("o")
         executable = "crypto-hud.exe"
         executableSha256 = $executableEntry.sha256

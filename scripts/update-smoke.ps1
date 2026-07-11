@@ -69,7 +69,9 @@ try {
     $packageArgs = @(
         "-ExecutionPolicy", "Bypass",
         "-File", ".\scripts\package-windows.ps1",
-        "-Version", $Version
+        "-Version", $Version,
+        "-AllowDirty",
+        "-AllowDevelopmentVersion"
     )
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"

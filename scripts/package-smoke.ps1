@@ -56,7 +56,13 @@ if (Test-Path $InstallDir) {
 
 Push-Location $RepoRoot
 try {
-    $packageArgs = @("-ExecutionPolicy", "Bypass", "-File", ".\scripts\package-windows.ps1", "-Version", $Version)
+    $packageArgs = @(
+        "-ExecutionPolicy", "Bypass",
+        "-File", ".\scripts\package-windows.ps1",
+        "-Version", $Version,
+        "-AllowDirty",
+        "-AllowDevelopmentVersion"
+    )
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"
     }
