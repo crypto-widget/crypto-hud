@@ -6,6 +6,7 @@ import "fonts/NotoSansSC-wght.ttf";
 component OpacitySlider inherits Rectangle {
     in-out property <int> value;
     in property <bool> enabled: true;
+    in property <string> accessible-label-text;
     in property <color> accent-color;
     in property <color> track-color;
     in property <color> knob-color;
@@ -19,6 +20,22 @@ component OpacitySlider inherits Rectangle {
 
     height: 20px;
     background: transparent;
+    forward-focus: slider_focus;
+
+    accessible-role: slider;
+    accessible-label: root.accessible-label-text;
+    accessible-enabled: root.enabled;
+    accessible-value: root.value;
+    accessible-value-minimum: 20;
+    accessible-value-maximum: 100;
+    accessible-value-step: 1;
+    accessible-action-set-value(candidate) => {
+        if candidate.is-float() {
+            root.commit-value(candidate.to-float());
+        }
+    }
+    accessible-action-increment => { root.commit-value(root.value + 1); }
+    accessible-action-decrement => { root.commit-value(root.value - 1); }
 
     function value-from-position(x: length) -> int {
         return 20 + round(clamp(x, 0px, root.width) * 80 / root.width);
@@ -28,6 +45,14 @@ component OpacitySlider inherits Rectangle {
         if root.enabled {
             root.value = root.value-from-position(x);
             root.changed(root.value);
+        }
+    }
+
+    function commit-value(candidate: float) {
+        if root.enabled {
+            root.value = round(clamp(candidate, 20, 100));
+            root.changed(root.value);
+            root.committed(root.value);
         }
     }
 
@@ -56,7 +81,7 @@ component OpacitySlider inherits Rectangle {
         height: 13px;
         border-radius: 6px;
         background: root.enabled ? root.knob-color : root.disabled-color;
-        border-width: 1px;
+        border-width: slider_focus.has-focus ? 2px : 1px;
         border-color: root.enabled ? root.accent-color : root.disabled-color;
     }
 
@@ -67,6 +92,7 @@ component OpacitySlider inherits Rectangle {
         mouse-cursor: !root.enabled ? default : (self.pressed ? grabbing : pointer);
         pointer-event(event) => {
             if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                slider_focus.focus();
                 root.set-value-from-position(self.mouse-x);
             } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
                 root.committed(root.value);
@@ -80,6 +106,31 @@ component OpacitySlider inherits Rectangle {
             }
         }
     }
+
+    slider_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: root.enabled;
+
+        key-pressed(event) => {
+            if event.text == Key.RightArrow || event.text == Key.UpArrow {
+                root.commit-value(root.value + 1);
+                return accept;
+            } else if event.text == Key.LeftArrow || event.text == Key.DownArrow {
+                root.commit-value(root.value - 1);
+                return accept;
+            } else if event.text == Key.Home {
+                root.commit-value(20);
+                return accept;
+            } else if event.text == Key.End {
+                root.commit-value(100);
+                return accept;
+            }
+            return reject;
+        }
+    }
 }
 
 component PercentStepper inherits Rectangle {
@@ -88,6 +139,7 @@ component PercentStepper inherits Rectangle {
     in property <int> maximum: 100;
     in property <int> step-size: 1;
     in property <bool> enabled: true;
+    in property <string> accessible-label-text;
     in property <color> text-color;
     in property <color> muted-color;
     in property <color> surface-color;
@@ -101,11 +153,34 @@ component PercentStepper inherits Rectangle {
     border-radius: 4px;
     background: root.surface-color;
     border-width: 1px;
-    border-color: root.control-border-color;
+    border-color: stepper_focus.has-focus ? root.text-color : root.control-border-color;
+    forward-focus: stepper_focus;
+
+    accessible-role: spinbox;
+    accessible-label: root.accessible-label-text;
+    accessible-enabled: root.enabled;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step-size;
+    accessible-action-set-value(candidate) => {
+        if candidate.is-float() {
+            root.set-value(candidate.to-float());
+        }
+    }
+    accessible-action-increment => { root.apply-step(root.step-size); }
+    accessible-action-decrement => { root.apply-step(-root.step-size); }
 
     function apply-step(delta: int) {
         if root.enabled {
             root.value = clamp(root.value + delta, root.minimum, root.maximum);
+            root.edited(root.value);
+        }
+    }
+
+    function set-value(candidate: float) {
+        if root.enabled {
+            root.value = round(clamp(candidate, root.minimum, root.maximum));
             root.edited(root.value);
         }
     }
@@ -194,6 +269,31 @@ component PercentStepper inherits Rectangle {
             clicked => { root.apply-step(root.step-size); }
         }
     }
+
+    stepper_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: root.enabled;
+
+        key-pressed(event) => {
+            if event.text == Key.RightArrow || event.text == Key.UpArrow {
+                root.apply-step(root.step-size);
+                return accept;
+            } else if event.text == Key.LeftArrow || event.text == Key.DownArrow {
+                root.apply-step(-root.step-size);
+                return accept;
+            } else if event.text == Key.Home {
+                root.set-value(root.minimum);
+                return accept;
+            } else if event.text == Key.End {
+                root.set-value(root.maximum);
+                return accept;
+            }
+            return reject;
+        }
+    }
 }
 
 component SettingsSmallButton inherits Rectangle {
@@ -211,7 +311,17 @@ component SettingsSmallButton inherits Rectangle {
     border-radius: 4px;
     background: action_touch.has-hover && root.enabled ? root.hover-color : root.surface-color;
     border-width: 1px;
-    border-color: root.control-border-color;
+    border-color: action_focus.has-focus ? root.text-color : root.control-border-color;
+    forward-focus: action_focus;
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
 
     Text {
         x: 6px;
@@ -234,6 +344,76 @@ component SettingsSmallButton inherits Rectangle {
         mouse-cursor: root.enabled ? pointer : default;
         clicked => { root.clicked(); }
     }
+
+    action_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: root.enabled;
+
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+component CompactSwitch inherits Rectangle {
+    in property <bool> checked;
+    in property <string> accessible-label-text;
+    in property <color> accent-color;
+    in property <color> track-color;
+    in property <color> knob-color;
+    callback toggled();
+
+    width: 34px;
+    height: 19px;
+    border-radius: 9px;
+    background: root.checked ? root.accent-color : root.track-color;
+    border-width: compact_switch_focus.has-focus ? 2px : 0px;
+    border-color: root.accent-color;
+    forward-focus: compact_switch_focus;
+
+    accessible-role: switch;
+    accessible-label: root.accessible-label-text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.toggled(); }
+
+    Rectangle {
+        x: root.checked ? 17px : 2px;
+        y: 2px;
+        width: 13px;
+        height: 13px;
+        border-radius: 6px;
+        background: root.knob-color;
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.toggled(); }
+    }
+
+    compact_switch_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                root.toggled();
+                return accept;
+            }
+            return reject;
+        }
+    }
 }
 
 component GithubProjectSignature inherits Rectangle {
@@ -252,6 +432,11 @@ component GithubProjectSignature inherits Rectangle {
     property <length> lockup-y: (root.height - 32px) / 2;
 
     background: transparent;
+    forward-focus: signature_focus;
+
+    accessible-role: button;
+    accessible-label: root.project-name;
+    accessible-action-default => { root.clicked(); }
 
     Path {
         x: root.lockup-x;
@@ -318,6 +503,21 @@ component GithubProjectSignature inherits Rectangle {
         height: parent.height;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+
+    signature_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
     }
 }
 
@@ -776,6 +976,7 @@ export component SettingsWindow inherits Window {
     callback widget-list-press(int);
     callback widget-list-drag(length);
     callback widget-list-release();
+    callback move-widget(int, int);
     callback delete-widget(int);
     callback minimize-settings();
     callback close-settings();
@@ -935,9 +1136,14 @@ export component SettingsWindow inherits Window {
                 width: 32px;
                 height: 26px;
                 border-radius: 4px;
-                background: close_touch.has-hover ? root.settings-selected-background : transparent;
+                background: close_touch.has-hover || close_focus.has-focus ? root.settings-selected-background : transparent;
                 border-width: 1px;
-                border-color: close_touch.has-hover ? root.settings-border-color : transparent;
+                border-color: close_touch.has-hover || close_focus.has-focus ? root.settings-border-color : transparent;
+                forward-focus: close_focus;
+
+                accessible-role: button;
+                accessible-label: root.close-text;
+                accessible-action-default => { root.close-settings(); }
 
                 Text {
                     y: 0px;
@@ -953,6 +1159,21 @@ export component SettingsWindow inherits Window {
                     width: parent.width;
                     height: parent.height;
                     clicked => { root.close-settings(); }
+                }
+
+                close_focus := FocusScope {
+                    x: 0px;
+                    y: 0px;
+                    width: 0px;
+                    height: 0px;
+
+                    key-pressed(event) => {
+                        if event.text == Key.Space || event.text == Key.Return {
+                            root.close-settings();
+                            return accept;
+                        }
+                        return reject;
+                    }
                 }
             }
 
@@ -1141,7 +1362,7 @@ export component SettingsWindow inherits Window {
                         width: 401px;
                         height: 66px;
                         border-radius: 4px;
-                        background: root.selected-widget-index == index ? root.settings-selected-background : list_row_touch.has-hover ? root.settings-content-background : transparent;
+                        background: root.selected-widget-index == index ? root.settings-selected-background : list_row_touch.has-hover || row_focus.has-focus ? root.settings-content-background : transparent;
 
                         WidgetListPreviewCarousel {
                             x: 58px;
@@ -1163,31 +1384,17 @@ export component SettingsWindow inherits Window {
                             fallback-text-color: root.settings-muted-color;
                         }
 
-                        Rectangle {
+                        CompactSwitch {
                             x: 14px;
                             y: 24px;
-                            width: 34px;
-                            height: 19px;
-                            border-radius: 9px;
-                            background: root.widget-visible-options[index] ? root.settings-accent-color : root.settings-track-color;
-
-                            Rectangle {
-                                x: root.widget-visible-options[index] ? 17px : 2px;
-                                y: 2px;
-                                width: 13px;
-                                height: 13px;
-                                border-radius: 6px;
-                                background: root.settings-knob-color;
-                            }
-
-                            TouchArea {
-                                width: parent.width;
-                                height: parent.height;
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    root.widget-action-menu-index = -1;
-                                    root.toggle-widget-visibility(index);
-                                }
+                            checked: root.widget-visible-options[index];
+                            accessible-label-text: widget_label + " · " + (root.widget-visible-options[index] ? root.widget-visible-text : root.widget-hidden-text);
+                            accent-color: root.settings-accent-color;
+                            track-color: root.settings-track-color;
+                            knob-color: root.settings-knob-color;
+                            toggled => {
+                                root.widget-action-menu-index = -1;
+                                root.toggle-widget-visibility(index);
                             }
                         }
 
@@ -1249,16 +1456,72 @@ export component SettingsWindow inherits Window {
                             }
                         }
 
-                        list_row_touch := TouchArea {
+                        row_focus := FocusScope {
                             x: 130px;
                             y: 0px;
                             width: 222px;
                             height: 60px;
-                            mouse-cursor: pointer;
-                            clicked => {
+
+                            accessible-role: list-item;
+                            accessible-label: widget_label;
+                            accessible-item-index: index;
+                            accessible-item-selectable: true;
+                            accessible-item-selected: root.selected-widget-index == index;
+                            accessible-action-default => {
                                 root.widget-action-menu-index = -1;
                                 root.selected-widget-index = index;
                                 root.select-widget(index);
+                            }
+
+                            key-pressed(event) => {
+                                if event.modifiers.control && event.text == Key.UpArrow {
+                                    root.move-widget(index, -1);
+                                    return accept;
+                                } else if event.modifiers.control && event.text == Key.DownArrow {
+                                    root.move-widget(index, 1);
+                                    return accept;
+                                } else if event.text == Key.UpArrow {
+                                    root.widget-action-menu-index = -1;
+                                    root.selected-widget-index = max(0, index - 1);
+                                    root.select-widget(root.selected-widget-index);
+                                    return accept;
+                                } else if event.text == Key.DownArrow {
+                                    root.widget-action-menu-index = -1;
+                                    root.selected-widget-index = min(root.widget-list-options.length - 1, index + 1);
+                                    root.select-widget(root.selected-widget-index);
+                                    return accept;
+                                } else if event.text == Key.Space || event.text == Key.Return {
+                                    root.widget-action-menu-index = -1;
+                                    root.selected-widget-index = index;
+                                    root.select-widget(index);
+                                    return accept;
+                                }
+                                return reject;
+                            }
+
+                            list_row_touch := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+                                mouse-cursor: root.widget-reorder-active && root.widget-reorder-index == index ? grabbing : grab;
+                                pointer-event(event) => {
+                                    if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                                        root.widget-list-press(index);
+                                    } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                                        root.widget-list-release();
+                                    } else if event.kind == PointerEventKind.cancel {
+                                        root.widget-list-release();
+                                    }
+                                }
+                                moved => {
+                                    if self.pressed {
+                                        root.widget-list-drag(self.mouse-y - self.pressed-y);
+                                    }
+                                }
+                                clicked => {
+                                    root.widget-action-menu-index = -1;
+                                    root.selected-widget-index = index;
+                                    root.select-widget(index);
+                                }
                             }
                         }
 
@@ -1436,6 +1699,7 @@ export component SettingsWindow inherits Window {
                     x: parent.width - 54px;
                     y: 161px;
                     checked <=> root.widget-layout-locked;
+                    accessible-label-text: root.always-on-top-text;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -1468,6 +1732,7 @@ export component SettingsWindow inherits Window {
                     x: parent.width - 54px;
                     y: 222px;
                     checked <=> root.widgets-always-on-top;
+                    accessible-label-text: root.widget-topmost-text;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -1669,6 +1934,7 @@ export component SettingsWindow inherits Window {
                     x: parent.width - 54px;
                     y: (root.widget-display-section-y + root.widget-theme-settings-offset + 148) * 1px;
                     checked <=> root.widget-show-coin-logos;
+                    accessible-label-text: root.widget-show-coin-logos-text;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -1701,6 +1967,7 @@ export component SettingsWindow inherits Window {
                     x: parent.width - 54px;
                     y: (root.widget-display-section-y + root.widget-theme-settings-offset + 198) * 1px;
                     checked <=> root.widget-hide-quote-asset;
+                    accessible-label-text: root.widget-hide-quote-asset-text;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -1739,6 +2006,7 @@ export component SettingsWindow inherits Window {
                     maximum: root.widget-scale-max-percent;
                     step-size: 5;
                     value <=> root.widget-scale-percent;
+                    accessible-label-text: root.widget-scale-text;
                     text-color: root.settings-label-color;
                     muted-color: root.settings-muted-color;
                     surface-color: root.settings-content-background;
@@ -1799,6 +2067,7 @@ export component SettingsWindow inherits Window {
                     height: 20px;
                     value <=> root.opacity-percent;
                     enabled: root.has-widgets;
+                    accessible-label-text: root.opacity-text;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -2440,6 +2709,7 @@ export component SettingsWindow inherits Window {
                     x: 17px;
                     y: 58px;
                     checked <=> root.market-binance-enabled;
+                    accessible-label-text: "Binance";
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -2464,6 +2734,7 @@ export component SettingsWindow inherits Window {
                     x: 139px;
                     y: 58px;
                     checked <=> root.market-coinbase-enabled;
+                    accessible-label-text: "Coinbase";
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -2488,6 +2759,7 @@ export component SettingsWindow inherits Window {
                     x: 281px;
                     y: 58px;
                     checked <=> root.market-okx-enabled;
+                    accessible-label-text: "OKX";
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -2512,6 +2784,7 @@ export component SettingsWindow inherits Window {
                     x: 379px;
                     y: 58px;
                     checked <=> root.market-hyperliquid-enabled;
+                    accessible-label-text: "Hyperliquid";
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -2553,6 +2826,7 @@ export component SettingsWindow inherits Window {
                     maximum: 60;
                     step-size: 1;
                     value <=> root.refresh-interval-seconds;
+                    accessible-label-text: root.refresh-interval-text;
                     text-color: root.settings-label-color;
                     muted-color: root.settings-muted-color;
                     surface-color: root.settings-content-background;
@@ -2797,6 +3071,7 @@ export component SettingsWindow inherits Window {
                     x: parent.width - 54px;
                     y: 142px;
                     checked <=> root.red-up-enabled;
+                    accessible-label-text: root.red-up-color-text;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -2850,6 +3125,7 @@ export component SettingsWindow inherits Window {
                     x: parent.width - 54px;
                     y: 53px;
                     checked <=> root.default-widgets-always-on-top;
+                    accessible-label-text: root.default-always-on-top-text;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -2953,6 +3229,7 @@ export component SettingsWindow inherits Window {
                         x: parent.width - 54px;
                         y: 56px;
                         checked <=> root.auto-start-enabled;
+                        accessible-label-text: root.auto-start-text;
                         accent-color: root.settings-accent-color;
                         track-color: root.settings-track-color;
                         knob-color: root.settings-knob-color;
@@ -2985,6 +3262,7 @@ export component SettingsWindow inherits Window {
                         x: parent.width - 54px;
                         y: 100px;
                         checked <=> root.show-main-window-on-startup;
+                        accessible-label-text: root.show-main-window-on-startup-text;
                         accent-color: root.settings-accent-color;
                         track-color: root.settings-track-color;
                         knob-color: root.settings-knob-color;
@@ -3047,6 +3325,7 @@ export component SettingsWindow inherits Window {
                         x: parent.width - 54px;
                         y: 56px;
                         checked <=> root.network-proxy-enabled;
+                        accessible-label-text: root.network-proxy-enabled-text;
                         accent-color: root.settings-accent-color;
                         track-color: root.settings-track-color;
                         knob-color: root.settings-knob-color;
@@ -3179,6 +3458,7 @@ export component SettingsWindow inherits Window {
                         x: parent.width - 54px;
                         y: 56px;
                         checked <=> root.tray-icon-enabled;
+                        accessible-label-text: root.tray-icon-text;
                         accent-color: root.settings-accent-color;
                         track-color: root.settings-track-color;
                         knob-color: root.settings-knob-color;
@@ -3211,6 +3491,7 @@ export component SettingsWindow inherits Window {
                         x: parent.width - 54px;
                         y: 100px;
                         checked <=> root.tray-hover-display-enabled;
+                        accessible-label-text: root.tray-hover-display-text;
                         accent-color: root.settings-accent-color;
                         track-color: root.settings-track-color;
                         knob-color: root.settings-knob-color;

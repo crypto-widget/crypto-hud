@@ -1574,6 +1574,35 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.on_move_widget({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |selected_index, direction| {
+            let next_index = {
+                let mut store = commit.layouts.borrow_mut();
+                let Some(next_index) = move_widget_in_store(&mut store, selected_index, direction)
+                else {
+                    return;
+                };
+                if let Err(error) = save_layout_store(&commit.state_path, &store) {
+                    eprintln!("failed to save widget order: {error:#}");
+                }
+                next_index as i32
+            };
+
+            commit.sync_widget_runtimes(false, "failed to reorder widget windows");
+            commit.apply_widget_pinning_for_settings_mode();
+            commit.set_saved_status(commit.current_settings());
+            commit.refresh_settings_window(&weak);
+            if let Some(ui) = weak.upgrade() {
+                ui.set_widget_reorder_active(false);
+                ui.set_widget_reorder_index(-1);
+                ui.set_selected_widget_index(next_index);
+            }
+            schedule_widget_shell_window_configuration();
+        }
+    });
+
     ui.on_add_widget({
         let commit = commit_context.clone();
         let weak = ui.as_weak();
@@ -3718,6 +3747,126 @@ mod tests {
         assert!(source.contains("transform-scale-x: root.settings-window-scale;"));
         assert!(source.contains("transform-scale-y: root.settings-window-scale;"));
         assert!(source.contains("(self.mouse-x - self.pressed-x) * root.settings-window-scale"));
+    }
+
+    #[test]
+    fn widget_list_wires_pointer_and_keyboard_reordering_to_persistent_backend() {
+        let source = settings_window_ui_source();
+        let row_start = source.find("row_focus := FocusScope {").unwrap();
+        let row_end = source[row_start..]
+            .find("action_menu := Rectangle {")
+            .unwrap();
+        let row = &source[row_start..row_start + row_end];
+
+        for contract in [
+            "root.widget-list-press(index);",
+            "root.widget-list-drag(self.mouse-y - self.pressed-y);",
+            "root.widget-list-release();",
+            "event.modifiers.control && event.text == Key.UpArrow",
+            "root.move-widget(index, -1);",
+            "event.modifiers.control && event.text == Key.DownArrow",
+            "root.move-widget(index, 1);",
+        ] {
+            assert!(
+                row.contains(contract),
+                "widget row should expose reorder contract: {contract}"
+            );
+        }
+
+        let backend = settings_window_rs_source();
+        let handler_start = backend.find("ui.on_move_widget({").unwrap();
+        let handler_end = backend[handler_start..].find("ui.on_add_widget({").unwrap();
+        let handler = &backend[handler_start..handler_start + handler_end];
+        assert!(handler.contains("move_widget_in_store(&mut store, selected_index, direction)"));
+        assert!(handler.contains("save_layout_store(&commit.state_path, &store)"));
+        assert!(handler.contains("commit.sync_widget_runtimes"));
+        assert!(handler.contains("commit.refresh_settings_window(&weak)"));
+    }
+
+    #[test]
+    fn widget_reorder_move_is_serialized_in_new_order() {
+        let state_path = temp_state_path("widget-reorder");
+        let mut store = LayoutStore {
+            widgets: vec![
+                test_widget("widget-a", "plugin-a", vec!["BTCUSDT"]),
+                test_widget("widget-b", "plugin-b", vec!["ETHUSDT"]),
+                test_widget("widget-c", "plugin-c", vec!["SOLUSDT"]),
+            ],
+            ..LayoutStore::default()
+        };
+
+        assert_eq!(move_widget_in_store(&mut store, 0, 1), Some(1));
+        save_layout_store(&state_path, &store).unwrap();
+
+        let persisted: LayoutStore =
+            serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap();
+        assert_eq!(
+            persisted
+                .widgets
+                .iter()
+                .map(|widget| widget.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["widget-b", "widget-a", "widget-c"]
+        );
+        assert_eq!(persisted.selected_widget_id.as_deref(), Some("widget-a"));
+
+        let _ = std::fs::remove_file(state_path);
+    }
+
+    #[test]
+    fn settings_primary_custom_controls_are_keyboard_and_accessibility_enabled() {
+        let settings_source = settings_window_ui_source();
+        let shared_source = ui_source("shared-controls.slint");
+
+        for contract in [
+            "accessible-role: switch;",
+            "accessible-checkable: true;",
+            "accessible-checked: root.checked;",
+            "switch_focus := FocusScope {",
+            "accessible-role: tab;",
+            "accessible-item-selected: root.selected;",
+            "nav_focus := FocusScope {",
+        ] {
+            assert!(
+                shared_source.contains(contract),
+                "shared settings controls should expose accessibility contract: {contract}"
+            );
+        }
+
+        for contract in [
+            "accessible-role: slider;",
+            "accessible-action-increment => { root.commit-value(root.value + 1); }",
+            "slider_focus := FocusScope {",
+            "accessible-role: spinbox;",
+            "accessible-action-increment => { root.apply-step(root.step-size); }",
+            "stepper_focus := FocusScope {",
+            "component CompactSwitch inherits Rectangle {",
+            "accessible-role: list-item;",
+            "accessible-item-selected: root.selected-widget-index == index;",
+            "accessible-label: root.close-text;",
+            "close_focus := FocusScope {",
+        ] {
+            assert!(
+                settings_source.contains(contract),
+                "settings window should expose accessibility contract: {contract}"
+            );
+        }
+
+        let window_component = settings_source
+            .find("export component SettingsWindow inherits Window {")
+            .map(|start| &settings_source[start..])
+            .unwrap();
+        for (index, (start, _)) in window_component
+            .match_indices("SettingSwitch {")
+            .enumerate()
+        {
+            let block = &window_component[start..window_component.len().min(start + 420)];
+            assert!(
+                block.contains("accessible-label-text:"),
+                "SettingSwitch instance {} should have a localized accessible label",
+                index + 1
+            );
+        }
     }
 
     #[test]
