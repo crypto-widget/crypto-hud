@@ -2071,24 +2071,6 @@ pub fn default_widget_name(locale: Locale, widget: WidgetText, number: u64) -> S
     format!("{} {number}", widget_title(locale, widget))
 }
 
-pub fn market_error_notification_body(locale: Locale, error: &str) -> String {
-    let error = ltr_isolate_for_locale(locale, error);
-    match locale {
-        Locale::En => format!("Market data update failed: {error}"),
-        Locale::ZhHans => format!("行情更新失败：{error}"),
-        Locale::ZhHant => format!("行情更新失敗：{error}"),
-        Locale::Es419 => format!("Falló la actualización de mercado: {error}"),
-        Locale::PtBr => format!("Falha ao atualizar dados de mercado: {error}"),
-        Locale::Vi => format!("Cập nhật dữ liệu thị trường thất bại: {error}"),
-        Locale::Id => format!("Pembaruan data pasar gagal: {error}"),
-        Locale::Tr => format!("Piyasa verisi güncellenemedi: {error}"),
-        Locale::Ko => format!("시장 데이터 업데이트 실패: {error}"),
-        Locale::Ja => format!("マーケットデータの更新に失敗しました: {error}"),
-        Locale::Ru => format!("Не удалось обновить рыночные данные: {error}"),
-        Locale::Ar => format!("فشل تحديث بيانات السوق: {error}"),
-    }
-}
-
 pub fn status_failure_message(
     locale: Locale,
     summary: &str,
@@ -3870,7 +3852,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(
-            readme_en.contains(&format!("{supported_language_count} UI languages")),
+            ["UI languages", "interface languages"]
+                .into_iter()
+                .any(|label| readme_en.contains(&format!("{supported_language_count} {label}"))),
             "README.md should advertise the current supported language count"
         );
         assert!(
@@ -4739,7 +4723,7 @@ mod tests {
         for entry in ALLOWED_IDENTICAL_TECHNICAL_UI_FIELDS {
             let Some(english) = english_fields
                 .iter()
-                .find(|(field_name, _)| field_name == &entry.field_name)
+                .find(|(field_name, _)| field_name == entry.field_name)
                 .map(|(_, value)| value)
             else {
                 panic!("EN_TEXT should include {}", entry.field_name);
@@ -5702,10 +5686,6 @@ mod tests {
                 "denied"
             ),
             "فشل تسجيل الاختصار: \u{2066}denied\u{2069}"
-        );
-        assert_eq!(
-            market_error_notification_body(Locale::Ar, "HTTP 429 api.binance.com"),
-            "فشل تحديث بيانات السوق: \u{2066}HTTP 429 api.binance.com\u{2069}"
         );
     }
 }

@@ -955,31 +955,6 @@ fn normalized_feed_symbols(symbols: Vec<String>) -> Vec<String> {
         })
 }
 
-fn notify_market_error(
-    throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
-    locale: i18n::Locale,
-    error: &str,
-) {
-    if let Some(body) =
-        market_error_notification_body_for_throttle(throttle, locale, error, Instant::now())
-    {
-        notifications::show(i18n::text(locale).tray_tooltip, &body);
-    }
-}
-
-fn market_error_notification_body_for_throttle(
-    throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
-    locale: i18n::Locale,
-    error: &str,
-    now: Instant,
-) -> Option<String> {
-    let body = i18n::market_error_notification_body(locale, error);
-    throttle
-        .borrow_mut()
-        .should_notify("market-feed", &body, now)
-        .then_some(body)
-}
-
 fn notify_alerts(
     throttle: &Rc<RefCell<notifications::NotificationThrottle>>,
     locale: i18n::Locale,
@@ -1143,43 +1118,6 @@ mod tests {
                 "initial widget apply should set locale-sensitive widget label: {required}"
             );
         }
-    }
-
-    #[test]
-    fn market_error_notification_throttle_uses_localized_body() {
-        let throttle = Rc::new(RefCell::new(notifications::NotificationThrottle::new(
-            Duration::from_secs(60),
-        )));
-        let now = Instant::now();
-        let error = "HTTP 429 api.binance.com";
-
-        let english_body =
-            market_error_notification_body_for_throttle(&throttle, i18n::Locale::En, error, now)
-                .expect("first market error should notify");
-        assert_eq!(
-            english_body,
-            "Market data update failed: HTTP 429 api.binance.com"
-        );
-
-        let zh_body = market_error_notification_body_for_throttle(
-            &throttle,
-            i18n::Locale::ZhHans,
-            error,
-            now + Duration::from_secs(1),
-        )
-        .expect("same market error should notify after language changes");
-        assert_eq!(zh_body, "行情更新失败：HTTP 429 api.binance.com");
-
-        assert!(
-            market_error_notification_body_for_throttle(
-                &throttle,
-                i18n::Locale::ZhHans,
-                error,
-                now + Duration::from_secs(2),
-            )
-            .is_none(),
-            "same localized market error should still be throttled"
-        );
     }
 
     #[test]
