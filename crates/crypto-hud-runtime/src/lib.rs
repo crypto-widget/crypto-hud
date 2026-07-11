@@ -7,7 +7,7 @@ use crypto_hud_core::{
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Write,
     path::Path,
     time::{Duration, Instant},
@@ -18,6 +18,7 @@ pub const MIN_SYMBOL_LIMIT: usize = 1;
 pub const MAX_SYMBOL_LIMIT: usize = 8;
 pub const MAX_PREVIEW_IMAGES: usize = 5;
 pub const MAX_PLUGIN_THEMES: usize = 8;
+pub const MAX_PLUGIN_PARAMETERS: usize = 8;
 pub const MAX_QUOTE_CACHE_ENTRIES: usize = 128;
 
 const MIN_PLUGIN_WIDTH: i32 = 120;
@@ -57,6 +58,8 @@ pub struct PluginManifest {
     pub themes: Vec<PluginTheme>,
     #[serde(default)]
     pub data_requirements: Vec<PluginDataRequirement>,
+    #[serde(default)]
+    pub parameters: Vec<PluginParameter>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -106,6 +109,30 @@ pub struct PluginDataRequirement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PluginParameter {
+    Integer {
+        key: String,
+        name: String,
+        #[serde(default, rename = "nameZhHans")]
+        name_zh_hans: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default, rename = "descriptionZhHans")]
+        description_zh_hans: String,
+        default: i32,
+        minimum: i32,
+        maximum: i32,
+        #[serde(default = "default_integer_parameter_step")]
+        step: i32,
+        #[serde(default)]
+        unit: String,
+        #[serde(default, rename = "unitZhHans")]
+        unit_zh_hans: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginTheme {
     pub id: String,
@@ -127,6 +154,10 @@ pub enum PluginThemeRole {
 
 fn default_min_symbol_limit() -> usize {
     MIN_SYMBOL_LIMIT
+}
+
+fn default_integer_parameter_step() -> i32 {
+    1
 }
 
 fn default_plugin_themes() -> Vec<PluginTheme> {
@@ -182,6 +213,7 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
     )?;
     validate_preview_images(&manifest.preview_images)?;
     validate_themes(&manifest.themes)?;
+    validate_parameters(&manifest.parameters)?;
     validate_size_policy(
         manifest.size_policy,
         manifest.default_size,
@@ -194,6 +226,82 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
                 requirement.capability
             );
         }
+    }
+    Ok(())
+}
+
+fn validate_parameters(parameters: &[PluginParameter]) -> Result<()> {
+    if parameters.len() > MAX_PLUGIN_PARAMETERS {
+        bail!("parameters must not exceed {MAX_PLUGIN_PARAMETERS} entries");
+    }
+
+    let mut keys = HashSet::new();
+    for parameter in parameters {
+        match parameter {
+            PluginParameter::Integer {
+                key,
+                name,
+                name_zh_hans,
+                description,
+                description_zh_hans,
+                default,
+                minimum,
+                maximum,
+                step,
+                unit,
+                unit_zh_hans,
+            } => {
+                validate_parameter_key(key)?;
+                if !keys.insert(key.as_str()) {
+                    bail!("parameters contains duplicate key {key}");
+                }
+                validate_parameter_text(name, "parameter name", 80, false)?;
+                validate_parameter_text(name_zh_hans, "parameter nameZhHans", 80, true)?;
+                validate_parameter_text(description, "parameter description", 240, true)?;
+                validate_parameter_text(
+                    description_zh_hans,
+                    "parameter descriptionZhHans",
+                    240,
+                    true,
+                )?;
+                validate_parameter_text(unit, "parameter unit", 16, true)?;
+                validate_parameter_text(unit_zh_hans, "parameter unitZhHans", 16, true)?;
+                if minimum >= maximum {
+                    bail!("integer parameter {key} minimum must be less than maximum");
+                }
+                if !(*minimum..=*maximum).contains(default) {
+                    bail!("integer parameter {key} default must be within its range");
+                }
+                if *step <= 0 || *step > maximum.saturating_sub(*minimum) {
+                    bail!("integer parameter {key} step must be positive and fit its range");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_parameter_key(key: &str) -> Result<()> {
+    if key.is_empty() || key.len() > 64 {
+        bail!("parameter key must contain between 1 and 64 characters");
+    }
+    if key.starts_with('-')
+        || key.ends_with('-')
+        || key.chars().any(|character| {
+            !(character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-')
+        })
+    {
+        bail!("parameter key must use lowercase ASCII letters, digits, or internal hyphens");
+    }
+    Ok(())
+}
+
+fn validate_parameter_text(value: &str, label: &str, max: usize, allow_empty: bool) -> Result<()> {
+    if !allow_empty && value.trim().is_empty() {
+        bail!("{label} must be non-empty");
+    }
+    if value.chars().count() > max {
+        bail!("{label} must not exceed {max} characters");
     }
     Ok(())
 }
@@ -1578,6 +1686,68 @@ mod tests {
         assert_eq!(manifest.themes.len(), 1);
         assert_eq!(manifest.themes[0].id, "default");
         assert!(manifest.themes[0].is_default);
+        assert!(manifest.parameters.is_empty());
+    }
+
+    #[test]
+    fn parses_and_validates_integer_plugin_parameter() {
+        let json = valid_manifest_json().replace(
+            r#""dataRequirements": ["#,
+            r#""parameters": [
+                {
+                    "kind": "integer",
+                    "key": "switch-interval-seconds",
+                    "name": "Switch interval",
+                    "nameZhHans": "切换时间",
+                    "description": "Time between pair switches.",
+                    "descriptionZhHans": "币种自动切换间隔。",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 60,
+                    "step": 1,
+                    "unit": "s",
+                    "unitZhHans": "秒"
+                }
+            ],
+            "dataRequirements": ["#,
+        );
+
+        let manifest = parse_manifest(&json).unwrap();
+
+        assert!(matches!(
+            &manifest.parameters[0],
+            PluginParameter::Integer {
+                key,
+                default: 5,
+                minimum: 1,
+                maximum: 60,
+                step: 1,
+                ..
+            } if key == "switch-interval-seconds"
+        ));
+    }
+
+    #[test]
+    fn rejects_integer_plugin_parameter_default_outside_range() {
+        let json = valid_manifest_json().replace(
+            r#""dataRequirements": ["#,
+            r#""parameters": [
+                {
+                    "kind": "integer",
+                    "key": "switch-interval-seconds",
+                    "name": "Switch interval",
+                    "default": 61,
+                    "minimum": 1,
+                    "maximum": 60
+                }
+            ],
+            "dataRequirements": ["#,
+        );
+
+        assert!(parse_manifest(&json)
+            .unwrap_err()
+            .to_string()
+            .contains("within its range"));
     }
 
     #[test]

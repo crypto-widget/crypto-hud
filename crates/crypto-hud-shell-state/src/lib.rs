@@ -38,6 +38,7 @@ pub const DEFAULT_LAYOUT_GAP: i32 = 24;
 pub const WIDGET_CONFIG_SHOW_COIN_LOGOS: &str = "show_coin_logos";
 pub const WIDGET_CONFIG_HIDE_QUOTE_ASSET: &str = "hide_quote_asset";
 pub const WIDGET_CONFIG_THEME: &str = "theme";
+pub const WIDGET_CONFIG_PLUGIN_PARAMETERS: &str = "plugin_parameters";
 pub const WIDGET_THEME_SYSTEM: &str = "system";
 pub const QUOTE_BOARD_WIDTH: i32 = 286;
 pub const QUOTE_BOARD_HEIGHT: i32 = 194;
@@ -1027,6 +1028,48 @@ pub fn set_widget_display_config(
         WIDGET_CONFIG_HIDE_QUOTE_ASSET.to_string(),
         Value::Bool(hide_quote_asset),
     );
+}
+
+pub fn widget_integer_parameter(
+    instance: &WidgetInstance,
+    key: &str,
+    default: i32,
+    minimum: i32,
+    maximum: i32,
+) -> i32 {
+    instance
+        .config
+        .as_object()
+        .and_then(|config| config.get(WIDGET_CONFIG_PLUGIN_PARAMETERS))
+        .and_then(Value::as_object)
+        .and_then(|parameters| parameters.get(key))
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or(default)
+        .clamp(minimum, maximum)
+}
+
+pub fn set_widget_integer_parameter(
+    instance: &mut WidgetInstance,
+    key: &str,
+    value: i32,
+    minimum: i32,
+    maximum: i32,
+) {
+    let config = widget_config_object_mut(instance);
+    let parameters = config
+        .entry(WIDGET_CONFIG_PLUGIN_PARAMETERS.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !parameters.is_object() {
+        *parameters = Value::Object(Map::new());
+    }
+    parameters
+        .as_object_mut()
+        .expect("plugin parameters should be an object")
+        .insert(
+            key.to_string(),
+            Value::Number(value.clamp(minimum, maximum).into()),
+        );
 }
 
 fn widget_config_show_coin_logos(config: &serde_json::Value) -> bool {
@@ -2742,6 +2785,34 @@ mod tests {
         assert_eq!(
             widget.config[WIDGET_CONFIG_THEME],
             Value::String("light".to_string())
+        );
+    }
+
+    #[test]
+    fn widget_integer_parameters_default_persist_and_clamp() {
+        let mut widget = WidgetInstance {
+            id: "market-compass-1".to_string(),
+            plugin_id: "com.cryptohud.market-compass".to_string(),
+            legacy_widget_type: None,
+            name: "Market Compass 1".to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            config: default_widget_config(),
+        };
+
+        assert_eq!(
+            widget_integer_parameter(&widget, "switch-interval-seconds", 5, 1, 60),
+            5
+        );
+        set_widget_integer_parameter(&mut widget, "switch-interval-seconds", 90, 1, 60);
+        assert_eq!(
+            widget_integer_parameter(&widget, "switch-interval-seconds", 5, 1, 60),
+            60
+        );
+        assert_eq!(
+            widget.config[WIDGET_CONFIG_PLUGIN_PARAMETERS]["switch-interval-seconds"],
+            Value::Number(60.into())
         );
     }
 

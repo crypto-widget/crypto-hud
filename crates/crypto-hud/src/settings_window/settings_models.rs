@@ -262,6 +262,68 @@ pub(super) fn widget_theme_preference_for_index(
         .unwrap_or_else(|| settings::WIDGET_THEME_SYSTEM.to_string())
 }
 
+#[derive(Default)]
+pub(super) struct WidgetIntegerParameterOptions {
+    pub labels: Vec<String>,
+    pub helps: Vec<String>,
+    pub units: Vec<String>,
+    pub values: Vec<i32>,
+    pub minimums: Vec<i32>,
+    pub maximums: Vec<i32>,
+    pub steps: Vec<i32>,
+}
+
+pub(super) fn widget_integer_parameter_options(
+    widget: &WidgetInstance,
+    plugin_catalog: &plugin::PluginCatalog,
+    locale: i18n::Locale,
+) -> WidgetIntegerParameterOptions {
+    let Some(definition) = plugin_catalog.find(&widget.plugin_id) else {
+        return WidgetIntegerParameterOptions::default();
+    };
+    let mut options = WidgetIntegerParameterOptions::default();
+    for parameter in &definition.parameters {
+        let plugin::PluginParameter::Integer {
+            key,
+            name,
+            name_zh_hans,
+            description,
+            description_zh_hans,
+            default,
+            minimum,
+            maximum,
+            step,
+            unit,
+            unit_zh_hans,
+        } = parameter;
+        options
+            .labels
+            .push(localized_parameter_text(name, name_zh_hans, locale));
+        options.helps.push(localized_parameter_text(
+            description,
+            description_zh_hans,
+            locale,
+        ));
+        options
+            .units
+            .push(localized_parameter_text(unit, unit_zh_hans, locale));
+        options.values.push(settings::widget_integer_parameter(
+            widget, key, *default, *minimum, *maximum,
+        ));
+        options.minimums.push(*minimum);
+        options.maximums.push(*maximum);
+        options.steps.push(*step);
+    }
+    options
+}
+
+fn localized_parameter_text(english: &str, zh_hans: &str, locale: i18n::Locale) -> String {
+    match locale {
+        i18n::Locale::ZhHans if !zh_hans.trim().is_empty() => zh_hans.to_string(),
+        _ => english.to_string(),
+    }
+}
+
 fn widget_theme_label(theme: &plugin::PluginTheme, locale: i18n::Locale) -> String {
     match theme.role {
         plugin::PluginThemeRole::Light => i18n::theme_options(locale)[1].to_string(),
@@ -491,6 +553,7 @@ mod tests {
             preview_images: Vec::new(),
             themes: plugin::single_default_theme(),
             data_requirements: Vec::new(),
+            parameters: Vec::new(),
             status: plugin::PluginStatus::Available,
         };
 

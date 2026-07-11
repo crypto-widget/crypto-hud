@@ -138,6 +138,12 @@ impl WidgetUi {
         }
     }
 
+    pub(crate) fn set_integer_parameter(&self, key: &str, value: i32) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property(&format!("config-{key}"), Value::Number(value.into()));
+        }
+    }
+
     fn set_quote_icon_ready(&self, values: &[bool]) {
         if let Self::DynamicSlint(ui) = self {
             ui.set_optional_property("quote-icon-ready", bool_model_value(values));
@@ -616,6 +622,7 @@ mod tests {
             preview_images: Vec::new(),
             themes: Vec::new(),
             data_requirements: Vec::new(),
+            parameters: Vec::new(),
             status: plugin::PluginStatus::Available,
         };
 

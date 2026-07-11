@@ -685,6 +685,7 @@ fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
     ui.set_pin_to_top(instance.layout.always_on_top);
     ui.set_layout_locked(instance.layout.locked);
     ui.set_theme_name(widget_theme_name(instance, plugin_catalog).into());
+    apply_plugin_parameters(ui, instance, plugin_catalog);
     ui.set_red_up_enabled(settings.red_up_enabled);
     ui.set_content_opacity(instance.layout.opacity_percent);
     ui.set_compact_mode(instance.widget_type() == WidgetType::MiniTicker);
@@ -718,6 +719,27 @@ fn widget_scale_for_instance(
         height: layout.height,
     };
     settings::widget_content_scale_percent_for_size(size, base_size) as f32 / 100.0
+}
+
+fn apply_plugin_parameters(
+    ui: &WidgetUi,
+    instance: &WidgetInstance,
+    plugin_catalog: &plugin::PluginCatalog,
+) {
+    let Some(definition) = plugin_catalog.find(&instance.plugin_id) else {
+        return;
+    };
+    for parameter in &definition.parameters {
+        let plugin::PluginParameter::Integer {
+            key,
+            default,
+            minimum,
+            maximum,
+            ..
+        } = parameter;
+        let value = settings::widget_integer_parameter(instance, key, *default, *minimum, *maximum);
+        ui.set_integer_parameter(key, value);
+    }
 }
 
 fn apply_widget_visibility(ui: &WidgetUi, visible: bool) -> Result<()> {

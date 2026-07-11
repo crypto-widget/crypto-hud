@@ -46,6 +46,22 @@
       "default": true
     }
   ],
+  "parameters": [
+    {
+      "kind": "integer",
+      "key": "switch-interval-seconds",
+      "name": "Switch interval",
+      "nameZhHans": "切换时间",
+      "description": "Time between automatic pair switches.",
+      "descriptionZhHans": "币种自动切换的时间间隔。",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 60,
+      "step": 1,
+      "unit": "s",
+      "unitZhHans": "秒"
+    }
+  ],
   "dataRequirements": [
     {
       "capability": "market.price"

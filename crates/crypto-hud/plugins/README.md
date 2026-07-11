@@ -223,6 +223,41 @@ property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
 
 `theme-name` 的值来自 `themes[].id`，例如 `light`、`dark` 或自定义 id。
 
+## 插件自定义参数
+
+插件最多可以声明 8 个整数参数。宿主会校验清单、在所选小组件设置中自动渲染步进控件、按小组件实例持久化参数值，并通过 `config-<key>` 属性传给 Slint。
+
+```json
+"parameters": [
+  {
+    "kind": "integer",
+    "key": "switch-interval-seconds",
+    "name": "Switch interval",
+    "nameZhHans": "切换时间",
+    "description": "Time between automatic pair switches.",
+    "descriptionZhHans": "币种自动切换的时间间隔。",
+    "default": 5,
+    "minimum": 1,
+    "maximum": 60,
+    "step": 1,
+    "unit": "s",
+    "unitZhHans": "秒"
+  }
+]
+```
+
+参数 key 只能使用小写 ASCII 字母、数字和内部连字符。Slint 必须暴露对应的数值属性：
+
+```slint
+in property <int> config-switch-interval-seconds: 5;
+
+Timer {
+    interval: root.config-switch-interval-seconds * 1s;
+}
+```
+
+未保存过的参数使用 `default`，已保存的值会被限制在 `minimum` 到 `maximum` 范围内。
+
 ## 行情颜色方向
 
 `red-up-enabled` 是宿主下发给所有插件的全局行情颜色方向开关。

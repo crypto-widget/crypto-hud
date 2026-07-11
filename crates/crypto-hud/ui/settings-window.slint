@@ -1,7 +1,6 @@
 import { Button, ComboBox, LineEdit, ListView, Palette, ScrollView, SpinBox } from "std-widgets.slint";
 import { PluginMarketItem } from "models.slint";
 import { PanelTitle, SettingLabel, SettingSectionTitle, SettingsNavItem, SettingSwitch } from "shared-controls.slint";
-import "fonts/NotoSansSC-wght.ttf";
 
 component OpacitySlider inherits Rectangle {
     in-out property <int> value;
@@ -531,6 +530,14 @@ component PluginPreviewCarousel inherits Rectangle {
 
     property <int> preview-count: root.plugin.preview_image_count < 5 ? root.plugin.preview_image_count : 5;
     property <int> active-index: root.preview-count <= 0 ? 0 : Math.mod(root.plugin.preview_frame_index, root.preview-count);
+    property <image> active-image: root.active-index == 0 ? root.plugin.preview_image_1
+        : root.active-index == 1 ? root.plugin.preview_image_2
+        : root.active-index == 2 ? root.plugin.preview_image_3
+        : root.active-index == 3 ? root.plugin.preview_image_4
+        : root.plugin.preview_image_5;
+    property <bool> preview-hovered: preview_touch.has-hover;
+    property <bool> preview-ready: false;
+    callback preview-hover-changed(bool, image);
 
     border-radius: 6px;
     background: root.surface-color;
@@ -607,6 +614,37 @@ component PluginPreviewCarousel inherits Rectangle {
         background: index == root.active-index ? root.accent-color : root.muted-color;
         visible: root.preview-count > 1 && index < root.preview-count;
     }
+
+    preview_touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+
+        changed has-hover => {
+            if (!self.has-hover) {
+                root.preview-ready = false;
+                root.preview-hover-changed(false, root.active-image);
+            }
+        }
+    }
+
+    changed active-image => {
+        if (root.preview-ready && root.preview-hovered) {
+            root.preview-hover-changed(true, root.active-image);
+        }
+    }
+
+    hover_preview_delay := Timer {
+        interval: 250ms;
+        running: root.preview-hovered && !root.preview-ready;
+        triggered() => {
+            if (root.preview-hovered) {
+                root.preview-ready = true;
+                root.preview-hover-changed(true, root.active-image);
+            }
+        }
+    }
+
 }
 
 component WidgetListPreviewCarousel inherits Rectangle {
@@ -742,6 +780,7 @@ export component SettingsWindow inherits Window {
     in-out property <bool> tray-hover-display-enabled;
     in-out property <bool> network-proxy-enabled;
     in-out property <string> network-proxy-url-input-text;
+    in-out property <string> network-proxy-error-text;
     in-out property <bool> alert-enabled;
     in-out property <int> alert-condition-index;
     in-out property <string> alert-threshold-input-text;
@@ -770,6 +809,13 @@ export component SettingsWindow inherits Window {
     in property <[int]> widget-scale-min-options;
     in property <[int]> widget-scale-max-options;
     in property <[string]> widget-theme-options;
+    in property <[string]> widget-parameter-labels;
+    in property <[string]> widget-parameter-helps;
+    in property <[string]> widget-parameter-units;
+    in-out property <[int]> widget-parameter-values;
+    in property <[int]> widget-parameter-minimums;
+    in property <[int]> widget-parameter-maximums;
+    in property <[int]> widget-parameter-steps;
     property <bool> has-widgets: root.widget-list-options.length != 0;
     property <length> widget-settings-scrollbar-gutter: 18px;
     in property <[string]> shortcut-options;
@@ -789,7 +835,8 @@ export component SettingsWindow inherits Window {
     property <int> widget-display-section-y: root.widget-symbol-status-y + 10;
     property <bool> widget-theme-control-visible: root.has-widgets && root.widget-theme-options.length > 0;
     property <int> widget-theme-settings-offset: root.widget-theme-control-visible ? 52 : 0;
-    property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset) * 1px;
+    property <int> widget-parameter-settings-offset: root.widget-parameter-labels.length > 0 ? 28 + root.widget-parameter-labels.length * 52 : 0;
+    property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset + root.widget-parameter-settings-offset) * 1px;
     in property <int> widget-symbol-min: 1;
     in property <int> widget-symbol-max: 5;
     in property <int> default-symbol-min: 1;
@@ -952,6 +999,13 @@ export component SettingsWindow inherits Window {
     property <bool> can-add-default-symbol: root.default-symbol-values.length < root.default-symbol-max;
     property <bool> can-remove-default-symbol: root.default-symbol-values.length > root.default-symbol-min;
     property <bool> can-confirm-symbol-picker: root.symbol-picker-open && root.symbol-picker-candidate-options.length > 0;
+    property <image> hovered-plugin-preview-image;
+    property <bool> hovered-plugin-preview-visible: false;
+    property <float> hovered-plugin-preview-scale: root.hovered-plugin-preview-image.width <= 0 || root.hovered-plugin-preview-image.height <= 0
+        ? 1.0
+        : min(1.0, min(1000.0 / root.hovered-plugin-preview-image.width, 600.0 / root.hovered-plugin-preview-image.height));
+    property <length> hovered-plugin-preview-width: root.hovered-plugin-preview-image.width * 1px * root.hovered-plugin-preview-scale;
+    property <length> hovered-plugin-preview-height: root.hovered-plugin-preview-image.height * 1px * root.hovered-plugin-preview-scale;
 
     callback apply-settings(bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
     callback apply-network-settings(bool, string);
@@ -970,6 +1024,7 @@ export component SettingsWindow inherits Window {
     callback add-widget(int);
     callback apply-widget-settings(int, string, bool, bool, int, int, int, bool, bool);
     callback apply-widget-scale(int, int);
+    callback apply-widget-integer-parameter(int, int, int);
     callback toggle-widget-visibility(int);
     callback reset-widget-positions();
     callback hide-all-widgets();
@@ -990,7 +1045,6 @@ export component SettingsWindow inherits Window {
     title: root.window-title-text;
     no-frame: true;
     icon: @image-url("icon.png");
-    default-font-family: "Noto Sans SC";
     background: root.settings-background;
 
     init => {
@@ -2131,7 +2185,7 @@ export component SettingsWindow inherits Window {
                     width: parent.width - 52px;
                     height: 16px;
                     text: root.advanced-options-text;
-                    color: root.settings-muted-color;
+                    color: root.widget-parameter-labels.length > 0 ? root.settings-heading-color : root.settings-muted-color;
                     font-size: 11px;
                     font-weight: 500;
                     horizontal-alignment: root.rtl-layout ? right : left;
@@ -2150,6 +2204,60 @@ export component SettingsWindow inherits Window {
                     font-weight: 500;
                     horizontal-alignment: center;
                     visible: false;
+                }
+
+                for parameter-label[index] in root.widget-parameter-labels : Rectangle {
+                    x: 0px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 281 + index * 52) * 1px;
+                    width: parent.width;
+                    height: 46px;
+                    background: transparent;
+
+                    SettingLabel {
+                        rtl-layout: root.rtl-layout;
+                        x: 17px;
+                        y: 1px;
+                        width: parent.width - 252px;
+                        label: parameter-label;
+                        help: root.widget-parameter-helps.length > index ? root.widget-parameter-helps[index] : "";
+                        label-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                    }
+
+                    PercentStepper {
+                        x: parent.width - 217px;
+                        y: 0px;
+                        width: 150px;
+                        height: 34px;
+                        enabled: root.has-widgets;
+                        minimum: root.widget-parameter-minimums[index];
+                        maximum: root.widget-parameter-maximums[index];
+                        step-size: root.widget-parameter-steps[index];
+                        value: root.widget-parameter-values[index];
+                        accessible-label-text: parameter-label;
+                        text-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                        surface-color: root.settings-content-background;
+                        hover-color: root.settings-selected-background;
+                        control-border-color: root.settings-border-color;
+                        edited(value) => {
+                            if root.has-widgets && root.selected-widget-index >= 0 {
+                                root.apply-widget-integer-parameter(root.selected-widget-index, index, value);
+                            }
+                        }
+                    }
+
+                    Text {
+                        x: parent.width - 58px;
+                        y: 10px;
+                        width: 41px;
+                        height: 14px;
+                        text: root.widget-parameter-units.length > index ? root.widget-parameter-units[index] : "";
+                        color: root.settings-muted-color;
+                        font-size: 10px;
+                        font-weight: 500;
+                        overflow: elide;
+                    }
                 }
 
                     }
@@ -2589,6 +2697,12 @@ export component SettingsWindow inherits Window {
                         accent-color: root.settings-accent-color;
                         fallback-background: root.settings-preview-card-background;
                         fallback-text-color: root.settings-preview-primary-color;
+                        preview-hover-changed(hovered, preview-image) => {
+                            root.hovered-plugin-preview-visible = hovered;
+                            if (hovered) {
+                                root.hovered-plugin-preview-image = preview-image;
+                            }
+                        }
                     }
 
                     Text {
@@ -2921,10 +3035,10 @@ export component SettingsWindow inherits Window {
                                 root.remove-default-symbol(index);
                             }
                         }
-                    }
-                }
+            }
+        }
 
-                Rectangle {
+        Rectangle {
                     x: 17px + root.default-symbol-chip-values.length * 92px;
                     y: 54px;
                     width: 69px;
@@ -3410,7 +3524,20 @@ export component SettingsWindow inherits Window {
                         font-size: 8px;
                         horizontal-alignment: root.rtl-layout ? right : left;
                         overflow: elide;
-                        visible: root.network-proxy-enabled;
+                        visible: root.network-proxy-enabled && root.network-proxy-error-text == "";
+                    }
+
+                    Text {
+                        x: 17px;
+                        y: 159px;
+                        width: parent.width - 34px;
+                        height: 14px;
+                        text: root.network-proxy-error-text;
+                        color: root.settings-status-color;
+                        font-size: 10px;
+                        font-weight: 600;
+                        overflow: elide;
+                        visible: root.network-proxy-enabled && root.network-proxy-error-text != "";
                     }
 
                 }
@@ -3696,6 +3823,34 @@ export component SettingsWindow inherits Window {
                 }
             }
 
+        }
+
+        plugin_preview_hover := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: root.hovered-plugin-preview-width + 16px;
+            height: root.hovered-plugin-preview-height + 16px;
+            border-radius: 8px;
+            background: root.settings-surface-background;
+            border-width: 1px;
+            border-color: root.settings-preview-border-color;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000066;
+            clip: true;
+            visible: root.settings-tab-index == 1
+                && root.hovered-plugin-preview-visible
+                && root.hovered-plugin-preview-image.width > 0
+                && root.hovered-plugin-preview-image.height > 0;
+
+            Image {
+                x: 8px;
+                y: 8px;
+                width: root.hovered-plugin-preview-width;
+                height: root.hovered-plugin-preview-height;
+                source: root.hovered-plugin-preview-image;
+                image-fit: contain;
+            }
         }
 
         Rectangle {

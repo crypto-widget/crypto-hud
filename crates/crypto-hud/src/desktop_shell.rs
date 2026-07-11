@@ -18,7 +18,7 @@ use crate::{
     widget_host::WidgetRuntime,
     window_manager::{
         effective_tray_icon_enabled, enter_settings_mode, remove_native_tray_icon,
-        restore_native_tray_icon, schedule_settings_window_raise,
+        restore_native_tray_icon, schedule_settings_window_configuration,
         schedule_widget_shell_window_configuration, show_widgets,
     },
     AppTray, KeepAliveWindow, SettingsWindow,
@@ -191,7 +191,7 @@ fn show_settings_window(
     if let Err(error) = ui.show() {
         eprintln!("failed to show settings window: {error:#}");
     }
-    schedule_settings_window_raise();
+    schedule_settings_window_configuration();
     schedule_widget_shell_window_configuration();
 }
 

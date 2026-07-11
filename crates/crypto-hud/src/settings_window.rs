@@ -42,7 +42,7 @@ use crate::{
     widget_host::WidgetRuntime,
     window_manager::{
         apply_tray_hover_display, apply_widget_pinning_for_settings_mode, desktop_size,
-        leave_settings_mode, schedule_settings_window_raise,
+        leave_settings_mode, schedule_settings_window_configuration,
         schedule_widget_shell_window_configuration, TrayHoverDisplayState,
     },
 };
@@ -51,16 +51,17 @@ mod settings_actions;
 mod settings_models;
 mod settings_theme;
 use settings_actions::{
-    add_plugin_widget_to_store, apply_widget_scale_to_store, apply_widget_settings_to_store,
-    delete_widget_from_store_at_index, WidgetSettingsUpdate,
+    add_plugin_widget_to_store, apply_widget_integer_parameter_to_store,
+    apply_widget_scale_to_store, apply_widget_settings_to_store, delete_widget_from_store_at_index,
+    WidgetSettingsUpdate,
 };
 pub(crate) use settings_models::widget_type_usage_text;
 use settings_models::{
     bool_model, image_model, int_model, owned_string_model, plugin_market_items_model,
     string_model, widget_instance_detail_options, widget_instance_options,
-    widget_preview_image_options, widget_preview_kind_options, widget_scale_max_options,
-    widget_scale_min_options, widget_scale_options, widget_theme_index, widget_theme_options,
-    widget_visibility_options,
+    widget_integer_parameter_options, widget_preview_image_options, widget_preview_kind_options,
+    widget_scale_max_options, widget_scale_min_options, widget_scale_options, widget_theme_index,
+    widget_theme_options, widget_visibility_options,
 };
 use settings_theme::apply_theme_to_settings_window;
 
@@ -1156,6 +1157,12 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         let weak = ui.as_weak();
         move |network_proxy_enabled, network_proxy_url_input_text| {
             let previous = commit.current_settings();
+            if network_proxy_enabled && network_proxy_url_input_text.trim().is_empty() {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_network_proxy_error_text("".into());
+                }
+                return;
+            }
             let network_proxy_url = match normalized_network_proxy_input(
                 network_proxy_enabled,
                 network_proxy_url_input_text.as_str(),
@@ -1163,15 +1170,18 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 Ok(network_proxy_url) => network_proxy_url,
                 Err(error) => {
                     let locale = i18n::resolve_locale(previous.language);
-                    *commit.settings_status.borrow_mut() = error.status_message(locale);
+                    let status = error.status_message(locale);
+                    *commit.settings_status.borrow_mut() = status.clone();
                     if let Some(ui) = weak.upgrade() {
-                        let status = commit.settings_status.borrow().clone();
-                        ui.set_status_text(status.as_str().into());
+                        ui.set_network_proxy_error_text(status.into());
                     }
                     return;
                 }
             };
 
+            if let Some(ui) = weak.upgrade() {
+                ui.set_network_proxy_error_text("".into());
+            }
             let mut settings = previous;
             settings.network_proxy_enabled = network_proxy_enabled;
             settings.network_proxy_url = network_proxy_url;
@@ -1756,7 +1766,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 true,
                 "failed to add widget window",
             );
-            schedule_settings_window_raise();
+            schedule_settings_window_configuration();
         }
     });
 
@@ -1870,6 +1880,51 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 ui.set_status_text(status.as_str().into());
             }
             schedule_widget_shell_window_configuration();
+        }
+    });
+
+    ui.on_apply_widget_integer_parameter({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |selected_index, parameter_index, value| {
+            let settings = commit.current_settings();
+            let changed = {
+                let mut store = commit.layouts.borrow_mut();
+                let changed = apply_widget_integer_parameter_to_store(
+                    &mut store,
+                    selected_index,
+                    parameter_index,
+                    value,
+                    &commit.plugin_catalog,
+                );
+                if changed {
+                    if let Err(error) = save_layout_store(&commit.state_path, &store) {
+                        eprintln!("failed to save widget parameter: {error:#}");
+                    }
+                }
+                changed
+            };
+            if !changed {
+                return;
+            }
+            commit.sync_widget_runtimes(false, "failed to apply widget parameter");
+            commit.apply_widget_pinning_for_settings_mode();
+            commit.set_saved_status(settings.clone());
+            if let Some(ui) = weak.upgrade() {
+                let locale = i18n::resolve_locale(settings.language);
+                let options = commit
+                    .layouts
+                    .borrow()
+                    .widgets
+                    .get(selected_index.max(0) as usize)
+                    .map(|widget| {
+                        widget_integer_parameter_options(widget, &commit.plugin_catalog, locale)
+                    })
+                    .unwrap_or_default();
+                ui.set_widget_parameter_values(int_model(options.values));
+                let status = commit.settings_status.borrow().clone();
+                ui.set_status_text(status.as_str().into());
+            }
         }
     });
 
@@ -3202,6 +3257,16 @@ pub(crate) fn refresh_settings_window(
             .map(settings::widget_hide_quote_asset)
             .unwrap_or(false),
     );
+    let parameter_options = selected_widget
+        .map(|widget| widget_integer_parameter_options(widget, plugin_catalog, locale))
+        .unwrap_or_default();
+    ui.set_widget_parameter_labels(owned_string_model(parameter_options.labels));
+    ui.set_widget_parameter_helps(owned_string_model(parameter_options.helps));
+    ui.set_widget_parameter_units(owned_string_model(parameter_options.units));
+    ui.set_widget_parameter_values(int_model(parameter_options.values));
+    ui.set_widget_parameter_minimums(int_model(parameter_options.minimums));
+    ui.set_widget_parameter_maximums(int_model(parameter_options.maximums));
+    ui.set_widget_parameter_steps(int_model(parameter_options.steps));
     ui.set_default_widgets_always_on_top(settings.widgets_always_on_top);
     ui.set_default_opacity_percent(settings.opacity_percent);
     ui.set_default_widget_scale_percent(settings.widget_scale_percent);
@@ -4212,6 +4277,63 @@ mod tests {
     }
 
     #[test]
+    fn plugin_market_image_thumbnails_open_delayed_natural_size_hover_previews() {
+        let source = settings_window_ui_source();
+
+        let carousel_start = source
+            .find("component PluginPreviewCarousel inherits Rectangle {")
+            .unwrap();
+        let carousel_end = source
+            .find("component WidgetListPreviewCarousel inherits Rectangle {")
+            .unwrap();
+        let carousel = &source[carousel_start..carousel_end];
+        assert!(
+            carousel.contains("property <image> active-image:")
+                && carousel.contains("root.plugin.preview_image_1")
+                && carousel.contains("root.plugin.preview_image_5"),
+            "the hover preview should follow every image in the thumbnail carousel"
+        );
+        assert!(
+            carousel.contains("preview_touch := TouchArea {")
+                && carousel.contains("mouse-cursor: pointer;")
+                && carousel.contains("changed has-hover => {")
+                && carousel.contains("root.preview-hover-changed(false, root.active-image);"),
+            "leaving the thumbnail should close the hover preview immediately"
+        );
+        assert!(
+            carousel.contains("hover_preview_delay := Timer {")
+                && carousel.contains("interval: 250ms;")
+                && carousel.contains("running: root.preview-hovered && !root.preview-ready;")
+                && carousel.contains("root.preview-hover-changed(true, root.active-image);"),
+            "hover previews should open after a short intentional-hover delay"
+        );
+
+        let overlay_start = source.find("plugin_preview_hover := Rectangle {").unwrap();
+        let overlay = &source[overlay_start..];
+        assert!(
+            source.contains("root.hovered-plugin-preview-image.width * 1px * root.hovered-plugin-preview-scale")
+                && source.contains("root.hovered-plugin-preview-image.height * 1px * root.hovered-plugin-preview-scale")
+                && source.contains("min(1.0, min(1000.0 / root.hovered-plugin-preview-image.width, 600.0 / root.hovered-plugin-preview-image.height))"),
+            "the overlay should use 1:1 source dimensions and only shrink oversized previews"
+        );
+        assert!(
+            overlay.contains("source: root.hovered-plugin-preview-image;")
+                && overlay.contains("image-fit: contain;")
+                && overlay.contains("root.settings-tab-index == 1")
+                && overlay.contains("root.hovered-plugin-preview-visible"),
+            "the enlarged image should be a component-library-only top-level overlay"
+        );
+        assert!(
+            overlay_start > source.find("system_tab := Rectangle {").unwrap()
+                && overlay_start
+                    < source
+                        .find("y: parent.height - 1px;\n            width: parent.width;")
+                        .unwrap(),
+            "the hover preview must be above every settings tab rather than inside a hidden tab"
+        );
+    }
+
+    #[test]
     fn plugin_market_text_rows_follow_rtl_layout() {
         let source = settings_window_ui_source();
 
@@ -4398,7 +4520,7 @@ mod tests {
         assert!(
             source.contains("property <int> widget-display-section-y: root.widget-symbol-status-y + 10;")
                 && source.contains(
-                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset) * 1px;"
+                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset + root.widget-parameter-settings-offset) * 1px;"
                 ),
             "removing pair limit help should tighten the spacing below the pair chips"
         );
@@ -4419,11 +4541,16 @@ mod tests {
         ));
         assert!(proxy_section.contains("x: parent.width - 54px;"));
         assert!(proxy_section.contains("text: root.network-proxy-example-hint-text;"));
+        assert!(proxy_section.contains("text: root.network-proxy-error-text;"));
+        assert!(proxy_section.contains(
+            "visible: root.network-proxy-enabled && root.network-proxy-error-text == \"\";"
+        ));
+        assert!(source.contains("in-out property <string> network-proxy-error-text;"));
         assert!(
             proxy_section
                 .matches("visible: root.network-proxy-enabled;")
                 .count()
-                >= 4
+                >= 3
         );
         assert!(!source.contains("network-proxy-http-example-text"));
         assert!(!source.contains("network-proxy-socks-example-text"));
@@ -4493,7 +4620,7 @@ mod tests {
     }
 
     #[test]
-    fn advanced_options_row_is_disabled_until_options_exist() {
+    fn advanced_options_row_hosts_plugin_integer_parameters() {
         let source = settings_window_ui_source();
         let advanced_label =
             block_before_anchor(&source, "Text {", "text: root.advanced-options-text;");
@@ -4503,14 +4630,18 @@ mod tests {
             "Text {",
         );
 
-        assert!(
-            advanced_label.contains("color: root.settings-muted-color;"),
-            "advanced options label should look disabled while it has no content"
-        );
+        assert!(advanced_label.contains(
+            "color: root.widget-parameter-labels.length > 0 ? root.settings-heading-color : root.settings-muted-color;"
+        ));
         assert!(
             advanced_arrow.contains("text: \">\";") && advanced_arrow.contains("visible: false;"),
-            "advanced options should not show an affordance to enter an empty section"
+            "inline plugin options should not show a navigation affordance"
         );
+        assert!(source
+            .contains("for parameter-label[index] in root.widget-parameter-labels : Rectangle {"));
+        assert!(source.contains(
+            "root.apply-widget-integer-parameter(root.selected-widget-index, index, value);"
+        ));
     }
 
     #[test]
@@ -4970,25 +5101,6 @@ mod tests {
         assert!(
             !error.status_message(i18n::Locale::Ar).contains('\u{2066}'),
             "localized Arabic detail should not be wrapped as an LTR technical error"
-        );
-    }
-
-    #[test]
-    fn failed_persistence_never_reports_saved_status() {
-        let english = AppSettings::default();
-        let failed: Result<()> = Err(anyhow::anyhow!("access denied"));
-        assert_eq!(
-            persistence_status(&english, status_saved(english.clone()), &failed),
-            "Could not save settings: access denied"
-        );
-
-        let chinese = AppSettings {
-            language: LanguagePreference::ZhHans,
-            ..AppSettings::default()
-        };
-        assert_eq!(
-            persistence_status(&chinese, "快捷键注册失败".to_string(), &failed),
-            "快捷键注册失败 | 无法保存设置：access denied"
         );
     }
 
@@ -5684,6 +5796,63 @@ mod tests {
     }
 
     #[test]
+    fn failed_persistence_never_reports_saved_status() {
+        let english = AppSettings::default();
+        let failed: Result<()> = Err(anyhow::anyhow!("access denied"));
+        assert_eq!(
+            persistence_status(&english, status_saved(english.clone()), &failed),
+            "Could not save settings: access denied"
+        );
+
+        let chinese = AppSettings {
+            language: LanguagePreference::ZhHans,
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            persistence_status(&chinese, "快捷键注册失败".to_string(), &failed),
+            "快捷键注册失败 | 无法保存设置：access denied"
+        );
+    }
+
+    #[test]
+    fn market_compass_integer_parameter_is_localized_saved_and_clamped() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = plugin::PluginCatalog::discover(vec![root]);
+        let widget = test_widget(
+            "plugin-compass-1",
+            "com.cryptohud.market-compass",
+            vec!["BTC", "ETH"],
+        );
+
+        let options = widget_integer_parameter_options(&widget, &catalog, i18n::Locale::ZhHans);
+        assert_eq!(options.labels, vec!["切换时间"]);
+        assert_eq!(options.helps, vec!["币种自动切换的时间间隔。"]);
+        assert_eq!(options.units, vec!["秒"]);
+        assert_eq!(options.values, vec![5]);
+        assert_eq!(options.minimums, vec![1]);
+        assert_eq!(options.maximums, vec![60]);
+
+        let mut store = LayoutStore {
+            selected_widget_id: Some(widget.id.clone()),
+            widgets: vec![widget],
+            ..LayoutStore::default()
+        };
+        assert!(apply_widget_integer_parameter_to_store(
+            &mut store, 0, 0, 90, &catalog
+        ));
+        assert_eq!(
+            settings::widget_integer_parameter(
+                &store.widgets[0],
+                "switch-interval-seconds",
+                5,
+                1,
+                60
+            ),
+            60
+        );
+    }
+
+    #[test]
     fn widget_scale_options_follow_each_instance_size() {
         let catalog = plugin::PluginCatalog::builtins();
         let definitions = widget_definitions_from_catalog(&catalog);
@@ -5948,6 +6117,7 @@ mod tests {
             preview_images: Vec::new(),
             themes: plugin::single_default_theme(),
             data_requirements: Vec::new(),
+            parameters: Vec::new(),
             status: plugin::PluginStatus::Available,
         }])
     }

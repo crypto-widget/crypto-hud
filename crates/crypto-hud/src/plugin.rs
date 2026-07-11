@@ -7,8 +7,9 @@ use std::{
 use anyhow::{anyhow, bail, Context, Result};
 use crypto_hud_core::{default_market_symbols, normalize_market_pair_key};
 pub use crypto_hud_runtime::{
-    parse_manifest, validate_manifest, PluginDataRequirement, PluginManifest, PluginSize,
-    PluginSizePolicy, PluginTheme, PluginThemeRole, MAX_PREVIEW_IMAGES, MIN_SYMBOL_LIMIT,
+    parse_manifest, validate_manifest, PluginDataRequirement, PluginManifest, PluginParameter,
+    PluginSize, PluginSizePolicy, PluginTheme, PluginThemeRole, MAX_PREVIEW_IMAGES,
+    MIN_SYMBOL_LIMIT,
 };
 use semver::Version;
 use slint_interpreter::{Compiler, ComponentDefinition, ValueType};
@@ -167,6 +168,7 @@ pub struct PluginDefinition {
     pub preview_images: Vec<PathBuf>,
     pub themes: Vec<PluginTheme>,
     pub data_requirements: Vec<PluginDataRequirement>,
+    pub parameters: Vec<PluginParameter>,
     pub status: PluginStatus,
 }
 
@@ -263,6 +265,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             data_requirements: vec![PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
+            parameters: Vec::new(),
             status: PluginStatus::Available,
         },
         PluginDefinition {
@@ -284,6 +287,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             data_requirements: vec![PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
+            parameters: Vec::new(),
             status: PluginStatus::Available,
         },
     ]
@@ -434,6 +438,7 @@ fn load_local_plugin(root: &Path) -> Result<PluginDefinition> {
         return Ok(plugin);
     }
 
+    let parameters = plugin.parameters.clone();
     if let PluginRendererDefinition::Slint {
         root_dir,
         entry,
@@ -441,7 +446,7 @@ fn load_local_plugin(root: &Path) -> Result<PluginDefinition> {
         definition,
     } = &mut plugin.renderer
     {
-        match compile_slint_renderer(root_dir, entry, component) {
+        match compile_slint_renderer(root_dir, entry, component, &parameters) {
             Ok(compiled) => {
                 *definition = Some(compiled);
                 plugin.status = PluginStatus::Available;
@@ -510,6 +515,7 @@ pub fn manifest_to_definition(
         preview_images,
         themes: manifest.themes,
         data_requirements: manifest.data_requirements,
+        parameters: manifest.parameters,
         status: PluginStatus::Unavailable(SLINT_RENDERER_UNCOMPILED_REASON.to_string()),
     })
 }
@@ -530,6 +536,7 @@ fn compile_slint_renderer(
     root_dir: &Path,
     entry: &Path,
     component: &str,
+    parameters: &[PluginParameter],
 ) -> Result<ComponentDefinition> {
     let mut compiler = Compiler::default();
     compiler.set_include_paths(vec![root_dir.to_path_buf()]);
@@ -557,7 +564,7 @@ fn compile_slint_renderer(
             result.component_names().collect::<Vec<_>>().join(", ")
         )
     })?;
-    validate_slint_contract(&definition)?;
+    validate_slint_contract(&definition, parameters)?;
     Ok(definition)
 }
 
@@ -582,7 +589,10 @@ fn read_plugin_slint_source(root_dir: &Path, path: &Path) -> Result<String> {
     fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))
 }
 
-fn validate_slint_contract(definition: &ComponentDefinition) -> Result<()> {
+fn validate_slint_contract(
+    definition: &ComponentDefinition,
+    parameters: &[PluginParameter],
+) -> Result<()> {
     let properties = definition.properties().collect::<Vec<_>>();
     for (name, expected_type) in REQUIRED_PROPERTIES {
         let Some((_, actual_type)) = properties.iter().find(|(property, _)| property == name)
@@ -595,6 +605,18 @@ fn validate_slint_contract(definition: &ComponentDefinition) -> Result<()> {
                 actual_type,
                 expected_type
             );
+        }
+    }
+
+    for parameter in parameters {
+        let PluginParameter::Integer { key, .. } = parameter;
+        let name = format!("config-{key}");
+        let Some((_, actual_type)) = properties.iter().find(|(property, _)| property == &name)
+        else {
+            bail!("Slint component is missing parameter property {name}");
+        };
+        if actual_type != &ValueType::Number {
+            bail!("Slint parameter property {name} must be an integer or float");
         }
     }
 
@@ -1241,6 +1263,28 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
+    fn market_compass_declares_configurable_switch_interval() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let plugin = catalog.find("com.cryptohud.market-compass").unwrap();
+
+        assert!(matches!(
+            &plugin.parameters[0],
+            PluginParameter::Integer {
+                key,
+                default: 5,
+                minimum: 1,
+                maximum: 60,
+                unit,
+                ..
+            } if key == "switch-interval-seconds" && unit == "s"
+        ));
+        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
+        assert!(source.contains("in property <int> config-switch-interval-seconds: 5;"));
+        assert!(source.contains("interval: root.config-switch-interval-seconds * 1s;"));
+    }
+
+    #[test]
     fn repo_plugins_accept_host_supplied_scale_and_root_drag_layer() {
         for plugin_id in HOST_SCALE_REPO_PLUGIN_IDS {
             let source = repo_plugin_ui_source(plugin_id);
@@ -1412,14 +1456,61 @@ export component ExamplePriceCard inherits Window {
             "market compass active pair should advance with the clockwise rotation step"
         );
         assert!(
-            source.contains(
-                "slot-angle: -90deg + (root.bounded-rotation-step - index) * 1turn / root.orbit-denominator;"
-            ),
+            source.contains("property <int> bounded-rotation-step: root.orbit-count <= 0 ? 0 : Math.mod(root.rotation-step, root.orbit-count);")
+                && source.contains(
+                    "slot-angle: -90deg + (root.rotation-step - index) * 1turn / root.orbit-denominator;"
+                ),
             "market compass pairs should be laid out counterclockwise so the next pair enters 12 o'clock during clockwise rotation"
         );
         assert!(
-            !source.contains("slot-angle: -90deg + (index + root.bounded-rotation-step)"),
+            source.contains("root.rotation-step += 1;")
+                && !source.contains("root.rotation-step = 0;"),
+            "market compass rotation should remain monotonic so the last-to-first transition continues clockwise"
+        );
+        assert!(
+            !source.contains("slot-angle: -90deg + (index + root.rotation-step)"),
             "market compass should not lay out pairs clockwise"
+        );
+    }
+
+    #[test]
+    fn market_compass_nodes_follow_the_rail_without_self_rotation() {
+        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
+
+        assert!(
+            source.contains("animate slot-angle { duration: 620ms; easing: ease-in-out; }")
+                && !source.contains("animate x { duration: 620ms;")
+                && !source.contains("animate y { duration: 620ms;"),
+            "market compass should animate its polar angle instead of interpolating x/y across a chord"
+        );
+        assert!(
+            source.contains(
+                "x: root.orbit-center-x + root.orbit-radius * Math.cos(coin_node.slot-angle)"
+            ) && source.contains(
+                "y: root.orbit-center-y + root.orbit-radius * Math.sin(coin_node.slot-angle)"
+            ),
+            "market compass node centers should be derived from one shared circular rail"
+        );
+        assert!(
+            !source.contains("property <angle> rolling-angle:")
+                && !source.contains("rim_glint := Rectangle")
+                && !source.contains("quote-icon-rotation-sheets")
+                && !source.contains("source-clip-x: coin_node.icon-frame-index"),
+            "market compass coin shells and logos should stay upright while their nodes orbit"
+        );
+    }
+
+    #[test]
+    fn market_compass_dark_theme_removes_the_misaligned_inner_ring() {
+        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
+
+        assert!(
+            source.contains("dark_inner_ring_mask := Rectangle")
+                && source.contains("width: parent.width * 0.594;")
+                && source.contains("border-width: parent.width * 0.032;")
+                && source.contains("border-color: #05090d;")
+                && source.contains("visible: !root.light-theme;"),
+            "market compass should cover only the dark node asset's extra inner cyan ring"
         );
     }
 

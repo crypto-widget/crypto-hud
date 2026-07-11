@@ -63,7 +63,7 @@ use widget_host::WidgetRuntime;
 use window_manager::{
     apply_tray_hover_display, enter_settings_mode, install_hotkey_poll_timer,
     install_tray_hover_display_timer, install_widget_shell_window_maintenance_timer,
-    schedule_settings_window_raise, schedule_widget_shell_window_configuration,
+    schedule_settings_window_configuration, schedule_widget_shell_window_configuration,
     TrayHoverDisplayState,
 };
 #[cfg(test)]
@@ -306,7 +306,7 @@ fn main() -> Result<()> {
         settings_window
             .show()
             .context("failed to show settings window on startup")?;
-        schedule_settings_window_raise();
+        schedule_settings_window_configuration();
     }
     let gui_smoke_settings_interaction_timer = install_gui_smoke_settings_interaction_timer(
         settings_window.as_weak(),
@@ -439,6 +439,7 @@ mod tests {
             data_requirements: vec![plugin::PluginDataRequirement {
                 capability: "market.price".to_string(),
             }],
+            parameters: Vec::new(),
             status: plugin::PluginStatus::Available,
         }
     }
@@ -621,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_mode_preserves_pinned_widgets_topmost() {
+    fn settings_mode_temporarily_suspends_pinned_widgets_topmost() {
         let instance = WidgetInstance {
             id: "quote-board-1".to_string(),
             plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
@@ -637,7 +638,7 @@ mod tests {
         };
 
         assert!(widget_pin_to_top(&instance, false));
-        assert!(widget_pin_to_top(&instance, true));
+        assert!(!widget_pin_to_top(&instance, true));
     }
 
     #[test]

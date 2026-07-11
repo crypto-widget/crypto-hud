@@ -192,6 +192,41 @@ property <color> change-color: row.positive
     : (root.red-up-enabled ? root.gain-color : root.loss-color);
 ```
 
+## Plugin Parameters
+
+Plugins can declare up to 8 integer parameters. The host validates the manifest, renders a stepper in the selected widget settings, persists each widget instance's value, and injects it into the Slint component as `config-<key>`.
+
+```json
+"parameters": [
+  {
+    "kind": "integer",
+    "key": "switch-interval-seconds",
+    "name": "Switch interval",
+    "nameZhHans": "切换时间",
+    "description": "Time between automatic pair switches.",
+    "descriptionZhHans": "币种自动切换的时间间隔。",
+    "default": 5,
+    "minimum": 1,
+    "maximum": 60,
+    "step": 1,
+    "unit": "s",
+    "unitZhHans": "秒"
+  }
+]
+```
+
+The parameter key must use lowercase ASCII letters, digits, and internal hyphens. The matching Slint property is required and must be numeric:
+
+```slint
+in property <int> config-switch-interval-seconds: 5;
+
+Timer {
+    interval: root.config-switch-interval-seconds * 1s;
+}
+```
+
+Missing persisted values use `default`; saved values are clamped to `minimum` and `maximum`.
+
 ## Scaling And Dragging
 
 The host stores widget scale and passes the real window state through `widget-scale`, `widget-width`, and `widget-height`. Do not infer scale from `root.width` or `root.height`.
