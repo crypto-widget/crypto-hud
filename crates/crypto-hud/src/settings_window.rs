@@ -5048,22 +5048,23 @@ mod tests {
     }
 
     #[test]
-    fn github_signature_prioritizes_available_update_state() {
+    fn github_signature_only_displays_project_name_and_version() {
         let source = settings_window_ui_source();
+        let component_start = source
+            .find("component GithubProjectSignature inherits Rectangle {")
+            .unwrap();
+        let component_end = source[component_start..]
+            .find("component PluginPreviewCarousel")
+            .map(|index| component_start + index)
+            .unwrap();
+        let signature_component = &source[component_start..component_end];
 
-        for required in [
-            "in property <bool> update-available: false;",
-            "status-text: root.status-text;",
-            "update-available: root.update-available;",
-            "update-version-text: root.update-version-text;",
-            "text: root.update-available ? root.update-version-text : root.status-text;",
-            "visible: root.update-available;",
-        ] {
-            assert!(
-                source.contains(required),
-                "GitHub signature should expose update state: {required}"
-            );
-        }
+        assert!(signature_component.contains("text: root.project-name;"));
+        assert!(signature_component.contains("text: root.version-text;"));
+        assert!(!signature_component.contains("status-text"));
+        assert!(!signature_component.contains("update-available"));
+        assert!(!source.contains("status-text: root.status-text;"));
+        assert!(!source.contains("update-available: root.update-available;"));
     }
 
     #[test]
