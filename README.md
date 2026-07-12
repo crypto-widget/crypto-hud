@@ -2,7 +2,7 @@
   <img src="crates/crypto-hud/ui/icon.png" width="88" alt="Crypto HUD logo">
 </p>
 
-<h1 align="center">Crypto HUD</h1>
+<h1 align="center">Crypto HUD — Native Crypto Desktop Widget for Windows</h1>
 
 <p align="center">
   <strong>Your market, always within a glance.</strong><br>
@@ -51,10 +51,10 @@
 
 ---
 
-Crypto HUD is a lightweight, local-first market display for people who want to
-follow a few coins without living inside a trading terminal. Place a widget
-where it feels natural, keep working, and glance over only when the market
-matters.
+Crypto HUD is a lightweight, local-first crypto desktop widget for Windows,
+built for people who want to follow a few coins without living inside a trading
+terminal. Place a widget where it feels natural, keep working, and glance over
+only when the market matters.
 
 <table>
   <tr>

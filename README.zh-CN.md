@@ -2,7 +2,7 @@
   <img src="crates/crypto-hud/ui/icon.png" width="88" alt="Crypto HUD 图标">
 </p>
 
-<h1 align="center">Crypto HUD</h1>
+<h1 align="center">Crypto HUD：Windows 原生加密货币桌面行情组件</h1>
 
 <p align="center">
   <strong>行情一直在，需要时扫一眼。</strong><br>
@@ -51,9 +51,9 @@
 
 ---
 
-Crypto HUD 是一款轻量、本地优先的桌面行情工具，适合想关注几个币种、
-又不想整天泡在交易终端里的人。把组件摆在顺眼的位置，继续工作；
-只有当行情值得在意时，再抬眼看一下。
+Crypto HUD 是一款轻量、本地优先的 Windows 加密货币桌面行情组件
+（crypto desktop widget），适合想关注几个币种、又不想整天泡在交易终端里的人。
+把组件摆在顺眼的位置，继续工作；只有当行情值得在意时，再抬眼看一下。
 
 <table>
   <tr>
