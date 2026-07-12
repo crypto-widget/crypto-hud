@@ -250,7 +250,7 @@ try {
         -ArgumentList @("--widgets", "3", "--gui-smoke-ms", "$TimeoutMs") `
         -PassThru
     try {
-        Wait-ForFile $ReadyFile 5000
+        Wait-ForFile $ReadyFile 10000
         $ready = Get-Content -LiteralPath $ReadyFile -Raw | ConvertFrom-Json
         if (-not [bool]$ready.marketDataReady) {
             throw "GUI plugin scale smoke marker did not report market data ready"

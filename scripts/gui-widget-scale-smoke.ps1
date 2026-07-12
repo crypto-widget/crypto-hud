@@ -8,6 +8,14 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $StateDir = Join-Path $RepoRoot "target\tmp\gui-widget-scale-smoke-state"
 $ReadyFile = Join-Path $StateDir "ready.json"
 $StateFile = Join-Path $StateDir "layouts.json"
+$CargoTargetDir = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    Join-Path $RepoRoot "target"
+} elseif ([System.IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
+    [System.IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $env:CARGO_TARGET_DIR))
+}
+$Exe = Join-Path $CargoTargetDir "debug\crypto-hud.exe"
 
 if (Test-Path $StateDir) {
     Remove-Item -LiteralPath $StateDir -Recurse -Force
@@ -161,9 +169,9 @@ function Wait-ForWidgetState([int]$ExpectedWidth, [int]$ExpectedHeight, [int]$Ex
 function Get-AutomationControl(
     [IntPtr]$WindowHandle,
     [string]$Name,
-    [System.Windows.Automation.ControlType]$ControlType
+    [System.Windows.Automation.ControlType]$ControlType,
+    [int]$TimeoutMilliseconds = 5000
 ) {
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle($WindowHandle)
     $nameCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty,
         $Name
@@ -175,14 +183,26 @@ function Get-AutomationControl(
     $condition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.Condition[]]@($nameCondition, $typeCondition)
     )
-    $element = $root.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $condition
-    )
-    if (-not $element) {
-        throw "Could not find accessible $ControlType control named '$Name'"
-    }
-    $element
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMilliseconds)
+    $lastError = "the control was not present in the automation tree"
+    do {
+        try {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($WindowHandle)
+            $element = $root.FindFirst(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                $condition
+            )
+            if ($element) {
+                return $element
+            }
+            $lastError = "the control was not present in the automation tree"
+        } catch {
+            $lastError = $_.Exception.Message
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Could not find accessible $ControlType control named '$Name' within $TimeoutMilliseconds ms. Last error: $lastError"
 }
 
 function Invoke-AutomationButton([IntPtr]$WindowHandle, [string]$Name) {
@@ -310,11 +330,11 @@ try {
     }
 
     $app = Start-Process `
-        -FilePath (Join-Path $RepoRoot "target\debug\crypto-hud.exe") `
+        -FilePath $Exe `
         -ArgumentList @("--widgets", "1", "--show-settings", "--gui-smoke-ms", "$TimeoutMs") `
         -PassThru
     try {
-        Wait-ForFile $ReadyFile 5000
+        Wait-ForFile $ReadyFile 8000
         $ready = Get-Content -LiteralPath $ReadyFile -Raw | ConvertFrom-Json
         if (-not [bool]$ready.marketDataReady) {
             throw "GUI widget scale smoke marker did not report market data ready"

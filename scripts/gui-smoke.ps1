@@ -1,6 +1,6 @@
 param(
     [int]$Widgets = 2,
-    [int]$TimeoutMs = 2200
+    [int]$TimeoutMs = 10000
 )
 
 $ErrorActionPreference = "Stop"

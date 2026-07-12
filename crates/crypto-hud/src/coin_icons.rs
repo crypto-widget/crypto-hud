@@ -385,7 +385,7 @@ fn download_icon(
     trust_wallet_index: &mut TrustWalletTokenIndex,
 ) -> Result<Option<PathBuf>, String> {
     if feature_flags::gui_smoke_offline_network_disabled() {
-        return Err("coin icon network access is disabled for offline GUI smoke".to_string());
+        return Ok(None);
     }
 
     let agent = http_agent(proxy_url)?;
