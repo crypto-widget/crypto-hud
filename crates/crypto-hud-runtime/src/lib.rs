@@ -1363,26 +1363,6 @@ pub fn oldest_update_for_symbols(symbols: &[String], quote_cache: &QuoteCache) -
         .min()
 }
 
-fn oldest_display_update_for_symbols(
-    symbols: &[String],
-    quote_cache: &QuoteCache,
-) -> Option<Instant> {
-    symbols
-        .iter()
-        .filter_map(|symbol| quote_cache.get(symbol))
-        .map(|state| {
-            if state.chart_closes_24h.is_empty() && state.chart_candles_24h.is_empty() {
-                state.updated_at
-            } else {
-                state
-                    .chart_updated_at
-                    .map(|chart_updated_at| chart_updated_at.min(state.updated_at))
-                    .unwrap_or(state.updated_at)
-            }
-        })
-        .min()
-}
-
 pub fn source_for_symbols(
     symbols: &[String],
     quote_cache: &QuoteCache,
@@ -1406,7 +1386,7 @@ pub fn updated_text_for_symbols(
     }
 
     let health = data_health_for_symbols(symbols, quote_cache, now);
-    let Some(updated_at) = oldest_display_update_for_symbols(symbols, quote_cache) else {
+    let Some(updated_at) = oldest_update_for_symbols(symbols, quote_cache) else {
         return if has_market_error {
             labels.connection_error.to_string()
         } else {
@@ -2536,7 +2516,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_failed_chart_does_not_inherit_fresh_ticker_timestamp() {
+    fn updated_text_uses_fresh_quote_timestamp_when_chart_is_stale() {
         let now = Instant::now() + Duration::from_secs(60 * 60);
         let mut cache = QuoteCache::new();
         cache.insert(
@@ -2580,7 +2560,7 @@ mod tests {
             display_options: WidgetDisplayOptions::default(),
         });
 
-        assert_eq!(view.updated_text, "Stale 60m");
+        assert_eq!(view.updated_text, "Updated 2s");
         assert_eq!(view.source_text, "live feed · Binance · source issue");
         assert!(!view.chart_ready);
         assert!(!view.chart_up_candle_path.is_empty());
