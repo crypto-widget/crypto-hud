@@ -214,7 +214,6 @@ cargo +1.96.0 test -p crypto-hud dynamic_option_sets_are_localized_for_every_non
 cargo +1.96.0 test -p crypto-hud key_settings_help_copy_is_localized_for_every_non_english_locale
 cargo +1.96.0 test -p crypto-hud settings_and_market_copy_follow_locale
 cargo +1.96.0 test -p crypto-hud slint_user_facing_text_literals_are_limited_to_non_localized_tokens
-cargo +1.96.0 test -p crypto-hud tray_menu_exposes_localized_show_widgets_action
 cargo +1.96.0 test -p crypto-hud refresh_tray_text_sets_every_localized_tray_label
 cargo +1.96.0 test -p crypto-hud settings_window_shared_text_controls_follow_rtl_layout
 cargo +1.96.0 test -p crypto-hud plugin_market_text_rows_follow_rtl_layout

@@ -2,7 +2,6 @@ export component AppTray inherits SystemTrayIcon {
     in-out property <bool> tray-visible: true;
     in property <string> tray-tooltip-text;
     in property <string> tray-settings-text;
-    in property <string> tray-show-widgets-text;
     in property <string> tray-quit-text;
 
     icon: @image-url("icon-small.png");
@@ -16,11 +15,6 @@ export component AppTray inherits SystemTrayIcon {
             activated => { root.open-settings(); }
         }
 
-        MenuItem {
-            title: root.tray-show-widgets-text;
-            activated => { root.show-widgets(); }
-        }
-
         MenuSeparator { }
 
         MenuItem {
@@ -32,7 +26,6 @@ export component AppTray inherits SystemTrayIcon {
     clicked => { root.open-settings(); }
 
     callback open-settings();
-    callback show-widgets();
     callback quit();
 }
 

@@ -332,7 +332,6 @@ fn main() -> Result<()> {
         settings_window.as_weak(),
         layouts.clone(),
         state_path.clone(),
-        widgets_hidden.clone(),
         settings_mode_active.clone(),
         plugin_catalog.clone(),
     )?;

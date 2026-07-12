@@ -418,18 +418,13 @@ component CompactSwitch inherits Rectangle {
 component GithubProjectSignature inherits Rectangle {
     in property <string> project-name;
     in property <string> version-text;
-    in property <string> status-text;
-    in property <bool> update-available;
-    in property <string> update-version-text;
-    in property <string> update-available-accessible-text;
     in property <color> label-color;
     in property <color> muted-color;
     in property <color> accent-color;
     callback clicked();
 
-    property <bool> has-secondary-text: root.update-available || root.status-text != "";
     property <color> active-label-color: signature_touch.has-hover ? root.accent-color : root.label-color;
-    property <length> lockup-width: root.has-secondary-text ? root.width : 96px;
+    property <length> lockup-width: 96px;
     property <length> lockup-x: (root.width - root.lockup-width) / 2;
     property <length> lockup-y: (root.height - 32px) / 2;
 
@@ -437,7 +432,7 @@ component GithubProjectSignature inherits Rectangle {
     forward-focus: signature_focus;
 
     accessible-role: button;
-    accessible-label: root.update-available ? root.update-available-accessible-text : root.project-name;
+    accessible-label: root.project-name;
     accessible-action-default => { root.clicked(); }
 
     Path {
@@ -467,48 +462,13 @@ component GithubProjectSignature inherits Rectangle {
     Text {
         x: root.lockup-x + 29px;
         y: root.lockup-y + 19px;
-        width: root.has-secondary-text ? 47px : root.lockup-width - 29px;
+        width: root.lockup-width - 29px;
         height: 14px;
         text: root.version-text;
         color: root.muted-color;
         font-size: 9px;
         font-weight: 600;
         overflow: elide;
-    }
-
-    Rectangle {
-        x: root.lockup-x + 81px;
-        y: root.lockup-y + 22px;
-        width: 8px;
-        height: 8px;
-        border-radius: 4px;
-        border-width: 1px;
-        border-color: root.accent-color;
-        background: transparent;
-        visible: root.update-available;
-
-        Rectangle {
-            x: 2px;
-            y: 2px;
-            width: 4px;
-            height: 4px;
-            border-radius: 2px;
-            background: root.accent-color;
-        }
-    }
-
-    Text {
-        x: root.lockup-x + 93px;
-        y: root.lockup-y + 19px;
-        width: root.lockup-width - 93px;
-        height: 14px;
-        text: root.update-available ? root.update-version-text : root.status-text;
-        color: root.update-available ? root.accent-color : root.muted-color;
-        font-size: 9px;
-        font-weight: root.update-available ? 700 : 600;
-        horizontal-alignment: right;
-        overflow: elide;
-        visible: root.has-secondary-text;
     }
 
     signature_touch := TouchArea {
@@ -1366,10 +1326,6 @@ export component SettingsWindow inherits Window {
                 height: 36px;
                 project-name: "crypto-hud";
                 version-text: root.app-version-signature-text;
-                status-text: root.status-text;
-                update-available: root.update-available;
-                update-version-text: root.update-version-text;
-                update-available-accessible-text: root.update-available-accessible-text;
                 label-color: root.settings-heading-color;
                 muted-color: root.settings-muted-color;
                 accent-color: root.settings-accent-color;

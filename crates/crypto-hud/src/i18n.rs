@@ -63,7 +63,6 @@ pub enum WidgetText {
 pub struct UiText {
     pub tray_tooltip: &'static str,
     pub tray_settings: &'static str,
-    pub tray_show_widgets: &'static str,
     pub tray_quit: &'static str,
     pub settings_title: &'static str,
     pub tab_widgets: &'static str,
@@ -198,7 +197,6 @@ pub struct UiText {
 const EN_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "Main Window",
-    tray_show_widgets: "Show Widgets",
     tray_quit: "Quit",
     settings_title: "Crypto HUD",
     tab_widgets: "Widgets",
@@ -334,7 +332,6 @@ const EN_TEXT: UiText = UiText {
 const ZH_HANS_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "主界面",
-    tray_show_widgets: "显示小组件",
     tray_quit: "退出",
     settings_title: "Crypto HUD",
     tab_widgets: "小组件",
@@ -469,7 +466,6 @@ const ZH_HANS_TEXT: UiText = UiText {
 const ZH_HANT_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "主視窗",
-    tray_show_widgets: "顯示小工具",
     tray_quit: "結束",
     settings_title: "Crypto HUD",
     tab_widgets: "小工具",
@@ -604,7 +600,6 @@ const ZH_HANT_TEXT: UiText = UiText {
 const ES_419_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "Ventana principal",
-    tray_show_widgets: "Mostrar widgets",
     tray_quit: "Salir",
     settings_title: "Crypto HUD",
     tab_widgets: "Widgets",
@@ -739,7 +734,6 @@ const ES_419_TEXT: UiText = UiText {
 const PT_BR_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "Janela principal",
-    tray_show_widgets: "Mostrar widgets",
     tray_quit: "Sair",
     settings_title: "Crypto HUD",
     tab_widgets: "Widgets",
@@ -874,7 +868,6 @@ const PT_BR_TEXT: UiText = UiText {
 const VI_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "Cửa sổ chính",
-    tray_show_widgets: "Hiện widget",
     tray_quit: "Thoát",
     settings_title: "Crypto HUD",
     tab_widgets: "Widget",
@@ -1009,7 +1002,6 @@ const VI_TEXT: UiText = UiText {
 const ID_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "Jendela utama",
-    tray_show_widgets: "Tampilkan widget",
     tray_quit: "Keluar",
     settings_title: "Crypto HUD",
     tab_widgets: "Widget",
@@ -1144,7 +1136,6 @@ const ID_TEXT: UiText = UiText {
 const TR_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "Ana pencere",
-    tray_show_widgets: "Widget'ları göster",
     tray_quit: "Çıkış",
     settings_title: "Crypto HUD",
     tab_widgets: "Widget'lar",
@@ -1280,7 +1271,6 @@ const TR_TEXT: UiText = UiText {
 const KO_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "메인 창",
-    tray_show_widgets: "위젯 표시",
     tray_quit: "종료",
     settings_title: "Crypto HUD",
     tab_widgets: "위젯",
@@ -1415,7 +1405,6 @@ const KO_TEXT: UiText = UiText {
 const JA_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "メインウィンドウ",
-    tray_show_widgets: "ウィジェットを表示",
     tray_quit: "終了",
     settings_title: "Crypto HUD",
     tab_widgets: "ウィジェット",
@@ -1550,7 +1539,6 @@ const JA_TEXT: UiText = UiText {
 const RU_TEXT: UiText = UiText {
     tray_tooltip: "Crypto HUD",
     tray_settings: "Главное окно",
-    tray_show_widgets: "Показать виджеты",
     tray_quit: "Выход",
     settings_title: "Crypto HUD",
     tab_widgets: "Виджеты",
@@ -1685,7 +1673,6 @@ const RU_TEXT: UiText = UiText {
 const AR_TEXT: UiText = UiText {
     tray_tooltip: "\u{2066}Crypto HUD\u{2069}",
     tray_settings: "النافذة الرئيسية",
-    tray_show_widgets: "إظهار الأدوات",
     tray_quit: "إنهاء",
     settings_title: "\u{2066}Crypto HUD\u{2069}",
     tab_widgets: "الأدوات",
@@ -3969,7 +3956,6 @@ mod tests {
             "cargo +1.96.0 test -p crypto-hud key_settings_help_copy_is_localized_for_every_non_english_locale",
             "cargo +1.96.0 test -p crypto-hud settings_and_market_copy_follow_locale",
             "cargo +1.96.0 test -p crypto-hud slint_user_facing_text_literals_are_limited_to_non_localized_tokens",
-            "cargo +1.96.0 test -p crypto-hud tray_menu_exposes_localized_show_widgets_action",
             "cargo +1.96.0 test -p crypto-hud refresh_tray_text_sets_every_localized_tray_label",
             "cargo +1.96.0 test -p crypto-hud settings_window_shared_text_controls_follow_rtl_layout",
             "cargo +1.96.0 test -p crypto-hud plugin_market_text_rows_follow_rtl_layout",
@@ -5049,7 +5035,6 @@ mod tests {
     fn primary_static_ui_fields(text: &'static UiText) -> Vec<(&'static str, &'static str)> {
         vec![
             ("tray_settings", text.tray_settings),
-            ("tray_show_widgets", text.tray_show_widgets),
             ("tray_quit", text.tray_quit),
             ("tab_widgets", text.tab_widgets),
             ("tab_plugin_market", text.tab_plugin_market),
