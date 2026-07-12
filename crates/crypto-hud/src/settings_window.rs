@@ -4392,24 +4392,22 @@ mod tests {
     }
 
     #[test]
-    fn tray_menu_exposes_localized_show_widgets_action() {
+    fn tray_menu_omits_redundant_show_widgets_action() {
         let source = slint_ui_sources()
             .into_iter()
             .find_map(|(file_name, source)| (file_name == "shell-windows.slint").then_some(source))
             .expect("shell-windows.slint should be included in UI sources");
 
-        assert!(
-            source.contains("in property <string> tray-show-widgets-text;"),
-            "tray menu should receive localized show-widgets text from Rust"
-        );
-        assert!(
-            source.contains("title: root.tray-show-widgets-text;"),
-            "tray menu should render the localized show-widgets label"
-        );
-        assert!(
-            source.contains("activated => { root.show-widgets(); }"),
-            "tray menu should call the existing show-widgets callback"
-        );
+        for removed in [
+            "tray-show-widgets-text",
+            "activated => { root.show-widgets(); }",
+            "callback show-widgets();",
+        ] {
+            assert!(
+                !source.contains(removed),
+                "tray menu should not expose the redundant show-widgets action: {removed}"
+            );
+        }
     }
 
     fn slint_ui_sources() -> Vec<(String, String)> {

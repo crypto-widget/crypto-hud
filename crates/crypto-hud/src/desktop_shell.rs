@@ -22,7 +22,7 @@ use crate::{
     window_manager::{
         effective_tray_icon_enabled, enter_settings_mode, remove_native_tray_icon,
         restore_native_tray_icon, schedule_settings_window_configuration,
-        schedule_widget_shell_window_configuration, show_widgets,
+        schedule_widget_shell_window_configuration,
     },
     AppTray, KeepAliveWindow, SettingsWindow,
 };
@@ -567,7 +567,6 @@ pub(crate) fn install_tray(
     settings_window: slint::Weak<SettingsWindow>,
     layouts: Rc<RefCell<LayoutStore>>,
     state_path: PathBuf,
-    widgets_hidden: Rc<RefCell<bool>>,
     settings_mode_active: Rc<RefCell<bool>>,
     plugin_catalog: Rc<plugin::PluginCatalog>,
 ) -> Result<AppTray> {
@@ -591,16 +590,6 @@ pub(crate) fn install_tray(
                     &plugin_catalog,
                 );
             }
-        }
-    });
-
-    tray.on_show_widgets({
-        let widgets = widgets.clone();
-        let layouts = layouts.clone();
-        let widgets_hidden = widgets_hidden.clone();
-        let settings_mode_active = settings_mode_active.clone();
-        move || {
-            show_widgets(&widgets, &layouts, &widgets_hidden, &settings_mode_active);
         }
     });
 
@@ -631,7 +620,6 @@ pub(crate) fn refresh_tray_text(tray: &AppTray, settings: AppSettings) {
     let text = i18n::text(i18n::resolve_locale(settings.language));
     tray.set_tray_tooltip_text(text.tray_tooltip.into());
     tray.set_tray_settings_text(text.tray_settings.into());
-    tray.set_tray_show_widgets_text(text.tray_show_widgets.into());
     tray.set_tray_quit_text(text.tray_quit.into());
     let tray_enabled = effective_tray_icon_enabled(&settings);
     tray.set_tray_visible(tray_enabled);
@@ -727,7 +715,6 @@ mod tests {
             "let text = i18n::text(i18n::resolve_locale(settings.language));",
             "tray.set_tray_tooltip_text(text.tray_tooltip.into());",
             "tray.set_tray_settings_text(text.tray_settings.into());",
-            "tray.set_tray_show_widgets_text(text.tray_show_widgets.into());",
             "tray.set_tray_quit_text(text.tray_quit.into());",
         ] {
             assert!(
