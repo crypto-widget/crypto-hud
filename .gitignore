@@ -13,4 +13,5 @@
 /.demo-run-state/
 /.demo-theme-preview/
 /design-qa.md
-/docs/
+AGENTS.md
+.codex/audits/2026-07-10-lightweight-ui/01-widget.png

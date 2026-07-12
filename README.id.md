@@ -50,6 +50,10 @@ Letakkan widget di posisi yang nyaman, lanjutkan pekerjaan, dan lihat pasar saat
 ## Dibuat untuk tetap tenang di latar belakang
 
 - **Native dan ringan**: Rust + Slint, tanpa Electron, Tauri, WebView, atau browser bawaan.
+- **Penggunaan ringan yang terukur**: pada pengujian bawaan dengan satu widget,
+  3 pasangan pasar, dan penyegaran setiap 5 detik, rata-rata CPU saat stabil
+  adalah **0,070%** dengan sekitar **20 MiB memori privat proses**.
+  [Lihat laporan performa lengkap](docs/performance-reports/README.id.md).
 - **Sekilas langsung paham**: widget dapat digeser dan selalu di atas agar angka penting tetap terlihat.
 - **Lokal lebih dulu**: tata letak dan preferensi tersimpan di komputer; tanpa akun atau API Key.
 - **Sembunyikan kapan saja**: tekan <kbd>Alt</kbd> + <kbd>C</kbd> untuk menyembunyikan atau memulihkan semua widget.

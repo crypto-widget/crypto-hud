@@ -54,12 +54,13 @@ const QUOTE_BOARD_LEGACY_ROW_HEIGHT_LIMIT: i32 = 5;
 const QUOTE_BOARD_EXTENDED_ROW_HEIGHT_STEP: i32 = 26;
 const LEGACY_QUOTE_BOARD_HEIGHT_WITH_FOOTER: i32 = 232;
 pub const DEFAULT_LAYOUT_SCAN_SLOTS: usize = 80;
+pub const DEFAULT_MONITOR_DPI: u32 = 96;
 pub const MIN_VISIBLE_WIDGET_PX: i32 = 8;
 pub const MIN_WIDGET_WIDTH: i32 = 12;
 pub const MIN_WIDGET_HEIGHT: i32 = 8;
 pub const MAX_WIDGET_WIDTH: i32 = 6000;
 pub const MAX_WIDGET_HEIGHT: i32 = 4000;
-pub const MIN_WIDGET_SCALE_PERCENT: i32 = 10;
+pub const MIN_WIDGET_SCALE_PERCENT: i32 = 30;
 pub const MAX_WIDGET_SCALE_PERCENT: i32 = 300;
 pub const DEFAULT_WIDGET_SCALE_PERCENT: i32 = 100;
 pub const PARKED_WIDGET_X: i32 = -32_000;
@@ -153,10 +154,17 @@ impl From<(i32, i32)> for WidgetSize {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopWorkArea {
+    /// Physical desktop coordinate reported by the platform.
     pub x: i32,
+    /// Physical desktop coordinate reported by the platform.
     pub y: i32,
+    /// Physical work-area width reported by the platform.
     pub width: i32,
+    /// Physical work-area height reported by the platform.
     pub height: i32,
+    /// Effective monitor DPI used to convert persisted logical widget sizes.
+    pub dpi: u32,
+    pub is_primary: bool,
 }
 
 impl DesktopWorkArea {
@@ -166,6 +174,31 @@ impl DesktopWorkArea {
             y: 0,
             width: desktop_size.0,
             height: desktop_size.1,
+            dpi: DEFAULT_MONITOR_DPI,
+            is_primary: true,
+        }
+    }
+
+    pub const fn effective_dpi(self) -> u32 {
+        if self.dpi == 0 {
+            DEFAULT_MONITOR_DPI
+        } else {
+            self.dpi
+        }
+    }
+
+    pub fn physical_length(self, logical_length: i32) -> i32 {
+        let logical_length = i64::from(logical_length.max(1));
+        let dpi = i64::from(self.effective_dpi());
+        ((logical_length * dpi + i64::from(DEFAULT_MONITOR_DPI / 2))
+            / i64::from(DEFAULT_MONITOR_DPI))
+        .clamp(1, i64::from(i32::MAX)) as i32
+    }
+
+    pub fn physical_size(self, logical_size: WidgetSize) -> WidgetSize {
+        WidgetSize {
+            width: self.physical_length(logical_size.width),
+            height: self.physical_length(logical_size.height),
         }
     }
 }
@@ -309,7 +342,7 @@ impl WidgetRect {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidgetLayout {
     pub x: i32,
     pub y: i32,
@@ -340,7 +373,7 @@ impl Default for WidgetLayout {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LayoutStore {
     #[serde(default)]
     pub settings: AppSettings,
@@ -352,7 +385,7 @@ pub struct LayoutStore {
     pub widgets: Vec<WidgetInstance>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WidgetInstance {
     pub id: String,
     #[serde(default)]
@@ -372,8 +405,12 @@ pub struct WidgetInstance {
 }
 
 impl WidgetInstance {
+    pub fn builtin_widget_type(&self) -> Option<WidgetKind> {
+        WidgetKind::from_plugin_id(&self.plugin_id)
+    }
+
     pub fn widget_type(&self) -> WidgetKind {
-        WidgetKind::from_plugin_id(&self.plugin_id).unwrap_or_default()
+        self.builtin_widget_type().unwrap_or_default()
     }
 }
 
@@ -844,6 +881,8 @@ impl Default for AppSettings {
 
 impl AppSettings {
     pub fn normalized(self) -> Self {
+        let network_proxy_url = normalize_network_proxy_url(self.network_proxy_url);
+        let proxy_has_userinfo = network_proxy_url_has_userinfo(&network_proxy_url);
         Self {
             widgets_always_on_top: self.widgets_always_on_top,
             opacity_percent: clamp_opacity(self.opacity_percent),
@@ -887,8 +926,12 @@ impl AppSettings {
             language: self.language,
             tray_icon_enabled: self.tray_icon_enabled,
             tray_hover_display_enabled: self.tray_hover_display_enabled,
-            network_proxy_enabled: self.network_proxy_enabled,
-            network_proxy_url: normalize_network_proxy_url(self.network_proxy_url),
+            network_proxy_enabled: self.network_proxy_enabled && !proxy_has_userinfo,
+            network_proxy_url: if proxy_has_userinfo {
+                String::new()
+            } else {
+                network_proxy_url
+            },
             alert_rules: normalize_alert_rules(self.alert_rules),
         }
     }
@@ -973,6 +1016,17 @@ pub fn default_tray_icon_enabled() -> bool {
 
 pub fn normalize_network_proxy_url(proxy_url: String) -> String {
     proxy_url.trim().to_string()
+}
+
+pub fn network_proxy_url_has_userinfo(proxy_url: &str) -> bool {
+    let authority_and_path = proxy_url
+        .split_once("://")
+        .map(|(_, remainder)| remainder)
+        .unwrap_or(proxy_url);
+    authority_and_path
+        .split(['/', '?', '#'])
+        .next()
+        .is_some_and(|authority| authority.contains('@'))
 }
 
 pub fn effective_network_proxy_url(settings: &AppSettings) -> Option<String> {
@@ -1321,7 +1375,11 @@ pub fn load_layout_store_with_diagnostics_and_work_areas(
 ) -> LoadedLayoutStore {
     match try_load_persisted_layout_store(path) {
         Ok(Some(persisted)) => {
-            return finish_loaded_layout_store(
+            let original_store = match &persisted {
+                PersistedLayoutStore::Current(store) => Some(store.clone()),
+                PersistedLayoutStore::Legacy(_) => None,
+            };
+            let loaded = finish_loaded_layout_store(
                 persisted,
                 LayoutStoreLoadSource::Current,
                 requested_widget_count,
@@ -1329,6 +1387,15 @@ pub fn load_layout_store_with_diagnostics_and_work_areas(
                 desktop_size,
                 work_areas,
             );
+            if original_store.as_ref() != Some(&loaded.store) {
+                if let Err(error) = save_layout_store(path, &loaded.store) {
+                    eprintln!(
+                        "failed to save normalized layout state at {}: {error:#}",
+                        path.display()
+                    );
+                }
+            }
+            return loaded;
         }
         Ok(None) => {}
         Err(error) => {
@@ -1534,7 +1601,10 @@ fn migrate_legacy_store_in_work_areas(
                 id,
                 plugin_id: WidgetKind::QuoteBoard.plugin_id().to_string(),
                 legacy_widget_type: None,
-                name: default_persisted_widget_name(WidgetKind::QuoteBoard, index as u64 + 1),
+                name: default_persisted_widget_name(
+                    WidgetKind::QuoteBoard,
+                    u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1),
+                ),
                 visible: true,
                 layout,
                 symbols: symbols.clone(),
@@ -1614,21 +1684,34 @@ pub fn normalize_store_with_catalog_and_work_areas(
     let mut next_widget_number = store.next_widget_number;
     let mut max_suffix = 0;
     for (index, instance) in store.widgets.iter_mut().enumerate() {
-        if let Some(legacy_widget_type) = instance.legacy_widget_type.take() {
-            instance.plugin_id = legacy_widget_type.plugin_id().to_string();
-        }
         if instance.plugin_id.trim().is_empty() {
-            instance.plugin_id = WidgetKind::QuoteBoard.plugin_id().to_string();
+            instance.plugin_id = instance
+                .legacy_widget_type
+                .take()
+                .unwrap_or_default()
+                .plugin_id()
+                .to_string();
+        } else {
+            // A non-empty plug-in id is the current persistence contract.  The
+            // legacy field must never replace an unavailable third-party id.
+            instance.legacy_widget_type = None;
         }
-        if instance.config.is_null() {
+        let builtin_widget_type = instance.builtin_widget_type();
+        let plugin_definition = definition_for_instance(instance, catalog);
+        let opaque_plugin_state = builtin_widget_type.is_none() && plugin_definition.is_none();
+        if !opaque_plugin_state && instance.config.is_null() {
             instance.config = default_widget_config();
         }
 
         if instance.id.trim().is_empty() || seen_ids.contains(&instance.id) {
             loop {
                 let number = next_widget_number;
-                next_widget_number += 1;
-                let candidate = format!("{}-{number}", instance.widget_type().id_prefix());
+                next_widget_number = advance_widget_number(number);
+                let id_prefix = builtin_widget_type
+                    .map(WidgetKind::id_prefix)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| plugin_instance_id_prefix(&instance.plugin_id));
+                let candidate = format!("{id_prefix}-{number}");
                 if !reserved_ids.contains(&candidate) {
                     reserved_ids.insert(candidate.clone());
                     instance.id = candidate;
@@ -1639,56 +1722,81 @@ pub fn normalize_store_with_catalog_and_work_areas(
         seen_ids.insert(instance.id.clone());
         max_suffix = max_suffix.max(widget_id_suffix(&instance.id).unwrap_or(0));
 
-        if instance.name.trim().is_empty() {
-            instance.name = default_persisted_widget_name(instance.widget_type(), index as u64 + 1);
+        if instance.name.trim().is_empty() && !opaque_plugin_state {
+            let number = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
+            instance.name = if let Some(widget_type) = builtin_widget_type {
+                default_persisted_widget_name(widget_type, number)
+            } else if let Some(definition) = plugin_definition {
+                format!("{} {number}", definition.name)
+            } else {
+                instance.name.clone()
+            };
         }
-        instance.symbols = normalized_symbols_for_instance(instance, catalog);
-        let default_size = default_widget_size_for_instance(instance, catalog);
-        let has_missing_scale_with_persisted_size =
-            instance.layout.scale_percent <= 0 && layout_has_persisted_size(&instance.layout);
-        let defer_quote_board_size_migration = has_missing_scale_with_persisted_size
-            && instance.widget_type() == WidgetKind::QuoteBoard;
-        let defer_dynamic_size_migration = has_missing_scale_with_persisted_size
-            && definition_for_instance(instance, catalog)
-                .map(|definition| definition.size_policy != WidgetSizePolicy::Fixed)
-                .unwrap_or(false);
-        normalize_layout_size_and_scale(
-            &mut instance.layout,
-            default_size,
-            store.settings.widget_scale_percent,
-            defer_quote_board_size_migration || defer_dynamic_size_migration,
-        );
-        migrate_legacy_quote_board_footer_size(instance);
-        migrate_quote_board_display_size(instance);
-        if defer_quote_board_size_migration && instance.layout.scale_percent <= 0 {
+        if !opaque_plugin_state {
+            instance.symbols = normalized_symbols_for_instance(instance, catalog);
+        }
+        if !opaque_plugin_state {
             let default_size = default_widget_size_for_instance(instance, catalog);
+            let has_missing_scale_with_persisted_size =
+                instance.layout.scale_percent <= 0 && layout_has_persisted_size(&instance.layout);
+            let defer_quote_board_size_migration = has_missing_scale_with_persisted_size
+                && builtin_widget_type == Some(WidgetKind::QuoteBoard);
+            let defer_dynamic_size_migration = has_missing_scale_with_persisted_size
+                && plugin_definition
+                    .map(|definition| definition.size_policy != WidgetSizePolicy::Fixed)
+                    .unwrap_or(false);
             normalize_layout_size_and_scale(
                 &mut instance.layout,
                 default_size,
                 store.settings.widget_scale_percent,
-                false,
+                defer_quote_board_size_migration || defer_dynamic_size_migration,
             );
+            migrate_legacy_quote_board_footer_size(instance);
+            migrate_quote_board_display_size(instance);
+            if defer_quote_board_size_migration && instance.layout.scale_percent <= 0 {
+                let default_size = default_widget_size_for_instance(instance, catalog);
+                normalize_layout_size_and_scale(
+                    &mut instance.layout,
+                    default_size,
+                    store.settings.widget_scale_percent,
+                    false,
+                );
+            }
+            let instance_size = widget_size_for_instance(instance, catalog);
+            if should_migrate_legacy_default_cascade
+                && is_legacy_default_layout(&instance.layout, index)
+            {
+                let layout = default_layout_for_size_in_work_areas(
+                    index,
+                    instance_size,
+                    store.settings.clone(),
+                    desktop_size,
+                    work_areas,
+                );
+                instance.layout.x = layout.x;
+                instance.layout.y = layout.y;
+            }
+            if layout_needs_recovery_for_size_in_work_areas(
+                &instance.layout,
+                instance_size,
+                work_areas,
+            ) {
+                let layout = default_layout_for_size_in_work_areas(
+                    index,
+                    instance_size,
+                    store.settings.clone(),
+                    desktop_size,
+                    work_areas,
+                );
+                instance.layout.x = layout.x;
+                instance.layout.y = layout.y;
+            }
+            instance.layout.opacity_percent = clamp_opacity(instance.layout.opacity_percent);
         }
-        let instance_size = widget_size_for_instance(instance, catalog);
-        if should_migrate_legacy_default_cascade
-            && is_legacy_default_layout(&instance.layout, index)
-        {
-            let layout =
-                default_layout_for_size(index, instance_size, store.settings.clone(), desktop_size);
-            instance.layout.x = layout.x;
-            instance.layout.y = layout.y;
-        }
-        if layout_needs_recovery_for_size_in_work_areas(&instance.layout, instance_size, work_areas)
-        {
-            let layout =
-                default_layout_for_size(index, instance_size, store.settings.clone(), desktop_size);
-            instance.layout.x = layout.x;
-            instance.layout.y = layout.y;
-        }
-        instance.layout.opacity_percent = clamp_opacity(instance.layout.opacity_percent);
     }
 
-    store.next_widget_number = next_widget_number.max(max_suffix + 1);
+    store.next_widget_number =
+        next_widget_number_after_normalization(next_widget_number, max_suffix);
 
     let selected_is_valid = store
         .selected_widget_id
@@ -1812,7 +1920,13 @@ pub fn layout_for_instance_in_work_areas(
 ) -> WidgetLayout {
     let size = widget_size_for_instance(instance, catalog);
     if layout_needs_recovery_for_size_in_work_areas(&instance.layout, size, work_areas) {
-        let mut layout = default_layout_for_size(index, size, settings.clone(), desktop_size);
+        let mut layout = default_layout_for_size_in_work_areas(
+            index,
+            size,
+            settings.clone(),
+            desktop_size,
+            work_areas,
+        );
         layout.scale_percent =
             widget_scale_percent_for_instance(instance, catalog, settings.widget_scale_percent);
         layout
@@ -1854,17 +1968,61 @@ pub fn default_layout_for_size(
     settings: AppSettings,
     desktop_size: (i32, i32),
 ) -> WidgetLayout {
+    default_layout_for_size_in_work_areas(
+        slot,
+        size,
+        settings,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn default_layout_for_size_in_work_areas(
+    slot: usize,
+    size: WidgetSize,
+    settings: AppSettings,
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> WidgetLayout {
     let size = clamp_widget_size(size);
-    let (desktop_width, desktop_height) = desktop_size;
-    let row_stride = QUOTE_BOARD_HEIGHT + DEFAULT_LAYOUT_GAP;
-    let usable_height = (desktop_height - DEFAULT_LAYOUT_MARGIN_Y * 2).max(row_stride);
-    let rows_per_column = (usable_height / row_stride).max(1) as usize;
-    let row = slot % rows_per_column;
-    let column = slot / rows_per_column;
-    let column_stride = QUOTE_BOARD_WIDTH + DEFAULT_LAYOUT_GAP;
-    let x = (desktop_width - DEFAULT_LAYOUT_MARGIN_X - size.width - column_stride * column as i32)
-        .max(DEFAULT_LAYOUT_MARGIN_X);
-    let y = DEFAULT_LAYOUT_MARGIN_Y + row_stride * row as i32;
+    let ordered_work_areas = ordered_work_areas(work_areas, desktop_size);
+    let mut remaining_slot = slot;
+    let mut selected = ordered_work_areas[0];
+    let mut selected_row = 0;
+    let mut selected_column = 0;
+
+    for work_area in &ordered_work_areas {
+        let physical_size = work_area.physical_size(size);
+        let margin_x = work_area.physical_length(DEFAULT_LAYOUT_MARGIN_X);
+        let margin_y = work_area.physical_length(DEFAULT_LAYOUT_MARGIN_Y);
+        let gap = work_area.physical_length(DEFAULT_LAYOUT_GAP);
+        let usable_width = (work_area.width - margin_x.saturating_mul(2)).max(physical_size.width);
+        let usable_height =
+            (work_area.height - margin_y.saturating_mul(2)).max(physical_size.height);
+        let columns = ((usable_width + gap) / (physical_size.width + gap)).max(1) as usize;
+        let rows = ((usable_height + gap) / (physical_size.height + gap)).max(1) as usize;
+        let capacity = rows.saturating_mul(columns).max(1);
+        if remaining_slot < capacity {
+            selected = *work_area;
+            selected_row = remaining_slot % rows;
+            selected_column = remaining_slot / rows;
+            break;
+        }
+        remaining_slot = remaining_slot.saturating_sub(capacity);
+    }
+
+    let physical_size = selected.physical_size(size);
+    let margin_x = selected.physical_length(DEFAULT_LAYOUT_MARGIN_X);
+    let margin_y = selected.physical_length(DEFAULT_LAYOUT_MARGIN_Y);
+    let gap = selected.physical_length(DEFAULT_LAYOUT_GAP);
+    let row_stride = physical_size.height.saturating_add(gap);
+    let column_stride = physical_size.width.saturating_add(gap);
+    let x = (selected.x + selected.width
+        - margin_x
+        - physical_size.width
+        - column_stride.saturating_mul(selected_column as i32))
+    .max(selected.x + margin_x);
+    let y = selected.y + margin_y + row_stride.saturating_mul(selected_row as i32);
 
     WidgetLayout {
         x,
@@ -1905,8 +2063,33 @@ pub fn next_available_layout_for_size_with_catalog(
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
 ) -> WidgetLayout {
-    for slot in 0..DEFAULT_LAYOUT_SCAN_SLOTS {
-        let candidate = default_layout_for_size(slot, size, settings.clone(), desktop_size);
+    next_available_layout_for_size_with_catalog_and_work_areas(
+        store,
+        size,
+        settings,
+        catalog,
+        desktop_size,
+        &[DesktopWorkArea::from_desktop_size(desktop_size)],
+    )
+}
+
+pub fn next_available_layout_for_size_with_catalog_and_work_areas(
+    store: &LayoutStore,
+    size: WidgetSize,
+    settings: AppSettings,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> WidgetLayout {
+    let scan_slots = DEFAULT_LAYOUT_SCAN_SLOTS.saturating_mul(work_areas.len().max(1));
+    for slot in 0..scan_slots {
+        let candidate = default_layout_for_size_in_work_areas(
+            slot,
+            size,
+            settings.clone(),
+            desktop_size,
+            work_areas,
+        );
         if !layout_overlaps_existing_for_size(
             store,
             &candidate,
@@ -1914,12 +2097,199 @@ pub fn next_available_layout_for_size_with_catalog(
             settings.clone(),
             catalog,
             desktop_size,
+            work_areas,
         ) {
             return candidate;
         }
     }
 
-    default_layout_for_size(store.widgets.len(), size, settings, desktop_size)
+    default_layout_for_size_in_work_areas(
+        store.widgets.len(),
+        size,
+        settings,
+        desktop_size,
+        work_areas,
+    )
+}
+
+pub fn reset_widget_positions_in_work_areas(
+    store: &mut LayoutStore,
+    catalog: &[WidgetDefinition],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> bool {
+    let sizes = store
+        .widgets
+        .iter()
+        .map(|instance| widget_size_for_instance(instance, catalog))
+        .collect::<Vec<_>>();
+    let positions = packed_widget_positions(&sizes, desktop_size, work_areas);
+    let mut changed = false;
+    for (instance, (x, y)) in store.widgets.iter_mut().zip(positions) {
+        if instance.layout.x != x || instance.layout.y != y {
+            instance.layout.x = x;
+            instance.layout.y = y;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn packed_widget_positions(
+    sizes: &[WidgetSize],
+    desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
+) -> Vec<(i32, i32)> {
+    let ordered_work_areas = ordered_work_areas(work_areas, desktop_size);
+    let clamped_sizes = sizes
+        .iter()
+        .copied()
+        .map(clamp_widget_size)
+        .collect::<Vec<_>>();
+    let fallback_work_area = ordered_work_areas
+        .iter()
+        .copied()
+        .max_by_key(|area| {
+            (
+                i64::from(area.x) + i64::from(area.width),
+                i64::from(area.y) + i64::from(area.height),
+                area.is_primary,
+            )
+        })
+        .unwrap_or(ordered_work_areas[0]);
+    let mut placed = Vec::<WidgetRect>::new();
+    let mut positions = Vec::with_capacity(sizes.len());
+
+    for (size_index, &logical_size) in clamped_sizes.iter().enumerate() {
+        let mut selected = None;
+        'areas: for work_area in &ordered_work_areas {
+            let size = work_area.physical_size(logical_size);
+            let margin_x = work_area.physical_length(DEFAULT_LAYOUT_MARGIN_X);
+            let margin_y = work_area.physical_length(DEFAULT_LAYOUT_MARGIN_Y);
+            let gap = work_area.physical_length(DEFAULT_LAYOUT_GAP);
+            let left = work_area.x.saturating_add(margin_x);
+            let top = work_area.y.saturating_add(margin_y);
+            let right = work_area
+                .x
+                .saturating_add(work_area.width)
+                .saturating_sub(margin_x);
+            let bottom = work_area
+                .y
+                .saturating_add(work_area.height)
+                .saturating_sub(margin_y);
+            let mut candidate_x = vec![right.saturating_sub(size.width)];
+            let mut candidate_y = vec![top];
+            for rect in &placed {
+                candidate_x.push(rect.x.saturating_sub(gap).saturating_sub(size.width));
+                candidate_y.push(rect.y.saturating_add(rect.height).saturating_add(gap));
+            }
+            candidate_x.sort_unstable_by(|left, right| right.cmp(left));
+            candidate_x.dedup();
+            candidate_y.sort_unstable();
+            candidate_y.dedup();
+
+            for y in candidate_y {
+                for &x in &candidate_x {
+                    let candidate = WidgetRect {
+                        x,
+                        y,
+                        width: size.width,
+                        height: size.height,
+                    };
+                    if rect_fits_bounds(candidate, left, top, right, bottom)
+                        && !placed
+                            .iter()
+                            .any(|existing| candidate.overlaps(*existing, gap))
+                    {
+                        selected = Some(candidate);
+                        break 'areas;
+                    }
+                }
+            }
+        }
+
+        let selected = selected.unwrap_or_else(|| {
+            // Windows extend toward positive x/y from their origin. Using the
+            // rightmost work area keeps oversized fallbacks from covering a
+            // neighboring monitor to its right.
+            let work_area = fallback_work_area;
+            let size = work_area.physical_size(logical_size);
+            let margin_x = work_area.physical_length(DEFAULT_LAYOUT_MARGIN_X);
+            let margin_y = work_area.physical_length(DEFAULT_LAYOUT_MARGIN_Y);
+            let left = work_area.x.saturating_add(margin_x);
+            let top = work_area.y.saturating_add(margin_y);
+            let maximum_x = work_area
+                .x
+                .saturating_add(work_area.width)
+                .saturating_sub(MIN_VISIBLE_WIDGET_PX);
+            let maximum_y = work_area
+                .y
+                .saturating_add(work_area.height)
+                .saturating_sub(MIN_VISIBLE_WIDGET_PX);
+            let fallback_slots = i32::try_from(sizes.len().saturating_sub(1)).unwrap_or(i32::MAX);
+            let horizontal_rank = clamped_sizes
+                .iter()
+                .enumerate()
+                .filter(|(index, candidate)| {
+                    candidate.width < logical_size.width
+                        || (candidate.width == logical_size.width && *index < size_index)
+                })
+                .count();
+            let vertical_rank = clamped_sizes
+                .iter()
+                .enumerate()
+                .filter(|(index, candidate)| {
+                    candidate.height > logical_size.height
+                        || (candidate.height == logical_size.height && *index > size_index)
+                })
+                .count();
+            let horizontal_rank = i32::try_from(horizontal_rank).unwrap_or(i32::MAX);
+            let vertical_rank = i32::try_from(vertical_rank).unwrap_or(i32::MAX);
+            let maximum_horizontal_span = maximum_x.saturating_sub(left).max(0);
+            let horizontal_step = if fallback_slots > 0 && maximum_horizontal_span > 0 {
+                maximum_horizontal_span / fallback_slots
+            } else {
+                0
+            };
+            let maximum_vertical_offset = maximum_y.saturating_sub(top).max(0);
+            let vertical_step = if fallback_slots > 0 && maximum_vertical_offset > 0 {
+                maximum_vertical_offset / fallback_slots
+            } else {
+                0
+            };
+            // When every work area is full, visibility is more important than
+            // avoiding overlap. Width and height ranks run along opposing axes,
+            // leaving exposed edges even for mixed sizes. Keeping every origin
+            // inside this work area also keeps its DPI calculation stable.
+            let x = left.saturating_add(
+                horizontal_rank
+                    .saturating_mul(horizontal_step)
+                    .min(maximum_horizontal_span),
+            );
+            let y = top.saturating_add(
+                vertical_rank
+                    .saturating_mul(vertical_step)
+                    .min(maximum_vertical_offset),
+            );
+            WidgetRect {
+                x,
+                y,
+                width: size.width,
+                height: size.height,
+            }
+        });
+        positions.push((selected.x, selected.y));
+        placed.push(selected);
+    }
+
+    positions
+}
+
+fn rect_fits_bounds(rect: WidgetRect, left: i32, top: i32, right: i32, bottom: i32) -> bool {
+    i64::from(rect.x) >= i64::from(left)
+        && i64::from(rect.y) >= i64::from(top)
+        && i64::from(rect.x) + i64::from(rect.width) <= i64::from(right)
+        && i64::from(rect.y) + i64::from(rect.height) <= i64::from(bottom)
 }
 
 pub fn layout_has_visible_area_for_size(
@@ -1939,15 +2309,18 @@ pub fn layout_has_visible_area_for_size_in_work_areas(
     size: WidgetSize,
     work_areas: &[DesktopWorkArea],
 ) -> bool {
-    let widget_left = i64::from(layout.x);
-    let widget_top = i64::from(layout.y);
-    let widget_right = widget_left + i64::from(size.width.max(0));
-    let widget_bottom = widget_top + i64::from(size.height.max(0));
-
+    let size_work_area = work_area_for_position(layout.x, layout.y, work_areas)
+        .copied()
+        .unwrap_or_else(|| DesktopWorkArea::from_desktop_size((1, 1)));
+    let physical_size = size_work_area.physical_size(size);
     work_areas.iter().any(|work_area| {
         if work_area.width <= 0 || work_area.height <= 0 {
             return false;
         }
+        let widget_left = i64::from(layout.x);
+        let widget_top = i64::from(layout.y);
+        let widget_right = widget_left + i64::from(physical_size.width);
+        let widget_bottom = widget_top + i64::from(physical_size.height);
         let work_left = i64::from(work_area.x);
         let work_top = i64::from(work_area.y);
         let work_right = work_left + i64::from(work_area.width);
@@ -2239,6 +2612,11 @@ pub fn normalized_symbols_for_instance(
     instance: &WidgetInstance,
     catalog: &[WidgetDefinition],
 ) -> Vec<String> {
+    if instance.builtin_widget_type().is_none()
+        && definition_for_instance(instance, catalog).is_none()
+    {
+        return instance.symbols.clone();
+    }
     normalized_symbols_with_bounds(
         instance.symbols.clone(),
         symbol_min_for_instance(instance, catalog),
@@ -2384,6 +2762,22 @@ pub fn widget_size_for_instance(
     instance: &WidgetInstance,
     catalog: &[WidgetDefinition],
 ) -> WidgetSize {
+    if instance.builtin_widget_type().is_none()
+        && definition_for_instance(instance, catalog).is_none()
+    {
+        return clamp_widget_size(WidgetSize {
+            width: if instance.layout.width > 0 {
+                instance.layout.width
+            } else {
+                QUOTE_BOARD_WIDTH
+            },
+            height: if instance.layout.height > 0 {
+                instance.layout.height
+            } else {
+                QUOTE_BOARD_HEIGHT
+            },
+        });
+    }
     let default_size = default_widget_size_for_instance(instance, catalog);
     if instance.layout.scale_percent > 0 {
         return widget_size_from_scale_percent(default_size, instance.layout.scale_percent);
@@ -2406,10 +2800,24 @@ pub fn default_widget_size_for_instance(
     instance: &WidgetInstance,
     catalog: &[WidgetDefinition],
 ) -> WidgetSize {
-    let builtin_type = WidgetKind::from_plugin_id(&instance.plugin_id);
+    let builtin_type = instance.builtin_widget_type();
     let default_size = definition_for_instance(instance, catalog)
         .map(|definition| widget_definition_size_for_symbols(definition, &instance.symbols))
-        .unwrap_or_else(|| builtin_type.unwrap_or_default().default_size());
+        .or_else(|| builtin_type.map(WidgetKind::default_size))
+        .unwrap_or_else(|| {
+            clamp_widget_size(WidgetSize {
+                width: if instance.layout.width > 0 {
+                    instance.layout.width
+                } else {
+                    QUOTE_BOARD_WIDTH
+                },
+                height: if instance.layout.height > 0 {
+                    instance.layout.height
+                } else {
+                    QUOTE_BOARD_HEIGHT
+                },
+            })
+        });
     default_widget_size_for_parts(
         builtin_type,
         default_size,
@@ -2459,18 +2867,97 @@ fn layout_overlaps_existing_for_size(
     settings: AppSettings,
     catalog: &[WidgetDefinition],
     desktop_size: (i32, i32),
+    work_areas: &[DesktopWorkArea],
 ) -> bool {
-    let candidate_rect = widget_rect_for_size(candidate, size);
+    let fallback_work_area = DesktopWorkArea::from_desktop_size(desktop_size);
+    let candidate_work_area = work_area_for_position(candidate.x, candidate.y, work_areas)
+        .copied()
+        .unwrap_or(fallback_work_area);
+    let candidate_rect = widget_rect_for_size(candidate, candidate_work_area.physical_size(size));
     store.widgets.iter().enumerate().any(|(index, instance)| {
         if is_parked_position(instance.layout.x, instance.layout.y) {
             return false;
         }
-        let layout = layout_for_instance(instance, index, settings.clone(), catalog, desktop_size);
+        let layout = layout_for_instance_in_work_areas(
+            instance,
+            index,
+            settings.clone(),
+            catalog,
+            desktop_size,
+            work_areas,
+        );
+        let instance_work_area = work_area_for_position(layout.x, layout.y, work_areas)
+            .copied()
+            .unwrap_or(fallback_work_area);
+        let gap = candidate_work_area
+            .physical_length(DEFAULT_LAYOUT_GAP)
+            .max(instance_work_area.physical_length(DEFAULT_LAYOUT_GAP));
         candidate_rect.overlaps(
-            widget_rect_for_size(&layout, widget_size_for_instance(instance, catalog)),
-            DEFAULT_LAYOUT_GAP,
+            widget_rect_for_size(
+                &layout,
+                instance_work_area.physical_size(widget_size_for_instance(instance, catalog)),
+            ),
+            gap,
         )
     })
+}
+
+fn ordered_work_areas(
+    work_areas: &[DesktopWorkArea],
+    desktop_size: (i32, i32),
+) -> Vec<DesktopWorkArea> {
+    let mut ordered = work_areas
+        .iter()
+        .copied()
+        .filter(|area| area.width > 0 && area.height > 0)
+        .collect::<Vec<_>>();
+    if ordered.is_empty() {
+        ordered.push(DesktopWorkArea::from_desktop_size(desktop_size));
+    }
+    ordered.sort_by_key(|area| {
+        (
+            !area.is_primary,
+            area.x,
+            area.y,
+            area.width,
+            area.height,
+            area.dpi,
+        )
+    });
+    ordered.dedup();
+    ordered
+}
+
+fn work_area_for_position(
+    x: i32,
+    y: i32,
+    work_areas: &[DesktopWorkArea],
+) -> Option<&DesktopWorkArea> {
+    work_areas
+        .iter()
+        .filter(|area| area.width > 0 && area.height > 0)
+        .find(|area| {
+            let right = i64::from(area.x) + i64::from(area.width);
+            let bottom = i64::from(area.y) + i64::from(area.height);
+            i64::from(x) >= i64::from(area.x)
+                && i64::from(x) < right
+                && i64::from(y) >= i64::from(area.y)
+                && i64::from(y) < bottom
+        })
+        .or_else(|| {
+            work_areas
+                .iter()
+                .filter(|area| area.width > 0 && area.height > 0)
+                .min_by_key(|area| {
+                    let nearest_x = i64::from(x)
+                        .clamp(i64::from(area.x), i64::from(area.x) + i64::from(area.width));
+                    let nearest_y = i64::from(y).clamp(
+                        i64::from(area.y),
+                        i64::from(area.y) + i64::from(area.height),
+                    );
+                    i64::from(x).abs_diff(nearest_x) + i64::from(y).abs_diff(nearest_y)
+                })
+        })
 }
 
 fn layout_has_persisted_size(layout: &WidgetLayout) -> bool {
@@ -2514,7 +3001,7 @@ fn normalize_layout_size_and_scale(
 }
 
 fn migrate_legacy_quote_board_footer_size(instance: &mut WidgetInstance) {
-    if instance.widget_type() != WidgetKind::QuoteBoard {
+    if instance.builtin_widget_type() != Some(WidgetKind::QuoteBoard) {
         return;
     }
 
@@ -2540,7 +3027,7 @@ fn migrate_legacy_quote_board_footer_size(instance: &mut WidgetInstance) {
 }
 
 fn migrate_quote_board_display_size(instance: &mut WidgetInstance) {
-    if instance.widget_type() != WidgetKind::QuoteBoard {
+    if instance.builtin_widget_type() != Some(WidgetKind::QuoteBoard) {
         return;
     }
 
@@ -2666,10 +3153,25 @@ fn next_widget_number(store: &mut LayoutStore, widget_type: WidgetKind) -> u64 {
     next_instance_number(store, widget_type.id_prefix())
 }
 
+const fn advance_widget_number(number: u64) -> u64 {
+    match number.checked_add(1) {
+        Some(next) => next,
+        None => DEFAULT_NEXT_WIDGET_NUMBER,
+    }
+}
+
+fn next_widget_number_after_normalization(next: u64, max_suffix: u64) -> u64 {
+    let next = next.max(DEFAULT_NEXT_WIDGET_NUMBER);
+    match max_suffix.checked_add(1) {
+        Some(after_suffix) => next.max(after_suffix),
+        None => next,
+    }
+}
+
 fn next_instance_number(store: &mut LayoutStore, id_prefix: &str) -> u64 {
     loop {
         let number = store.next_widget_number.max(DEFAULT_NEXT_WIDGET_NUMBER);
-        store.next_widget_number = number + 1;
+        store.next_widget_number = advance_widget_number(number);
         let id = format!("{id_prefix}-{number}");
         if !store.widgets.iter().any(|widget| widget.id == id) {
             return number;
@@ -3251,10 +3753,13 @@ mod tests {
             width: QUOTE_BOARD_WIDTH,
             height: QUOTE_BOARD_HEIGHT,
         };
-        let scaled_10 = widget_size_from_scale_percent(default_size, 10);
-        assert_eq!(scaled_10.width, 29);
-        assert_eq!(scaled_10.height, 19);
-        assert_eq!(widget_scale_percent_for_size(scaled_10, default_size), 10);
+        let scaled_min = widget_size_from_scale_percent(default_size, 10);
+        assert_eq!(scaled_min.width, 86);
+        assert_eq!(scaled_min.height, 58);
+        assert_eq!(
+            widget_scale_percent_for_size(scaled_min, default_size),
+            MIN_WIDGET_SCALE_PERCENT
+        );
 
         let scaled = widget_size_from_scale_percent(default_size, 125);
 
@@ -3524,8 +4029,8 @@ mod tests {
             store.widgets[1].layout.scale_percent,
             MIN_WIDGET_SCALE_PERCENT
         );
-        assert_eq!(store.widgets[1].layout.width, 24);
-        assert_eq!(store.widgets[1].layout.height, 11);
+        assert_eq!(store.widgets[1].layout.width, 71);
+        assert_eq!(store.widgets[1].layout.height, 34);
     }
 
     #[test]
@@ -3679,6 +4184,167 @@ mod tests {
     }
 
     #[test]
+    fn loading_current_state_removes_proxy_credentials_from_disk() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-proxy-migration-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        let secret = "do-not-retain-this-password";
+        let store = LayoutStore {
+            settings: AppSettings {
+                network_proxy_enabled: true,
+                network_proxy_url: format!("http://alice:{secret}@127.0.0.1:7890"),
+                ..AppSettings::default()
+            },
+            ..LayoutStore::default()
+        };
+        save_layout_store(&path, &store).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains(secret));
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::Current);
+        assert!(!loaded.store.settings.network_proxy_enabled);
+        assert!(loaded.store.settings.network_proxy_url.is_empty());
+        let persisted_contents = fs::read_to_string(&path).unwrap();
+        assert!(!persisted_contents.contains(secret));
+        assert!(!persisted_contents.contains("alice:"));
+        let persisted = try_load_persisted_layout_store(&path).unwrap().unwrap();
+        let PersistedLayoutStore::Current(persisted) = persisted else {
+            panic!("sanitized state should retain the current layout schema");
+        };
+        assert!(!persisted.settings.network_proxy_enabled);
+        assert!(persisted.settings.network_proxy_url.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn loading_current_state_persists_normalized_dynamic_widget_size() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-dynamic-size-migration-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        let plugin_id = "com.cryptohud.status-strip";
+        let catalog = vec![WidgetDefinition {
+            id: plugin_id.to_string(),
+            name: "Status Strip".to_string(),
+            default_size: WidgetSize {
+                width: 618,
+                height: 92,
+            },
+            size_policy: WidgetSizePolicy::SymbolGrid {
+                cell_width: 122,
+                cell_height: 84,
+                content_padding_width: 8,
+                content_padding_height: 8,
+                columns: Some(5),
+                rows: None,
+            },
+            min_symbol_limit: 1,
+            symbol_limit: 5,
+            default_symbols: default_market_symbols(),
+        }];
+        let store = LayoutStore {
+            selected_widget_id: Some("plugin-strip-3".to_string()),
+            widgets: vec![WidgetInstance {
+                id: "plugin-strip-3".to_string(),
+                plugin_id: plugin_id.to_string(),
+                legacy_widget_type: None,
+                name: "Status Strip 3".to_string(),
+                visible: true,
+                layout: WidgetLayout {
+                    x: 164,
+                    y: 164,
+                    always_on_top: false,
+                    opacity_percent: 96,
+                    locked: true,
+                    scale_percent: 150,
+                    width: 624,
+                    height: 138,
+                },
+                symbols: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
+                config: default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+        save_layout_store(&path, &store).unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &catalog, (1920, 1080));
+
+        assert_eq!(loaded.store.widgets[0].layout.width, 561);
+        assert_eq!(loaded.store.widgets[0].layout.height, 138);
+        let persisted = try_load_persisted_layout_store(&path).unwrap().unwrap();
+        let PersistedLayoutStore::Current(persisted) = persisted else {
+            panic!("normalized state should retain the current layout schema");
+        };
+        assert_eq!(persisted.widgets[0].layout.width, 561);
+        assert_eq!(persisted.widgets[0].layout.height, 138);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn loading_current_state_migrates_obsolete_ten_percent_widget_scale() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-minimum-scale-migration-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        let store = LayoutStore {
+            selected_widget_id: Some("mini-ticker-1".to_string()),
+            widgets: vec![WidgetInstance {
+                id: "mini-ticker-1".to_string(),
+                plugin_id: WidgetKind::MiniTicker.plugin_id().to_string(),
+                legacy_widget_type: None,
+                name: "Mini Ticker 1".to_string(),
+                visible: true,
+                layout: WidgetLayout {
+                    scale_percent: 10,
+                    width: 24,
+                    height: 11,
+                    ..WidgetLayout::default()
+                },
+                symbols: vec!["ETH".to_string()],
+                config: default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+        save_layout_store(&path, &store).unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(
+            &path,
+            0,
+            &[WidgetDefinition::builtin(WidgetKind::MiniTicker)],
+            (1920, 1080),
+        );
+
+        assert_eq!(
+            loaded.store.widgets[0].layout.scale_percent,
+            MIN_WIDGET_SCALE_PERCENT
+        );
+        assert_eq!(loaded.store.widgets[0].layout.width, 71);
+        assert_eq!(loaded.store.widgets[0].layout.height, 34);
+        let persisted = try_load_persisted_layout_store(&path).unwrap().unwrap();
+        let PersistedLayoutStore::Current(persisted) = persisted else {
+            panic!("minimum-scale migration should retain the current layout schema");
+        };
+        assert_eq!(
+            persisted.widgets[0].layout.scale_percent,
+            MIN_WIDGET_SCALE_PERCENT
+        );
+        assert_eq!(persisted.widgets[0].layout.width, 71);
+        assert_eq!(persisted.widgets[0].layout.height, 34);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn load_layout_store_migrates_legacy_state_file_name() {
         let dir = std::env::temp_dir().join(format!(
             "crypto-hud-shell-state-migrate-{}-{}",
@@ -3786,18 +4452,24 @@ mod tests {
                 y: 0,
                 width: 1920,
                 height: 1040,
+                dpi: DEFAULT_MONITOR_DPI,
+                is_primary: false,
             },
             DesktopWorkArea {
                 x: 0,
                 y: 0,
                 width: 1920,
                 height: 1040,
+                dpi: DEFAULT_MONITOR_DPI,
+                is_primary: true,
             },
             DesktopWorkArea {
                 x: 1920,
                 y: -200,
                 width: 2560,
                 height: 1440,
+                dpi: DEFAULT_MONITOR_DPI,
+                is_primary: false,
             },
         ];
         let size = WidgetSize {
@@ -3836,5 +4508,475 @@ mod tests {
             size,
             &work_areas
         ));
+    }
+
+    #[test]
+    fn unavailable_plugin_state_stays_opaque_during_normalization() {
+        let original_layout = WidgetLayout {
+            x: 42_000,
+            y: -17_000,
+            always_on_top: false,
+            opacity_percent: 137,
+            locked: true,
+            scale_percent: 0,
+            width: 777,
+            height: 333,
+        };
+        let original_symbols = vec!["vendor-specific-symbol".to_string(), "???".to_string()];
+        let original_config = serde_json::json!({
+            "opaque": { "version": 7, "values": [1, 2, 3] }
+        });
+        let mut store = LayoutStore {
+            widgets: vec![WidgetInstance {
+                id: "vendor-widget-9".to_string(),
+                plugin_id: "com.example.unavailable".to_string(),
+                legacy_widget_type: Some(WidgetKind::QuoteBoard),
+                name: String::new(),
+                visible: true,
+                layout: original_layout.clone(),
+                symbols: original_symbols.clone(),
+                config: original_config.clone(),
+            }],
+            ..LayoutStore::default()
+        };
+
+        normalize_store_with_catalog(&mut store, 0, &[], (1920, 1080));
+
+        let widget = &store.widgets[0];
+        assert_eq!(widget.plugin_id, "com.example.unavailable");
+        assert!(widget.name.is_empty());
+        assert_eq!(widget.symbols, original_symbols);
+        assert_eq!(widget.config, original_config);
+        assert_eq!(widget.layout, original_layout);
+        assert_eq!(widget.legacy_widget_type, None);
+    }
+
+    #[test]
+    fn work_area_dpi_converts_logical_widget_size_to_physical_pixels() {
+        let logical_size = WidgetSize {
+            width: QUOTE_BOARD_WIDTH,
+            height: QUOTE_BOARD_HEIGHT,
+        };
+        for (dpi, expected_width) in [(120, 358), (144, 429), (192, 572)] {
+            let work_area = DesktopWorkArea {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+                dpi,
+                is_primary: true,
+            };
+            let physical_size = work_area.physical_size(logical_size);
+            assert_eq!(physical_size.width, expected_width);
+            let layout = WidgetLayout {
+                x: -(physical_size.width - MIN_VISIBLE_WIDGET_PX),
+                y: 100,
+                ..WidgetLayout::default()
+            };
+            assert!(layout_has_visible_area_for_size_in_work_areas(
+                &layout,
+                logical_size,
+                &[work_area],
+            ));
+        }
+    }
+
+    #[test]
+    fn cross_monitor_visibility_uses_one_origin_monitor_dpi() {
+        let work_areas = [
+            DesktopWorkArea {
+                x: -1920,
+                y: 0,
+                width: 1920,
+                height: 1080,
+                dpi: 96,
+                is_primary: true,
+            },
+            DesktopWorkArea {
+                x: 100,
+                y: 0,
+                width: 1920,
+                height: 1080,
+                dpi: 192,
+                is_primary: false,
+            },
+        ];
+        let logical_size = WidgetSize {
+            width: 40,
+            height: 40,
+        };
+        let nearer_low_dpi_monitor = WidgetLayout {
+            x: 45,
+            y: 100,
+            width: logical_size.width,
+            height: logical_size.height,
+            ..WidgetLayout::default()
+        };
+        let nearer_high_dpi_monitor = WidgetLayout {
+            x: 55,
+            ..nearer_low_dpi_monitor.clone()
+        };
+
+        assert_eq!(
+            work_area_for_position(
+                nearer_low_dpi_monitor.x,
+                nearer_low_dpi_monitor.y,
+                &work_areas,
+            )
+            .unwrap()
+            .dpi,
+            96
+        );
+        assert!(!layout_has_visible_area_for_size_in_work_areas(
+            &nearer_low_dpi_monitor,
+            logical_size,
+            &work_areas,
+        ));
+        assert_eq!(
+            work_area_for_position(
+                nearer_high_dpi_monitor.x,
+                nearer_high_dpi_monitor.y,
+                &work_areas,
+            )
+            .unwrap()
+            .dpi,
+            192
+        );
+        assert!(layout_has_visible_area_for_size_in_work_areas(
+            &nearer_high_dpi_monitor,
+            logical_size,
+            &work_areas,
+        ));
+    }
+
+    #[test]
+    fn reset_positions_pack_actual_sizes_without_overlap_across_monitors() {
+        let work_areas = [
+            DesktopWorkArea {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+                dpi: 120,
+                is_primary: true,
+            },
+            DesktopWorkArea {
+                x: 1920,
+                y: -160,
+                width: 2560,
+                height: 1440,
+                dpi: 192,
+                is_primary: false,
+            },
+        ];
+        let sizes = [(500, 300), (700, 240), (300, 500), (640, 360)];
+        let definitions = sizes
+            .iter()
+            .enumerate()
+            .map(|(index, &(width, height))| WidgetDefinition {
+                id: format!("com.example.layout-{index}"),
+                name: format!("Layout {index}"),
+                default_size: WidgetSize { width, height },
+                size_policy: WidgetSizePolicy::Fixed,
+                min_symbol_limit: 1,
+                symbol_limit: 1,
+                default_symbols: vec!["BTC".to_string()],
+            })
+            .collect::<Vec<_>>();
+        let mut store = LayoutStore {
+            widgets: definitions
+                .iter()
+                .enumerate()
+                .map(|(index, definition)| WidgetInstance {
+                    id: format!("layout-{index}"),
+                    plugin_id: definition.id.clone(),
+                    legacy_widget_type: None,
+                    name: definition.name.clone(),
+                    visible: true,
+                    layout: WidgetLayout {
+                        x: 0,
+                        y: 0,
+                        scale_percent: 0,
+                        width: definition.default_size.width,
+                        height: definition.default_size.height,
+                        ..WidgetLayout::default()
+                    },
+                    symbols: vec!["BTC".to_string()],
+                    config: default_widget_config(),
+                })
+                .collect(),
+            ..LayoutStore::default()
+        };
+
+        assert!(reset_widget_positions_in_work_areas(
+            &mut store,
+            &definitions,
+            (1920, 1080),
+            &work_areas,
+        ));
+
+        let rects = store
+            .widgets
+            .iter()
+            .map(|instance| {
+                let area =
+                    work_area_for_position(instance.layout.x, instance.layout.y, &work_areas)
+                        .copied()
+                        .unwrap();
+                widget_rect_for_size(
+                    &instance.layout,
+                    area.physical_size(widget_size_for_instance(instance, &definitions)),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (index, rect) in rects.iter().enumerate() {
+            for other in rects.iter().skip(index + 1) {
+                assert!(!rect.overlaps(*other, 0), "reset layouts must not overlap");
+            }
+        }
+        for instance in &store.widgets {
+            assert!(layout_has_visible_area_for_size_in_work_areas(
+                &instance.layout,
+                widget_size_for_instance(instance, &definitions),
+                &work_areas,
+            ));
+        }
+    }
+
+    #[test]
+    fn packed_fallback_keeps_oversized_widgets_visible_when_the_desktop_is_full() {
+        let work_area = DesktopWorkArea {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            dpi: 96,
+            is_primary: true,
+        };
+        let oversized = WidgetSize {
+            width: MAX_WIDGET_WIDTH,
+            height: MAX_WIDGET_HEIGHT,
+        };
+        let regular = WidgetSize {
+            width: 300,
+            height: 200,
+        };
+
+        for sizes in [
+            vec![oversized, oversized, oversized],
+            vec![oversized, regular],
+            vec![regular, oversized],
+        ] {
+            let positions = packed_widget_positions(&sizes, (1920, 1080), &[work_area]);
+            assert_eq!(positions.len(), sizes.len());
+            let visible_rects = positions
+                .iter()
+                .copied()
+                .zip(sizes.iter().copied())
+                .map(|((x, y), size)| {
+                    let layout = WidgetLayout {
+                        x,
+                        y,
+                        width: size.width,
+                        height: size.height,
+                        ..WidgetLayout::default()
+                    };
+                    assert!(layout_has_visible_area_for_size_in_work_areas(
+                        &layout,
+                        size,
+                        &[work_area],
+                    ));
+                    WidgetRect {
+                        x: x.max(work_area.x),
+                        y: y.max(work_area.y),
+                        width: x
+                            .saturating_add(size.width)
+                            .min(work_area.x.saturating_add(work_area.width))
+                            .saturating_sub(x.max(work_area.x)),
+                        height: y
+                            .saturating_add(size.height)
+                            .min(work_area.y.saturating_add(work_area.height))
+                            .saturating_sub(y.max(work_area.y)),
+                    }
+                })
+                .collect::<Vec<_>>();
+            for (index, rect) in visible_rects.iter().enumerate() {
+                for other in visible_rects.iter().skip(index + 1) {
+                    let rect_contains_other = rect.x <= other.x
+                        && rect.y <= other.y
+                        && rect.x.saturating_add(rect.width) >= other.x.saturating_add(other.width)
+                        && rect.y.saturating_add(rect.height)
+                            >= other.y.saturating_add(other.height);
+                    let other_contains_rect = other.x <= rect.x
+                        && other.y <= rect.y
+                        && other.x.saturating_add(other.width) >= rect.x.saturating_add(rect.width)
+                        && other.y.saturating_add(other.height)
+                            >= rect.y.saturating_add(rect.height);
+                    assert!(
+                        !rect_contains_other && !other_contains_rect,
+                        "fallback windows should retain independently exposed edges: {visible_rects:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn packed_fallback_origins_keep_the_selected_dpi_with_a_left_hand_monitor() {
+        let work_areas = [
+            DesktopWorkArea {
+                x: -2560,
+                y: 0,
+                width: 2560,
+                height: 1440,
+                dpi: 192,
+                is_primary: false,
+            },
+            DesktopWorkArea {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+                dpi: 96,
+                is_primary: true,
+            },
+        ];
+        let oversized = WidgetSize {
+            width: MAX_WIDGET_WIDTH,
+            height: MAX_WIDGET_HEIGHT,
+        };
+        let regular = WidgetSize {
+            width: 300,
+            height: 200,
+        };
+
+        for sizes in [vec![oversized, regular], vec![regular, oversized]] {
+            let positions = packed_widget_positions(&sizes, (4480, 1440), &work_areas);
+            let visible_rects = positions
+                .iter()
+                .copied()
+                .zip(sizes.iter().copied())
+                .map(|((x, y), logical_size)| {
+                    let origin_area = work_area_for_position(x, y, &work_areas).unwrap();
+                    assert_eq!(origin_area.dpi, 96);
+                    assert!((0..1920).contains(&x) && (0..1080).contains(&y));
+                    let physical_size = origin_area.physical_size(logical_size);
+                    WidgetRect {
+                        x,
+                        y,
+                        width: x
+                            .saturating_add(physical_size.width)
+                            .min(1920)
+                            .saturating_sub(x),
+                        height: y
+                            .saturating_add(physical_size.height)
+                            .min(1080)
+                            .saturating_sub(y),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let first = visible_rects[0];
+            let second = visible_rects[1];
+            let first_contains_second = first.x <= second.x
+                && first.y <= second.y
+                && first.x.saturating_add(first.width) >= second.x.saturating_add(second.width)
+                && first.y.saturating_add(first.height) >= second.y.saturating_add(second.height);
+            let second_contains_first = second.x <= first.x
+                && second.y <= first.y
+                && second.x.saturating_add(second.width) >= first.x.saturating_add(first.width)
+                && second.y.saturating_add(second.height) >= first.y.saturating_add(first.height);
+            assert!(!first_contains_second && !second_contains_first);
+        }
+    }
+
+    #[test]
+    fn oversized_fallback_uses_the_rightmost_monitor_to_avoid_cross_screen_coverage() {
+        let work_areas = [
+            DesktopWorkArea {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+                dpi: 96,
+                is_primary: true,
+            },
+            DesktopWorkArea {
+                x: 1920,
+                y: 0,
+                width: 2560,
+                height: 1440,
+                dpi: 192,
+                is_primary: false,
+            },
+        ];
+        let oversized = WidgetSize {
+            width: MAX_WIDGET_WIDTH,
+            height: MAX_WIDGET_HEIGHT,
+        };
+        let regular = WidgetSize {
+            width: 300,
+            height: 200,
+        };
+
+        for sizes in [vec![oversized, regular], vec![regular, oversized]] {
+            let positions = packed_widget_positions(&sizes, (4480, 1440), &work_areas);
+            let oversized_index = sizes.iter().position(|size| *size == oversized).unwrap();
+            let regular_index = 1 - oversized_index;
+            let oversized_area = work_area_for_position(
+                positions[oversized_index].0,
+                positions[oversized_index].1,
+                &work_areas,
+            )
+            .unwrap();
+            let regular_area = work_area_for_position(
+                positions[regular_index].0,
+                positions[regular_index].1,
+                &work_areas,
+            )
+            .unwrap();
+
+            assert_eq!(oversized_area.dpi, 192);
+            assert!(positions[oversized_index].0 >= 1920);
+            assert_eq!(regular_area.dpi, 96);
+            assert!(positions[regular_index].0 < 1920);
+        }
+    }
+
+    #[test]
+    fn widget_number_wraps_without_overflow_and_skips_existing_ids() {
+        let mut store = LayoutStore {
+            next_widget_number: u64::MAX,
+            widgets: vec![WidgetInstance {
+                id: format!("quote-board-{}", u64::MAX),
+                plugin_id: WidgetKind::QuoteBoard.plugin_id().to_string(),
+                legacy_widget_type: None,
+                name: "Existing".to_string(),
+                visible: true,
+                layout: WidgetLayout::default(),
+                symbols: default_market_symbols(),
+                config: default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+        let settings = store.settings.clone();
+
+        let id = add_widget_instance(&mut store, WidgetKind::QuoteBoard, &settings, (1920, 1080));
+
+        assert_eq!(id, "quote-board-1");
+        assert_eq!(store.next_widget_number, 2);
+    }
+
+    #[test]
+    fn persisted_proxy_userinfo_is_removed_during_settings_migration() {
+        let settings = AppSettings {
+            network_proxy_enabled: true,
+            network_proxy_url: "http://alice:secret@127.0.0.1:7890".to_string(),
+            ..AppSettings::default()
+        }
+        .normalized();
+
+        assert!(!settings.network_proxy_enabled);
+        assert!(settings.network_proxy_url.is_empty());
+        assert_eq!(effective_network_proxy_url(&settings), None);
     }
 }

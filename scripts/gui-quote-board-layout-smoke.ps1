@@ -102,6 +102,9 @@ $seedState = [ordered]@{
         widgets_always_on_top = $false
         opacity_percent = 96
         widget_scale_percent = 100
+        shortcut = "disabled"
+        tray_icon_enabled = $false
+        auto_start_enabled = $false
     }
     selected_widget_id = "quote-board-full-1"
     next_widget_number = 5
@@ -114,6 +117,8 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $env:CRYPTO_HUD_STATE_DIR = $StateDir
 $env:CRYPTO_HUD_GUI_SMOKE_READY_FILE = $ReadyFile
 $env:CRYPTO_HUD_INSTANCE_ID = "com.crypto-hud.gui-quote-board-layout-smoke.$PID"
+$env:CRYPTO_HUD_GUI_SMOKE_OFFLINE = "1"
+$env:CRYPTO_HUD_DISABLE_UPDATE_CHECK = "1"
 $env:SLINT_BACKEND = "software"
 
 function Assert-Close([double]$Actual, [double]$Expected, [double]$Tolerance, [string]$Label) {
@@ -168,6 +173,9 @@ try {
     if (-not $ready.ready) {
         throw "GUI quote board layout smoke marker did not report ready"
     }
+    if (-not $ready.marketDataReady) {
+        throw "GUI quote board layout smoke marker did not report market data ready"
+    }
     if ([int]$ready.widgetCount -ne 4) {
         throw "Expected 4 widgets, saw $($ready.widgetCount)"
     }
@@ -189,4 +197,6 @@ try {
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_INSTANCE_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_OFFLINE -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_DISABLE_UPDATE_CHECK -ErrorAction SilentlyContinue
 }

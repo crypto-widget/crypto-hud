@@ -3,7 +3,11 @@ rust = "1.96.0"
 
 [tasks.check]
 description = "Check the Slint native widget app"
-run = "cargo check --workspace"
+run = "cargo check --locked --workspace --all-targets --all-features"
+
+[tasks.clippy]
+description = "Run strict Clippy checks used by CI"
+run = "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings"
 
 [tasks.run-app]
 description = "Run the Slint native app with one instance of each widget"
@@ -19,4 +23,12 @@ run = "cargo fmt --all --check"
 
 [tasks.test]
 description = "Run the workspace test suite"
-run = "cargo test --workspace"
+run = "cargo test --locked --workspace --all-targets --no-fail-fast"
+
+[tasks.ci]
+description = "Run the complete local CI-equivalent Rust validation"
+run = '''
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets --no-fail-fast
+'''

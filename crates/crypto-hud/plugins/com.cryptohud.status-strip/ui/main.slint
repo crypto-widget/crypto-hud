@@ -148,7 +148,14 @@ export component StatusStrip inherits Window {
                 width: root.s(self.cell-width);
                 height: parent.height;
                 visible: index < root.max-block-count;
-                background: transparent;
+                // Keep a rectangular fill below the decorative path. Some
+                // software renderers cull very small scaled paths entirely;
+                // the parent card still provides the correct outer clipping.
+                background: index == 0 ? @linear-gradient(180deg, #1ab5cd 0%, #128bb1 100%)
+                    : (index == 1 ? @linear-gradient(180deg, #29a2d7 0%, #1f6ebc 100%)
+                    : (index == 2 ? @linear-gradient(180deg, #f79d25 0%, #e55e1f 100%)
+                    : (index == 3 ? @linear-gradient(180deg, #dbcc27 0%, #b5aa16 100%)
+                    : @linear-gradient(180deg, #52b868 0%, #288b52 100%))));
 
                 StatusStripFill {
                     tone-index: index;

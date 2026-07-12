@@ -2,7 +2,7 @@
   <img src="crates/crypto-hud/ui/icon.png" width="88" alt="Crypto HUD logo">
 </p>
 
-<h1 align="center">Crypto HUD</h1>
+<h1 align="center">Crypto HUD — Native Crypto Desktop Widget for Windows</h1>
 
 <p align="center">
   <strong>Your market, always within a glance.</strong><br>
@@ -27,7 +27,7 @@
 <p align="center">
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078d4?style=flat-square&logo=windows11&logoColor=white">
   <img alt="Built with Rust" src="https://img.shields.io/badge/built_with-Rust-dea584?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Native Slint UI" src="https://img.shields.io/badge/UI-native_Slint-2379f4?style=flat-square">
+  <a href="https://slint.dev"><img alt="Made with Slint" height="20" src="https://raw.githubusercontent.com/slint-ui/slint/v1.17.0/logo/MadeWithSlint-logo-whitebg.png"></a>
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square">
 </p>
 
@@ -51,10 +51,10 @@
 
 ---
 
-Crypto HUD is a lightweight, local-first market display for people who want to
-follow a few coins without living inside a trading terminal. Place a widget
-where it feels natural, keep working, and glance over only when the market
-matters.
+Crypto HUD is a lightweight, local-first crypto desktop widget for Windows,
+built for people who want to follow a few coins without living inside a trading
+terminal. Place a widget where it feels natural, keep working, and glance over
+only when the market matters.
 
 <table>
   <tr>
@@ -64,6 +64,11 @@ matters.
     <td width="25%"><strong>🙈 Quiet on demand</strong><br><sub>Hide or restore every widget with <kbd>Alt</kbd> + <kbd>C</kbd>.</sub></td>
   </tr>
 </table>
+
+<p align="center">
+  <strong>Measured in the default test: 0.070% average CPU · about 20 MiB private memory</strong><br>
+  <sub>One widget · 3 market pairs · 5-second refresh · <a href="docs/performance-reports/README.md">Full performance report →</a></sub>
+</p>
 
 ## Widget gallery
 
@@ -211,7 +216,10 @@ mise run run-app
   Releases are produced with the local Windows scripts. The package workflow
   creates a zip, checksum, and release manifest in `dist/`. Production packages
   must be Authenticode signed; the smoke scripts use an explicit local-only
-  unsigned override.
+  unsigned override. Bundled widgets are installed under `plugins/`; preview
+  images and the application icon are installed under `resources/previews/`
+  and `resources/icon.ico`, with every shipped file bound to the signed release
+  integrity metadata.
 
   ```powershell
   cargo test --locked --workspace
@@ -219,9 +227,24 @@ mise run run-app
   powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
   powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
   powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-  # Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) first.
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
+  # Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) and
+  # CRYPTO_HUD_SIGN_CERT_PASSWORD first. Signed packages always rebuild.
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.8 -Sign
   ```
+
+  For a production first install, verify the installer before executing any of
+  its code. Confirm that `Status` is `Valid` and that `SignerCertificate.Subject`
+  matches the publisher identity published with the release, then use
+  `AllSigned` rather than bypassing PowerShell policy:
+
+  ```powershell
+  Get-AuthenticodeSignature -LiteralPath .\install.ps1 | Format-List Status,SignerCertificate
+  powershell -ExecutionPolicy AllSigned -File .\install.ps1
+  ```
+
+  `-ExecutionPolicy Bypass` and `CRYPTO_HUD_ALLOW_UNSIGNED_SMOKE=1` are reserved
+  for the repository's isolated unsigned smoke tests; they are not production
+  installation options.
 </details>
 
 ## Roadmap

@@ -2,7 +2,7 @@
   <img src="crates/crypto-hud/ui/icon.png" width="88" alt="Crypto HUD 图标">
 </p>
 
-<h1 align="center">Crypto HUD</h1>
+<h1 align="center">Crypto HUD：Windows 原生加密货币桌面行情组件</h1>
 
 <p align="center">
   <strong>行情一直在，需要时扫一眼。</strong><br>
@@ -51,9 +51,9 @@
 
 ---
 
-Crypto HUD 是一款轻量、本地优先的桌面行情工具，适合想关注几个币种、
-又不想整天泡在交易终端里的人。把组件摆在顺眼的位置，继续工作；
-只有当行情值得在意时，再抬眼看一下。
+Crypto HUD 是一款轻量、本地优先的 Windows 加密货币桌面行情组件
+（crypto desktop widget），适合想关注几个币种、又不想整天泡在交易终端里的人。
+把组件摆在顺眼的位置，继续工作；只有当行情值得在意时，再抬眼看一下。
 
 <table>
   <tr>
@@ -63,6 +63,11 @@ Crypto HUD 是一款轻量、本地优先的桌面行情工具，适合想关注
     <td width="25%"><strong>🙈 随时安静</strong><br><sub>按 <kbd>Alt</kbd> + <kbd>C</kbd> 一键隐藏或恢复全部组件。</sub></td>
   </tr>
 </table>
+
+<p align="center">
+  <strong>默认配置实测：平均 CPU 约 0.070% · 进程私有内存约 20 MiB</strong><br>
+  <sub>单个组件 · 3 个币对 · 5 秒刷新 · <a href="docs/performance-reports/README.zh-CN.md">查看完整性能报告 →</a></sub>
+</p>
 
 ## 组件效果
 
@@ -201,7 +206,9 @@ mise run run-app
 
   发布包由本地 Windows 脚本生成。打包流程会在 `dist/` 中创建 zip、校验和与
   release manifest。生产包必须使用 Authenticode 签名；smoke 脚本仅通过明确的
-  本地开发开关使用未签名包。
+  本地开发开关使用未签名包。内置组件安装到 `plugins/`；预览图和应用图标分别
+  安装到 `resources/previews/` 与 `resources/icon.ico`。所有随包文件都由已签名的
+  发布完整性元数据绑定。
 
   ```powershell
   cargo test --locked --workspace
@@ -209,9 +216,22 @@ mise run run-app
   powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
   powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
   powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-  # 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）。
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
+  # 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）以及
+  # CRYPTO_HUD_SIGN_CERT_PASSWORD。正式签名时始终重新构建。
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.8 -Sign
   ```
+
+  首次安装生产包时，应在执行安装脚本中的任何代码前先验证其签名。确认 `Status`
+  为 `Valid`，并核对 `SignerCertificate.Subject` 与发布页公布的发布者身份一致；随后
+  使用 `AllSigned`，不要绕过 PowerShell 执行策略：
+
+  ```powershell
+  Get-AuthenticodeSignature -LiteralPath .\install.ps1 | Format-List Status,SignerCertificate
+  powershell -ExecutionPolicy AllSigned -File .\install.ps1
+  ```
+
+  `-ExecutionPolicy Bypass` 和 `CRYPTO_HUD_ALLOW_UNSIGNED_SMOKE=1` 仅用于仓库中
+  隔离运行的未签名 smoke 测试，不是生产安装选项。
 </details>
 
 ## 路线图

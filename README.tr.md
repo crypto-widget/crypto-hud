@@ -50,6 +50,10 @@ uygun bir yere koyun, işinize devam edin ve yalnızca gerektiğinde göz atın.
 ## Arka planda sessizce çalışmak için tasarlandı
 
 - **Yerel ve hafif**: Rust + Slint; Electron, Tauri, WebView veya gömülü tarayıcı yok.
+- **Ölçülen hafif kullanım**: bir widget, 3 piyasa çifti ve 5 saniyelik yenileme
+  aralığıyla yapılan varsayılan testte kararlı durumdaki ortalama CPU kullanımı
+  **%0,070**, özel işlem belleği ise yaklaşık **20 MiB** oldu.
+  [Tam performans raporunu görüntüleyin](docs/performance-reports/README.tr.md).
 - **Tek bakışta bilgi**: taşınabilir ve her zaman üstte kalan widget'lar önemli rakamları görünür tutar.
 - **Önce yerel**: düzen ve tercihler bilgisayarınızda kalır; hesap veya API Key gerekmez.
 - **İstediğinizde gizleyin**: tüm widget'ları <kbd>Alt</kbd> + <kbd>C</kbd> ile gizleyin veya geri getirin.

@@ -13,9 +13,12 @@ use crypto_hud_core::normalize_symbol_token;
 use serde::Deserialize;
 use slint::Image;
 
+use crate::feature_flags;
+
 const MAX_ICON_BYTES: usize = 512 * 1024;
 const MAX_TOKENLIST_BYTES: usize = 12 * 1024 * 1024;
 const ICON_RETRY_DELAY: Duration = Duration::from_secs(5 * 60);
+const TOKENLIST_RETRY_DELAY: Duration = Duration::from_secs(5 * 60);
 const USER_AGENT: &str = concat!("crypto-hud/", env!("CARGO_PKG_VERSION"));
 const TRUSTWALLET_TOKENLIST_CHAINS: &[&str] = &[
     "ethereum",
@@ -80,7 +83,13 @@ struct IconCandidate {
 
 #[derive(Default)]
 struct TrustWalletTokenIndex {
-    chains: HashMap<&'static str, Option<HashMap<String, Vec<String>>>>,
+    proxy_url: Option<Option<String>>,
+    chains: HashMap<&'static str, TrustWalletChainIndex>,
+}
+
+enum TrustWalletChainIndex {
+    Ready(HashMap<String, Vec<String>>),
+    Failed { retry_at: Instant },
 }
 
 #[derive(Deserialize)]
@@ -137,6 +146,7 @@ impl CoinIconRegistry {
                         }
                     }
                     WorkerCommand::ClearCache => {
+                        trust_wallet_index.clear();
                         if let Err(error) = remove_cached_icon_files(&worker_cache_dir) {
                             eprintln!("failed to clear coin icon cache in worker: {error}");
                         }
@@ -374,6 +384,10 @@ fn download_icon(
     proxy_url: Option<&str>,
     trust_wallet_index: &mut TrustWalletTokenIndex,
 ) -> Result<Option<PathBuf>, String> {
+    if feature_flags::gui_smoke_offline_network_disabled() {
+        return Err("coin icon network access is disabled for offline GUI smoke".to_string());
+    }
+
     let agent = http_agent(proxy_url)?;
     let candidates = icon_candidates(key);
 
@@ -390,7 +404,7 @@ fn download_icon(
         }
     }
 
-    for url in trust_wallet_index.logo_urls_for_symbol(&agent, key) {
+    for url in trust_wallet_index.logo_urls_for_symbol(&agent, key, proxy_url) {
         let extension = icon_extension_from_url(&url);
         if let Ok(bytes) = fetch_icon_bytes(&agent, &url, extension) {
             let path = cache_file_path(cache_dir, key, extension);
@@ -570,16 +584,51 @@ fn trustwallet_native_chain(key: &str) -> Option<&'static str> {
 }
 
 impl TrustWalletTokenIndex {
-    fn logo_urls_for_symbol(&mut self, agent: &ureq::Agent, key: &str) -> Vec<String> {
+    fn clear(&mut self) {
+        self.proxy_url = None;
+        self.chains.clear();
+    }
+
+    fn reset_for_proxy(&mut self, proxy_url: Option<&str>) {
+        let proxy_url = normalized_proxy_url(proxy_url);
+        if self.proxy_url.as_ref() != Some(&proxy_url) {
+            self.proxy_url = Some(proxy_url);
+            self.chains.clear();
+        }
+    }
+
+    fn logo_urls_for_symbol(
+        &mut self,
+        agent: &ureq::Agent,
+        key: &str,
+        proxy_url: Option<&str>,
+    ) -> Vec<String> {
+        self.logo_urls_for_symbol_at(agent, key, proxy_url, Instant::now())
+    }
+
+    fn logo_urls_for_symbol_at(
+        &mut self,
+        agent: &ureq::Agent,
+        key: &str,
+        proxy_url: Option<&str>,
+        now: Instant,
+    ) -> Vec<String> {
+        self.reset_for_proxy(proxy_url);
         let mut urls = Vec::new();
 
         for chain in TRUSTWALLET_TOKENLIST_CHAINS {
-            if !self.chains.contains_key(chain) {
-                let index = fetch_trustwallet_chain_index(agent, chain).ok();
+            let should_fetch = trustwallet_chain_index_needs_fetch(self.chains.get(chain), now);
+            if should_fetch {
+                let index = match fetch_trustwallet_chain_index(agent, chain) {
+                    Ok(index) => TrustWalletChainIndex::Ready(index),
+                    Err(_) => TrustWalletChainIndex::Failed {
+                        retry_at: now + TOKENLIST_RETRY_DELAY,
+                    },
+                };
                 self.chains.insert(chain, index);
             }
 
-            if let Some(Some(index)) = self.chains.get(chain) {
+            if let Some(TrustWalletChainIndex::Ready(index)) = self.chains.get(chain) {
                 if let Some(chain_urls) = index.get(key) {
                     urls.extend(chain_urls.iter().cloned());
                 }
@@ -592,6 +641,17 @@ impl TrustWalletTokenIndex {
 
         urls.truncate(3);
         urls
+    }
+}
+
+fn trustwallet_chain_index_needs_fetch(
+    index: Option<&TrustWalletChainIndex>,
+    now: Instant,
+) -> bool {
+    match index {
+        None => true,
+        Some(TrustWalletChainIndex::Ready(_)) => false,
+        Some(TrustWalletChainIndex::Failed { retry_at }) => now >= *retry_at,
     }
 }
 
@@ -669,6 +729,47 @@ mod tests {
             Some("http://127.0.0.1:7890"),
             now + ICON_RETRY_DELAY
         ));
+    }
+
+    #[test]
+    fn failed_trustwallet_chain_index_retries_only_after_expiry() {
+        let now = Instant::now();
+        let failed = TrustWalletChainIndex::Failed {
+            retry_at: now + TOKENLIST_RETRY_DELAY,
+        };
+
+        assert!(!trustwallet_chain_index_needs_fetch(Some(&failed), now));
+        assert!(trustwallet_chain_index_needs_fetch(
+            Some(&failed),
+            now + TOKENLIST_RETRY_DELAY
+        ));
+        assert!(trustwallet_chain_index_needs_fetch(None, now));
+    }
+
+    #[test]
+    fn trustwallet_index_resets_on_proxy_change_and_cache_clear() {
+        let mut index = TrustWalletTokenIndex::default();
+        index.reset_for_proxy(Some("http://127.0.0.1:7890"));
+        index.chains.insert(
+            "ethereum",
+            TrustWalletChainIndex::Ready(HashMap::from([(
+                "token".to_string(),
+                vec!["https://assets-cdn.trustwallet.com/token.png".to_string()],
+            )])),
+        );
+
+        index.reset_for_proxy(Some("socks5://127.0.0.1:1080"));
+        assert!(index.chains.is_empty());
+
+        index.chains.insert(
+            "ethereum",
+            TrustWalletChainIndex::Failed {
+                retry_at: Instant::now() + TOKENLIST_RETRY_DELAY,
+            },
+        );
+        index.clear();
+        assert!(index.chains.is_empty());
+        assert_eq!(index.proxy_url, None);
     }
 
     #[test]

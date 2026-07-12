@@ -21,11 +21,11 @@ use std::collections::HashMap;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     env,
     rc::Rc,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
@@ -33,17 +33,17 @@ use crypto_hud_market as market;
 use crypto_hud_runtime::QuoteCache;
 use crypto_hud_shell_state as settings;
 use desktop_shell::{
-    install_gui_smoke_timer, install_instance_activation_timer, install_keepalive_window,
-    install_single_instance_guard, install_tray, parse_launch_options, refresh_tray_text,
-    write_gui_smoke_ready_file,
+    install_gui_smoke_ready_timer, install_gui_smoke_timer, install_instance_activation_timer,
+    install_keepalive_window, install_single_instance_guard, install_tray, parse_launch_options,
+    refresh_tray_text,
 };
 use runtime_bridge::{install_runtime_event_timer, sync_widget_runtimes, RuntimeEventTimerDeps};
 #[cfg(test)]
 use settings::{
-    default_widget_config, AppSettings, LegacyLayoutStore, WidgetInstance,
+    default_widget_config, AppSettings, LayoutStore, LegacyLayoutStore, WidgetInstance,
     WidgetKind as WidgetType, WidgetLayout,
 };
-use settings::{save_layout_store, state_dir_for_path, state_path, LayoutStore};
+use settings::{save_layout_store, state_dir_for_path, state_path};
 use settings_window::{
     apply_dynamic_widget_auto_sizes_to_store, install_preview_carousel_timer,
     install_settings_window, SettingsWindowDeps,
@@ -56,8 +56,9 @@ use state_bridge::{
 #[cfg(test)]
 use state_bridge::{
     add_widget_instance, default_layout_for_index, default_layout_for_size,
-    default_layout_for_widget, default_symbols, layout_has_visible_area, migrate_legacy_store,
-    normalize_store, parse_symbols, parse_symbols_for_type,
+    default_layout_for_widget, default_symbols, layout_has_visible_area,
+    layout_has_visible_area_for_size, migrate_legacy_store, normalize_store, parse_symbols,
+    parse_symbols_for_type,
 };
 use widget_host::WidgetRuntime;
 use window_manager::{
@@ -88,6 +89,7 @@ const LEGACY_DEFAULT_POSITION_STEP: i32 = settings::LEGACY_DEFAULT_POSITION_STEP
 #[cfg(test)]
 const DEFAULT_LAYOUT_GAP: i32 = settings::DEFAULT_LAYOUT_GAP;
 pub(crate) const ABOUT_REPOSITORY_URL: &str = "https://github.com/crypto-widget/crypto-hud";
+pub(crate) const RELEASES_URL: &str = "https://github.com/crypto-widget/crypto-hud/releases";
 pub(crate) const WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[cfg(test)]
@@ -100,13 +102,12 @@ struct WidgetRect {
 }
 
 #[cfg(test)]
-fn widget_rect(layout: &WidgetLayout, widget_type: WidgetType) -> WidgetRect {
-    let size = widget_type.default_size();
+fn widget_rect(layout: &WidgetLayout, _widget_type: WidgetType) -> WidgetRect {
     WidgetRect {
         x: layout.x,
         y: layout.y,
-        width: size.width,
-        height: size.height,
+        width: layout.width,
+        height: layout.height,
     }
 }
 
@@ -122,9 +123,7 @@ impl WidgetRect {
 
 fn install_gui_smoke_settings_interaction_timer(
     settings_window: slint::Weak<SettingsWindow>,
-    widgets: Rc<RefCell<Vec<WidgetRuntime>>>,
-    layouts: Rc<RefCell<LayoutStore>>,
-    settings_window_requested: bool,
+    interaction_complete: Rc<Cell<bool>>,
 ) -> Option<Timer> {
     env::var_os("CRYPTO_HUD_GUI_SMOKE_SETTINGS_INTERACTION")?;
 
@@ -157,14 +156,56 @@ fn install_gui_smoke_settings_interaction_timer(
                 ui.invoke_open_widget_symbol_picker();
                 ui.invoke_confirm_symbol_picker(0, 0);
             }
-            let widgets = widgets.clone();
-            let layouts = layouts.clone();
+            let interaction_complete = interaction_complete.clone();
             Timer::single_shot(Duration::from_millis(140), move || {
-                write_gui_smoke_ready_file(&widgets, &layouts, settings_window_requested);
+                interaction_complete.set(true);
             });
         },
     );
     Some(timer)
+}
+
+fn offline_gui_smoke_enabled(gui_smoke_requested: bool, flag: Option<&str>) -> bool {
+    gui_smoke_requested && flag == Some("1")
+}
+
+fn deterministic_gui_smoke_market_events(symbols: &[String]) -> Vec<market::MarketEvent> {
+    let chart_updated_at = Instant::now();
+    symbols
+        .iter()
+        .enumerate()
+        .map(|(index, symbol)| {
+            let price = 100.0 + index as f64 * 25.0;
+            let timestamp = 1_700_000_000_000 + index as u64 * 1_000_000;
+            let chart_candles_24h = (0_u32..4)
+                .map(|offset| {
+                    let open = price + f64::from(offset) * 0.5;
+                    let close = open + 0.25;
+                    market::MarketCandle {
+                        open_time_millis: timestamp + u64::from(offset) * 300_000,
+                        open,
+                        high: close + 0.25,
+                        low: open - 0.25,
+                        close,
+                    }
+                })
+                .collect::<Vec<_>>();
+            let chart_closes_24h = chart_candles_24h
+                .iter()
+                .map(|candle| candle.close)
+                .collect();
+            market::MarketEvent::Snapshot(market::MarketSnapshot {
+                symbol: symbol.clone(),
+                price,
+                change_percent_24h: 1.0 + index as f64 * 0.1,
+                chart_closes_24h,
+                chart_candles_24h,
+                chart_updated_at: Some(chart_updated_at),
+                chart_error: None,
+                source: crypto_hud_core::market_pair_source(symbol).unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 fn main() -> Result<()> {
@@ -179,6 +220,11 @@ fn main() -> Result<()> {
     }
 
     let launch_options = parse_launch_options();
+    let offline_gui_smoke = offline_gui_smoke_enabled(
+        launch_options.gui_smoke_exit_after.is_some(),
+        env::var("CRYPTO_HUD_GUI_SMOKE_OFFLINE").ok().as_deref(),
+    );
+    feature_flags::set_gui_smoke_offline_network_disabled(offline_gui_smoke);
     let requested_widget_count = if launch_options.each_widget {
         0
     } else {
@@ -228,8 +274,9 @@ fn main() -> Result<()> {
     }
     let settings_status = Rc::new(RefCell::new(state_load_warning.unwrap_or_default()));
     let shortcut_manager = Rc::new(RefCell::new(shortcuts::ShortcutManager::new()));
+    let market_symbols = symbols_from_store(&layouts.borrow(), &plugin_catalog);
     let market_feed_config = Arc::new(Mutex::new(market::MarketFeedConfig {
-        symbols: symbols_from_store(&layouts.borrow(), &plugin_catalog),
+        symbols: market_symbols.clone(),
         provider: app_settings.market_provider,
         refresh_interval_seconds: app_settings.refresh_interval_seconds,
         enabled_sources: settings::enabled_market_sources(&app_settings),
@@ -308,14 +355,13 @@ fn main() -> Result<()> {
             .context("failed to show settings window on startup")?;
         schedule_settings_window_configuration();
     }
+    let gui_smoke_settings_interaction_complete = Rc::new(Cell::new(false));
     let gui_smoke_settings_interaction_timer = install_gui_smoke_settings_interaction_timer(
         settings_window.as_weak(),
-        widgets.clone(),
-        layouts.clone(),
-        show_main_window_on_startup,
+        gui_smoke_settings_interaction_complete.clone(),
     );
     if gui_smoke_settings_interaction_timer.is_none() {
-        write_gui_smoke_ready_file(&widgets, &layouts, show_main_window_on_startup);
+        gui_smoke_settings_interaction_complete.set(true);
     }
     let keepalive_window = install_keepalive_window()?;
     let gui_smoke_timer = install_gui_smoke_timer(launch_options.gui_smoke_exit_after);
@@ -345,7 +391,11 @@ fn main() -> Result<()> {
         plugin_catalog.clone(),
     );
 
-    let market_updates = market::spawn_market_feed(market_feed_config);
+    let market_updates = if offline_gui_smoke {
+        market::MarketFeed::from_events(deterministic_gui_smoke_market_events(&market_symbols))
+    } else {
+        market::spawn_market_feed(market_feed_config)
+    };
     let update_events = if launch_options.gui_smoke_exit_after.is_some() {
         None
     } else {
@@ -362,11 +412,22 @@ fn main() -> Result<()> {
         quote_cache: quote_cache.clone(),
         coin_icons: coin_icons.clone(),
         plugin_catalog: plugin_catalog.clone(),
+        settings_window: settings_window.as_weak(),
         market_updates,
         update_events,
     });
+    let gui_smoke_ready_timer = install_gui_smoke_ready_timer(
+        launch_options.gui_smoke_exit_after,
+        widgets.clone(),
+        layouts.clone(),
+        quote_cache.clone(),
+        plugin_catalog.clone(),
+        show_main_window_on_startup,
+        gui_smoke_settings_interaction_complete,
+    );
 
     let event_loop_result = slint::run_event_loop_until_quit().context("Slint event loop failed");
+    drop(gui_smoke_ready_timer);
     drop(runtime_event_timer);
     drop(instance_activation_timer);
     drop(widget_shell_window_maintenance_timer);
@@ -413,6 +474,47 @@ fn seed_each_widget_on_empty_start(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offline_gui_smoke_requires_both_launch_option_and_exact_flag() {
+        assert!(offline_gui_smoke_enabled(true, Some("1")));
+        assert!(!offline_gui_smoke_enabled(false, Some("1")));
+        assert!(!offline_gui_smoke_enabled(true, None));
+        assert!(!offline_gui_smoke_enabled(true, Some("true")));
+        assert!(!offline_gui_smoke_enabled(true, Some("0")));
+    }
+
+    #[test]
+    fn deterministic_gui_smoke_events_cover_every_symbol_with_valid_charts() {
+        let symbols = vec![
+            "binance:spot:BTC/USDT".to_string(),
+            "coinbase:spot:ETH/USD".to_string(),
+        ];
+        let events = deterministic_gui_smoke_market_events(&symbols);
+
+        assert_eq!(events.len(), symbols.len());
+        for (event, expected_symbol) in events.iter().zip(&symbols) {
+            let market::MarketEvent::Snapshot(snapshot) = event else {
+                panic!("offline GUI smoke should only emit snapshots");
+            };
+            assert_eq!(&snapshot.symbol, expected_symbol);
+            assert!(snapshot.price.is_finite() && snapshot.price > 0.0);
+            assert!(snapshot.change_percent_24h.is_finite());
+            assert_eq!(snapshot.chart_closes_24h.len(), 4);
+            assert_eq!(snapshot.chart_candles_24h.len(), 4);
+            assert!(snapshot.chart_updated_at.is_some());
+            assert!(snapshot.chart_error.is_none());
+            assert!(snapshot.chart_candles_24h.iter().all(|candle| {
+                [candle.open, candle.high, candle.low, candle.close]
+                    .into_iter()
+                    .all(|value| value.is_finite() && value > 0.0)
+                    && candle.low <= candle.open
+                    && candle.open <= candle.high
+                    && candle.low <= candle.close
+                    && candle.close <= candle.high
+            }));
+        }
+    }
 
     fn local_test_plugin_definition() -> plugin::PluginDefinition {
         plugin::PluginDefinition {
@@ -509,6 +611,12 @@ mod tests {
                 DEFAULT_LAYOUT_GAP,
             )
         );
+        assert!(store.widgets.iter().all(|widget| {
+            layout_has_visible_area_for_size(
+                &widget.layout,
+                (widget.layout.width, widget.layout.height),
+            )
+        }));
     }
 
     #[test]
@@ -585,6 +693,12 @@ mod tests {
                 DEFAULT_LAYOUT_GAP,
             )
         );
+        assert!(store.widgets.iter().all(|widget| {
+            layout_has_visible_area_for_size(
+                &widget.layout,
+                (widget.layout.width, widget.layout.height),
+            )
+        }));
     }
 
     #[test]

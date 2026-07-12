@@ -16,9 +16,9 @@ New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 
 $seedWidgets = @(
     [ordered]@{
-        id = "focus-ticker-10"
+        id = "focus-ticker-30"
         plugin_id = "com.cryptohud.focus-ticker"
-        name = "Focus Ticker 10"
+        name = "Focus Ticker 30"
         visible = $true
         layout = [ordered]@{
             x = 80
@@ -26,50 +26,54 @@ $seedWidgets = @(
             always_on_top = $false
             opacity_percent = 96
             locked = $false
-            scale_percent = 10
-            width = 82
-            height = 16
+            scale_percent = 30
+            width = 246
+            height = 47
         }
         symbols = @("BTC")
         config = [ordered]@{}
     },
     [ordered]@{
-        id = "trust-card-10"
+        id = "trust-card-30"
         plugin_id = "com.cryptohud.trust-card"
-        name = "Trust Card 10"
+        name = "Trust Card 30"
         visible = $true
         layout = [ordered]@{
-            x = 190
+            x = 350
             y = 80
             always_on_top = $false
             opacity_percent = 96
             locked = $false
-            scale_percent = 10
-            width = 52
-            height = 41
+            scale_percent = 30
+            width = 156
+            height = 116
         }
         symbols = @("ETH")
         config = [ordered]@{}
     },
     [ordered]@{
-        id = "status-strip-10"
+        id = "status-strip-30"
         plugin_id = "com.cryptohud.status-strip"
-        name = "Status Strip 10"
+        name = "Status Strip 30"
         visible = $true
         layout = [ordered]@{
-            x = 270
+            x = 540
             y = 80
             always_on_top = $false
             opacity_percent = 96
             locked = $false
-            scale_percent = 10
-            width = 37
-            height = 9
+            scale_percent = 30
+            width = 112
+            height = 28
         }
         symbols = @("BTC", "ETH", "SOL")
         config = [ordered]@{}
     }
 )
+
+foreach ($widget in $seedWidgets) {
+    $widget.layout.always_on_top = $true
+}
 
 $seedState = [ordered]@{
     settings = [ordered]@{
@@ -77,8 +81,11 @@ $seedState = [ordered]@{
         opacity_percent = 96
         widget_scale_percent = 100
         theme = "dark"
+        shortcut = "disabled"
+        tray_icon_enabled = $false
+        auto_start_enabled = $false
     }
-    selected_widget_id = "focus-ticker-10"
+    selected_widget_id = "focus-ticker-30"
     next_widget_number = 4
     widgets = $seedWidgets
 }
@@ -102,6 +109,7 @@ public static class CryptoHudGuiPluginScaleSmokeWin32 {
     [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
@@ -110,6 +118,8 @@ public static class CryptoHudGuiPluginScaleSmokeWin32 {
         public int Right;
         public int Bottom;
     }
+
+    public const uint PW_RENDERFULLCONTENT = 0x00000002;
 }
 '@
 }
@@ -167,7 +177,19 @@ function Assert-ScaledContentVisible([object]$Window, [string]$Title, [int]$Expe
         [Math]::Max(1, [int]$Window.Height)
     )
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $graphics.CopyFromScreen([int]$Window.Left, [int]$Window.Top, 0, 0, $bitmap.Size)
+    $deviceContext = $graphics.GetHdc()
+    try {
+        $printed = [CryptoHudGuiPluginScaleSmokeWin32]::PrintWindow(
+            [IntPtr]$Window.Handle,
+            $deviceContext,
+            [CryptoHudGuiPluginScaleSmokeWin32]::PW_RENDERFULLCONTENT
+        )
+    } finally {
+        $graphics.ReleaseHdc($deviceContext)
+    }
+    if (-not $printed) {
+        $graphics.CopyFromScreen([int]$Window.Left, [int]$Window.Top, 0, 0, $bitmap.Size)
+    }
     $graphics.Dispose()
 
     $capturePath = Join-Path $StateDir "$Title.png"
@@ -205,13 +227,15 @@ function Assert-ScaledContentVisible([object]$Window, [string]$Title, [int]$Expe
     $bitmap.Dispose()
 
     if ($detailPixels -lt 6) {
-        throw "$Title 10% screenshot looks clipped; expected scaled detail pixels, saw $detailPixels. Capture: $capturePath"
+        throw "$Title 30% screenshot looks clipped; expected scaled detail pixels, saw $detailPixels. Capture: $capturePath"
     }
 }
 
 $env:CRYPTO_HUD_STATE_DIR = $StateDir
 $env:CRYPTO_HUD_GUI_SMOKE_READY_FILE = $ReadyFile
 $env:CRYPTO_HUD_INSTANCE_ID = "com.crypto-hud.gui-plugin-scale-smoke.$PID"
+$env:CRYPTO_HUD_GUI_SMOKE_OFFLINE = "1"
+$env:CRYPTO_HUD_DISABLE_UPDATE_CHECK = "1"
 $env:SLINT_BACKEND = "software"
 
 Push-Location $RepoRoot
@@ -223,17 +247,21 @@ try {
 
     $app = Start-Process `
         -FilePath (Join-Path $RepoRoot "target\debug\crypto-hud.exe") `
-        -ArgumentList @("--widgets", "3", "--show-settings", "--gui-smoke-ms", "$TimeoutMs") `
+        -ArgumentList @("--widgets", "3", "--gui-smoke-ms", "$TimeoutMs") `
         -PassThru
     try {
         Wait-ForFile $ReadyFile 5000
+        $ready = Get-Content -LiteralPath $ReadyFile -Raw | ConvertFrom-Json
+        if (-not [bool]$ready.marketDataReady) {
+            throw "GUI plugin scale smoke marker did not report market data ready"
+        }
         Start-Sleep -Milliseconds 900
 
         $windows = @(Get-ProcessWindows $app.Id)
         $expected = @(
-            [pscustomobject]@{ Title = "focus-ticker-10"; Width = 82; Height = 16 },
-            [pscustomobject]@{ Title = "trust-card-10"; Width = 52; Height = 39 },
-            [pscustomobject]@{ Title = "status-strip-10"; Width = 37; Height = 9 }
+            [pscustomobject]@{ Title = "focus-ticker-30"; Width = 246; Height = 47 },
+            [pscustomobject]@{ Title = "trust-card-30"; Width = 156; Height = 116 },
+            [pscustomobject]@{ Title = "status-strip-30"; Width = 112; Height = 28 }
         )
 
         foreach ($widget in $expected) {
@@ -255,4 +283,6 @@ try {
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_INSTANCE_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_OFFLINE -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_DISABLE_UPDATE_CHECK -ErrorAction SilentlyContinue
 }

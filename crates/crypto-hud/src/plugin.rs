@@ -45,6 +45,8 @@ const BUNDLED_BUILTIN_SLINT_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.trust-card",
     "com.cryptohud.status-strip",
 ];
+const BUNDLED_PLUGIN_DIRECTORY_NAME: &str = "plugins";
+const BUNDLED_RESOURCE_DIRECTORY_NAME: &str = "resources";
 #[cfg(test)]
 const HOST_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.focus-ticker",
@@ -93,7 +95,37 @@ impl PluginCatalog {
     }
 
     pub fn load(state_dir: &Path) -> Self {
-        Self::discover(plugin_roots(state_dir))
+        let bundled_roots = bundled_plugin_roots();
+        let bundled_root_available = bundled_roots.iter().any(|root| root.is_dir());
+        let expected_bundled_root = bundled_roots
+            .iter()
+            .find(|root| root.is_dir())
+            .or_else(|| bundled_roots.first())
+            .cloned();
+        let mut catalog = Self::discover(plugin_roots(state_dir));
+        if !bundled_root_available {
+            if let Some(root) = expected_bundled_root.as_ref() {
+                catalog.push_error(root.clone(), "bundled plugin directory is missing");
+            }
+        }
+        for plugin_id in BUNDLED_BUILTIN_SLINT_PLUGIN_IDS {
+            let bundled_plugin_loaded = catalog.plugins.iter().any(|plugin| {
+                plugin.id == *plugin_id
+                    && matches!(
+                        &plugin.renderer,
+                        PluginRendererDefinition::Slint { root_dir, .. }
+                            if is_bundled_builtin_slint_plugin(plugin_id, root_dir)
+                    )
+            });
+            if !bundled_plugin_loaded {
+                let path = expected_bundled_root
+                    .as_ref()
+                    .map(|root| root.join(plugin_id))
+                    .unwrap_or_else(|| PathBuf::from(plugin_id));
+                catalog.push_error(path, "required bundled plugin is missing or invalid");
+            }
+        }
+        catalog
     }
 
     pub fn discover(plugin_roots: Vec<PathBuf>) -> Self {
@@ -334,19 +366,73 @@ fn builtin_preview_images(prefix: &str) -> Vec<PathBuf> {
     ["light", "dark"]
         .into_iter()
         .map(|theme| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("ui")
-                .join("previews")
-                .join(format!("{prefix}-{theme}.png"))
+            bundled_resource_path(Path::new("previews").join(format!("{prefix}-{theme}.png")))
         })
         .collect()
 }
 
 pub fn plugin_roots(state_dir: &Path) -> Vec<PathBuf> {
-    vec![
-        user_plugin_root(state_dir),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins"),
-    ]
+    let mut roots = bundled_plugin_roots();
+    roots.push(user_plugin_root(state_dir));
+    roots
+}
+
+fn executable_directory() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+}
+
+fn installed_plugin_root() -> Option<PathBuf> {
+    executable_directory().map(|directory| directory.join(BUNDLED_PLUGIN_DIRECTORY_NAME))
+}
+
+#[cfg(any(debug_assertions, test))]
+fn development_plugin_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUNDLED_PLUGIN_DIRECTORY_NAME)
+}
+
+fn bundled_plugin_roots() -> Vec<PathBuf> {
+    let installed_roots = installed_plugin_root().into_iter().collect::<Vec<_>>();
+    #[cfg(any(debug_assertions, test))]
+    {
+        let mut roots = installed_roots;
+        let development_root = development_plugin_root();
+        if !roots.contains(&development_root) {
+            roots.push(development_root);
+        }
+        roots
+    }
+    #[cfg(not(any(debug_assertions, test)))]
+    {
+        installed_roots
+    }
+}
+
+pub(crate) fn bundled_resource_path(relative_path: impl AsRef<Path>) -> PathBuf {
+    let relative_path = relative_path.as_ref();
+    let installed_path = executable_directory()
+        .map(|directory| {
+            directory
+                .join(BUNDLED_RESOURCE_DIRECTORY_NAME)
+                .join(relative_path)
+        })
+        .unwrap_or_else(|| PathBuf::from(BUNDLED_RESOURCE_DIRECTORY_NAME).join(relative_path));
+    if installed_path.exists() {
+        return installed_path;
+    }
+
+    #[cfg(any(debug_assertions, test))]
+    {
+        let development_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("ui")
+            .join(relative_path);
+        if development_path.exists() {
+            return development_path;
+        }
+    }
+
+    installed_path
 }
 
 pub fn user_plugin_root(state_dir: &Path) -> PathBuf {
@@ -465,11 +551,11 @@ fn is_bundled_builtin_slint_plugin(plugin_id: &str, root_dir: &Path) -> bool {
         return false;
     }
 
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("plugins")
-        .canonicalize()
-        .map(|bundled_plugin_root| root_dir.starts_with(bundled_plugin_root))
-        .unwrap_or(false)
+    bundled_plugin_roots().into_iter().any(|root| {
+        root.canonicalize()
+            .map(|bundled_plugin_root| root_dir.starts_with(bundled_plugin_root))
+            .unwrap_or(false)
+    })
 }
 
 pub fn manifest_to_definition(
@@ -671,7 +757,13 @@ pub fn validate_plugin_directory_limits(root: &Path) -> Result<()> {
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
     let mut total_size = 0_u64;
-    validate_plugin_directory_limits_inner(&root, &root, &mut total_size)?;
+    let mut visited_directories = HashSet::from([root.clone()]);
+    validate_plugin_directory_limits_inner(
+        &root,
+        &root,
+        &mut total_size,
+        &mut visited_directories,
+    )?;
     if total_size > PLUGIN_DIR_MAX_BYTES {
         bail!("plugin directory exceeds {PLUGIN_DIR_MAX_BYTES} bytes");
     }
@@ -682,6 +774,7 @@ fn validate_plugin_directory_limits_inner(
     root: &Path,
     current: &Path,
     total_size: &mut u64,
+    visited_directories: &mut HashSet<PathBuf>,
 ) -> Result<()> {
     for entry in
         fs::read_dir(current).with_context(|| format!("failed to list {}", current.display()))?
@@ -698,7 +791,18 @@ fn validate_plugin_directory_limits_inner(
         let metadata = fs::metadata(&canonical)
             .with_context(|| format!("failed to stat {}", canonical.display()))?;
         if metadata.is_dir() {
-            validate_plugin_directory_limits_inner(root, &canonical, total_size)?;
+            if !visited_directories.insert(canonical.clone()) {
+                bail!(
+                    "plugin directory contains a symlink or junction cycle: {}",
+                    path.display()
+                );
+            }
+            validate_plugin_directory_limits_inner(
+                root,
+                &canonical,
+                total_size,
+                visited_directories,
+            )?;
             continue;
         }
         if !metadata.is_file() {
@@ -966,6 +1070,46 @@ export component ExamplePriceCard inherits Window {
         assert!(catalog.find(BUILTIN_QUOTE_BOARD_PLUGIN_ID).is_some());
         assert!(catalog.find(BUILTIN_MINI_TICKER_PLUGIN_ID).is_some());
         assert!(catalog.errors().is_empty());
+    }
+
+    #[test]
+    fn runtime_plugin_roots_prefer_the_executable_bundle_over_user_plugins() {
+        let state_dir = temp_plugin_root("runtime-plugin-roots");
+        let roots = plugin_roots(&state_dir);
+        let executable_root = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(BUNDLED_PLUGIN_DIRECTORY_NAME);
+
+        assert_eq!(roots.first(), Some(&executable_root));
+        assert_eq!(roots.last(), Some(&user_plugin_root(&state_dir)));
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn builtin_previews_resolve_to_existing_development_assets_in_tests() {
+        for path in builtin_preview_images("quote-board") {
+            assert!(path.is_file(), "missing preview asset {}", path.display());
+        }
+    }
+
+    #[test]
+    fn plugin_directory_cycle_guard_rejects_a_revisited_directory() {
+        let root = temp_plugin_root("directory-cycle-guard");
+        let child = root.join("child");
+        fs::create_dir_all(&child).unwrap();
+        let root = root.canonicalize().unwrap();
+        let child = child.canonicalize().unwrap();
+        let mut visited = HashSet::from([root.clone(), child]);
+        let mut total_size = 0;
+
+        let error =
+            validate_plugin_directory_limits_inner(&root, &root, &mut total_size, &mut visited)
+                .unwrap_err();
+
+        assert!(error.to_string().contains("cycle"));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

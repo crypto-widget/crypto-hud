@@ -11,6 +11,8 @@ use serde::Deserialize;
 
 const DEFAULT_RELEASE_API_URL: &str =
     "https://api.github.com/repos/crypto-widget/crypto-hud/releases/latest";
+const TRUSTED_RELEASE_TAG_URL_PREFIX: &str =
+    "https://github.com/crypto-widget/crypto-hud/releases/tag/";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 const USER_AGENT: &str = concat!("crypto-hud/", env!("CARGO_PKG_VERSION"));
 
@@ -75,6 +77,13 @@ pub struct UpdateInfo {
     pub asset_url: Option<String>,
     pub checksum_asset_name: Option<String>,
     pub checksum_asset_url: Option<String>,
+}
+
+pub(crate) fn trusted_release_page_url(update: &UpdateInfo) -> Option<&str> {
+    let tag_name = update
+        .html_url
+        .strip_prefix(TRUSTED_RELEASE_TAG_URL_PREFIX)?;
+    (tag_name == update.tag_name).then_some(update.html_url.as_str())
 }
 
 #[derive(Debug, Deserialize)]
@@ -268,6 +277,25 @@ mod tests {
             update.checksum_asset_name.as_deref(),
             Some("crypto-hud-v0.1.1-windows-x64.zip.sha256")
         );
+    }
+
+    #[test]
+    fn only_trusts_the_matching_project_release_page() {
+        let mut update = update_from_release_json("0.1.0", &release_json("v0.1.1", false), false)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            trusted_release_page_url(&update),
+            Some("https://github.com/crypto-widget/crypto-hud/releases/tag/v0.1.1")
+        );
+
+        update.html_url = "https://example.com/crypto-hud/releases/tag/v0.1.1".to_string();
+        assert_eq!(trusted_release_page_url(&update), None);
+
+        update.html_url =
+            "https://github.com/crypto-widget/crypto-hud/releases/tag/v0.1.2".to_string();
+        assert_eq!(trusted_release_page_url(&update), None);
     }
 
     #[test]
