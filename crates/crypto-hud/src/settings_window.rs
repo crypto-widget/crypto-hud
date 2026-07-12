@@ -5046,7 +5046,7 @@ mod tests {
     }
 
     #[test]
-    fn github_signature_only_displays_project_name_and_version() {
+    fn github_signature_marks_available_update_without_replacing_current_version() {
         let source = settings_window_ui_source();
         let component_start = source
             .find("component GithubProjectSignature inherits Rectangle {")
@@ -5057,12 +5057,19 @@ mod tests {
             .unwrap();
         let signature_component = &source[component_start..component_end];
 
-        assert!(signature_component.contains("text: root.project-name;"));
+        assert!(signature_component.contains("in property <bool> update-available;"));
         assert!(signature_component.contains("text: root.version-text;"));
+        assert!(signature_component.contains("version_row := Rectangle {"));
+        assert!(signature_component.contains("y: (parent.height - 8px) / 2;"));
+        assert!(signature_component.contains("x: root.update-available ? 12px : 0px;"));
+        assert!(signature_component.contains("vertical-alignment: center;"));
+        assert!(signature_component.contains("visible: root.update-available;"));
+        assert!(!signature_component.contains("update-version-text"));
         assert!(!signature_component.contains("status-text"));
-        assert!(!signature_component.contains("update-available"));
-        assert!(!source.contains("status-text: root.status-text;"));
-        assert!(!source.contains("update-available: root.update-available;"));
+        assert!(source.contains("update-available: root.update-available;"));
+        assert!(source
+            .contains("update-available-accessible-text: root.update-available-accessible-text;"));
+        assert!(!source.contains("update-version-text: root.update-version-text;"));
     }
 
     #[test]
