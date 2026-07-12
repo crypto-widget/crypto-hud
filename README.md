@@ -27,7 +27,7 @@
 <p align="center">
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows-0078d4?style=flat-square&logo=windows11&logoColor=white">
   <img alt="Built with Rust" src="https://img.shields.io/badge/built_with-Rust-dea584?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Native Slint UI" src="https://img.shields.io/badge/UI-native_Slint-2379f4?style=flat-square">
+  <a href="https://slint.dev"><img alt="Made with Slint" height="20" src="https://raw.githubusercontent.com/slint-ui/slint/v1.17.0/logo/MadeWithSlint-logo-whitebg.png"></a>
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square">
 </p>
 
