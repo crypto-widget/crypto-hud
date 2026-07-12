@@ -201,7 +201,9 @@ mise run run-app
 
   发布包由本地 Windows 脚本生成。打包流程会在 `dist/` 中创建 zip、校验和与
   release manifest。生产包必须使用 Authenticode 签名；smoke 脚本仅通过明确的
-  本地开发开关使用未签名包。
+  本地开发开关使用未签名包。内置组件安装到 `plugins/`；预览图和应用图标分别
+  安装到 `resources/previews/` 与 `resources/icon.ico`。所有随包文件都由已签名的
+  发布完整性元数据绑定。
 
   ```powershell
   cargo test --locked --workspace
@@ -209,9 +211,22 @@ mise run run-app
   powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
   powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
   powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-  # 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）。
+  # 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）以及
+  # CRYPTO_HUD_SIGN_CERT_PASSWORD。正式签名时始终重新构建。
   powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
   ```
+
+  首次安装生产包时，应在执行安装脚本中的任何代码前先验证其签名。确认 `Status`
+  为 `Valid`，并核对 `SignerCertificate.Subject` 与发布页公布的发布者身份一致；随后
+  使用 `AllSigned`，不要绕过 PowerShell 执行策略：
+
+  ```powershell
+  Get-AuthenticodeSignature -LiteralPath .\install.ps1 | Format-List Status,SignerCertificate
+  powershell -ExecutionPolicy AllSigned -File .\install.ps1
+  ```
+
+  `-ExecutionPolicy Bypass` 和 `CRYPTO_HUD_ALLOW_UNSIGNED_SMOKE=1` 仅用于仓库中
+  隔离运行的未签名 smoke 测试，不是生产安装选项。
 </details>
 
 ## 路线图

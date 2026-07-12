@@ -62,6 +62,14 @@ pub(super) fn apply_widget_settings_to_store(
     let definitions = widget_definitions_from_catalog(plugin_catalog);
     select_widget_by_index(store, selected_index);
     let selected_id = store.selected_widget_id.clone();
+    let editable = selected_id
+        .as_deref()
+        .and_then(|id| store.widgets.iter().find(|instance| instance.id == id))
+        .and_then(|instance| plugin_catalog.find(&instance.plugin_id))
+        .is_some_and(plugin::PluginDefinition::is_available);
+    if !editable {
+        return false;
+    }
     let changed = if let Some(instance) = selected_id
         .as_deref()
         .and_then(|id| store.widgets.iter_mut().find(|instance| instance.id == id))
@@ -101,6 +109,14 @@ pub(super) fn apply_widget_scale_to_store(
     let definitions = widget_definitions_from_catalog(plugin_catalog);
     select_widget_by_index(store, selected_index);
     let index = selected_index.max(0) as usize;
+    let editable = store
+        .widgets
+        .get(index)
+        .and_then(|instance| plugin_catalog.find(&instance.plugin_id))
+        .is_some_and(plugin::PluginDefinition::is_available);
+    if !editable {
+        return false;
+    }
     let changed = if let Some(instance) = store.widgets.get_mut(index) {
         apply_widget_scale_to_instance(instance, &definitions, widget_scale_percent);
         true
@@ -125,6 +141,7 @@ pub(super) fn apply_widget_integer_parameter_to_store(
     };
     let Some(parameter) = plugin_catalog
         .find(&instance.plugin_id)
+        .filter(|definition| definition.is_available())
         .and_then(|definition| definition.parameters.get(parameter_index.max(0) as usize))
     else {
         return false;

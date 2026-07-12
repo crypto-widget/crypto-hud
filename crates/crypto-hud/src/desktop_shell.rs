@@ -1,12 +1,15 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     env, fs,
+    io::{self, Write},
     path::{Path, PathBuf},
     rc::Rc,
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
 use anyhow::{Context, Result};
+use crypto_hud_runtime::QuoteCache;
 use crypto_hud_shell_state as settings;
 use settings::{AppSettings, LayoutStore};
 use single_instance::SingleInstance;
@@ -27,6 +30,7 @@ use crate::{
 const DEFAULT_WIDGET_COUNT: usize = 1;
 const DEFAULT_SINGLE_INSTANCE_ID: &str = "com.crypto-hud";
 const INSTANCE_ACTIVATION_POLL_INTERVAL: Duration = Duration::from_millis(200);
+static GUI_SMOKE_MARKER_NONCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct InstanceActivationSignal {
     #[cfg(windows)]
@@ -241,20 +245,65 @@ pub(crate) fn install_gui_smoke_timer(exit_after: Option<Duration>) -> Option<Ti
     Some(timer)
 }
 
-pub(crate) fn write_gui_smoke_ready_file(
+pub(crate) fn install_gui_smoke_ready_timer(
+    exit_after: Option<Duration>,
+    widgets: Rc<RefCell<Vec<WidgetRuntime>>>,
+    layouts: Rc<RefCell<LayoutStore>>,
+    quote_cache: Rc<RefCell<QuoteCache>>,
+    plugin_catalog: Rc<plugin::PluginCatalog>,
+    settings_window_requested: bool,
+    interaction_complete: Rc<Cell<bool>>,
+) -> Option<Timer> {
+    exit_after?;
+    env_os_with_legacy(
+        "CRYPTO_HUD_GUI_SMOKE_READY_FILE",
+        &["CRYPTO_WIDGET_SLINT_GUI_SMOKE_READY_FILE"],
+    )?;
+
+    let marker_written = Rc::new(Cell::new(false));
+    let timer = Timer::default();
+    timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
+        if marker_written.get() || !interaction_complete.get() {
+            return;
+        }
+        if write_gui_smoke_ready_file(
+            &widgets,
+            &layouts,
+            &quote_cache,
+            &plugin_catalog,
+            settings_window_requested,
+        ) {
+            marker_written.set(true);
+        }
+    });
+    Some(timer)
+}
+
+fn market_data_row_count(symbols: &[String], quote_cache: &QuoteCache) -> usize {
+    symbols
+        .iter()
+        .filter(|symbol| quote_cache.get(symbol).is_some())
+        .count()
+}
+
+fn write_gui_smoke_ready_file(
     widgets: &Rc<RefCell<Vec<WidgetRuntime>>>,
     layouts: &Rc<RefCell<LayoutStore>>,
+    quote_cache: &Rc<RefCell<QuoteCache>>,
+    plugin_catalog: &plugin::PluginCatalog,
     settings_window_requested: bool,
-) {
+) -> bool {
     let Some(path) = env_os_with_legacy(
         "CRYPTO_HUD_GUI_SMOKE_READY_FILE",
         &["CRYPTO_WIDGET_SLINT_GUI_SMOKE_READY_FILE"],
     ) else {
-        return;
+        return false;
     };
     let widgets_ref = widgets.borrow();
     let store = layouts.borrow();
+    let quote_cache = quote_cache.borrow();
     let widget_count = widgets_ref.len();
+    let mut market_data_ready = widget_count > 0;
     let widget_states = widgets_ref
         .iter()
         .filter_map(|runtime| {
@@ -263,6 +312,9 @@ pub(crate) fn write_gui_smoke_ready_file(
                 .iter()
                 .find(|instance| instance.id == runtime.id)?;
             let runtime_size = runtime.ui.window().size();
+            let market_data_row_count = market_data_row_count(&runtime.symbols, &quote_cache);
+            market_data_ready &=
+                !runtime.symbols.is_empty() && market_data_row_count == runtime.symbols.len();
             Some(serde_json::json!({
                 "id": runtime.id,
                 "pluginId": runtime.plugin_id,
@@ -273,29 +325,123 @@ pub(crate) fn write_gui_smoke_ready_file(
                 "runtimeWidth": runtime_size.width,
                 "runtimeHeight": runtime_size.height,
                 "symbolCount": runtime.symbols.len(),
+                "marketDataRowCount": market_data_row_count,
                 "widgetScale": runtime.widget_scale,
             }))
         })
         .collect::<Vec<_>>();
+    market_data_ready &= widget_states.len() == widget_count;
+    if !market_data_ready {
+        return false;
+    }
+    let plugin_ids = plugin_catalog
+        .plugins()
+        .iter()
+        .map(|plugin| plugin.id.clone())
+        .collect::<Vec<_>>();
+    let catalog_errors = plugin_catalog
+        .errors()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
     let marker = serde_json::json!({
         "ready": true,
+        "marketDataReady": market_data_ready,
         "widgetCount": widget_count,
         "widgets": widget_states,
+        "pluginIds": plugin_ids,
+        "catalogErrors": catalog_errors,
         "settingsWindowRequested": settings_window_requested,
     });
     let path = PathBuf::from(path);
     if let Some(parent) = path.parent() {
         if let Err(error) = fs::create_dir_all(parent) {
             eprintln!("failed to create GUI smoke marker directory: {error:#}");
-            return;
+            return false;
         }
     }
-    if let Err(error) = fs::write(&path, format!("{marker}\n")) {
+    if let Err(error) = write_file_atomically(&path, format!("{marker}\n").as_bytes()) {
         eprintln!(
             "failed to write GUI smoke marker {}: {error:#}",
             path.display()
         );
+        return false;
     }
+    true
+}
+
+fn write_file_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_else(|| "gui-smoke-ready".into());
+
+    for _ in 0..16 {
+        let nonce = GUI_SMOKE_MARKER_NONCE.fetch_add(1, Ordering::Relaxed);
+        let temporary_path =
+            path.with_file_name(format!(".{file_name}.{}.{}.tmp", std::process::id(), nonce));
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+
+        let write_result = file
+            .write_all(contents)
+            .and_then(|()| file.sync_all())
+            .and_then(|()| replace_file_atomically(&temporary_path, path));
+        drop(file);
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&temporary_path);
+            return Err(error);
+        }
+        return Ok(());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate a unique GUI smoke marker temporary file",
+    ))
+}
+
+#[cfg(windows)]
+fn replace_file_atomically(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomically(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
 }
 
 fn env_var_with_legacy(
@@ -510,6 +656,47 @@ mod tests {
             instance_activation_event_name("com.crypto-hud"),
             instance_activation_event_name("com.crypto-hud.test")
         );
+    }
+
+    #[test]
+    fn market_data_row_count_requires_a_cached_quote_for_each_symbol() {
+        let symbols = vec!["BTC".to_string(), "ETH".to_string()];
+        let mut quote_cache = QuoteCache::new();
+        quote_cache.insert(
+            "BTC".to_string(),
+            crypto_hud_runtime::QuoteState::new(
+                100.0,
+                1.0,
+                vec![99.0, 100.0],
+                settings::MarketDataSource::Binance,
+                std::time::Instant::now(),
+            ),
+        );
+
+        assert_eq!(market_data_row_count(&symbols, &quote_cache), 1);
+        assert_eq!(market_data_row_count(&[], &quote_cache), 0);
+    }
+
+    #[test]
+    fn gui_smoke_marker_write_atomically_replaces_stale_content() {
+        let nonce = GUI_SMOKE_MARKER_NONCE.fetch_add(1, Ordering::Relaxed);
+        let directory = env::temp_dir().join(format!(
+            "crypto-hud-ready-marker-test-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("ready.json");
+        fs::write(&path, b"stale").unwrap();
+
+        write_file_atomically(&path, br#"{"ready":true}"#).unwrap();
+
+        let marker = fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&marker).unwrap()["ready"],
+            true
+        );
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(windows)]

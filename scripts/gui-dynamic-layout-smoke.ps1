@@ -92,6 +92,9 @@ $seedState = [ordered]@{
     settings = [ordered]@{
         widgets_always_on_top = $false
         opacity_percent = 96
+        shortcut = "disabled"
+        tray_icon_enabled = $false
+        auto_start_enabled = $false
     }
     selected_widget_id = "quote-board-1"
     next_widget_number = 5
@@ -104,6 +107,8 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $env:CRYPTO_HUD_STATE_DIR = $StateDir
 $env:CRYPTO_HUD_GUI_SMOKE_READY_FILE = $ReadyFile
 $env:CRYPTO_HUD_INSTANCE_ID = "com.crypto-hud.gui-dynamic-layout-smoke.$PID"
+$env:CRYPTO_HUD_GUI_SMOKE_OFFLINE = "1"
+$env:CRYPTO_HUD_DISABLE_UPDATE_CHECK = "1"
 $env:SLINT_BACKEND = "software"
 
 function Assert-Close([double]$Actual, [double]$Expected, [double]$Tolerance, [string]$Label) {
@@ -156,6 +161,9 @@ try {
     if (-not $ready.ready) {
         throw "GUI dynamic layout smoke marker did not report ready"
     }
+    if (-not $ready.marketDataReady) {
+        throw "GUI dynamic layout smoke marker did not report market data ready"
+    }
     if ([int]$ready.widgetCount -ne 4) {
         throw "Expected 4 widgets, saw $($ready.widgetCount)"
     }
@@ -176,11 +184,13 @@ try {
 
     Assert-Widget $widgets["quote-board-1"] 274 80 1 1.00 100
     Assert-Widget $widgets["plugin-ticker-2"] 1025 195 1 1.25 125
-    Assert-Widget $widgets["plugin-strip-3"] 624 138 3 1.50 150
+    Assert-Widget $widgets["plugin-strip-3"] 561 138 3 1.50 150
     Assert-Widget $widgets["plugin-card-4"] 520 386 1 1.00 100
 } finally {
     Pop-Location
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_INSTANCE_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_OFFLINE -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_DISABLE_UPDATE_CHECK -ErrorAction SilentlyContinue
 }

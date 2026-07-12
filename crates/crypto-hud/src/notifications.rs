@@ -78,7 +78,7 @@ pub fn show(_title: &str, _body: &str) {}
 
 #[cfg(windows)]
 mod windows {
-    use std::{ffi::OsStr, os::windows::ffi::OsStrExt, path::PathBuf};
+    use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
 
     use windows_sys::Win32::{
         Foundation::{HWND, POINT, RECT},
@@ -202,9 +202,7 @@ mod windows {
     }
 
     fn load_tray_icon() -> Option<HICON> {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("ui")
-            .join("icon.ico");
+        let path = crate::plugin::bundled_resource_path("icon.ico");
         let path = wide_null(path.as_os_str());
         let handle = unsafe {
             LoadImageW(

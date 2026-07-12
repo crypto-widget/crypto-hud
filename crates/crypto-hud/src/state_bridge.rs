@@ -21,6 +21,7 @@ pub(crate) fn widget_definitions_from_catalog(
     catalog
         .plugins()
         .iter()
+        .filter(|plugin| plugin.is_available())
         .map(widget_definition_from_plugin)
         .collect()
 }

@@ -43,6 +43,9 @@ $seedState = [ordered]@{
         widgets_always_on_top = $false
         opacity_percent = 96
         widget_scale_percent = 100
+        shortcut = "disabled"
+        tray_icon_enabled = $false
+        auto_start_enabled = $false
     }
     selected_widget_id = "quote-board-1"
     next_widget_number = 2
@@ -53,6 +56,8 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($StateFile, $seedJson, $utf8NoBom)
 
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 
 if (-not ("CryptoHudGuiScaleSmokeWin32" -as [type])) {
     Add-Type @'
@@ -153,28 +158,91 @@ function Wait-ForWidgetState([int]$ExpectedWidth, [int]$ExpectedHeight, [int]$Ex
     throw "Widget state did not reach ${ExpectedWidth}x${ExpectedHeight} at ${ExpectedScale}%"
 }
 
-function Click-ClientPoint([IntPtr]$WindowHandle, [int]$X, [int]$Y, [string]$Label) {
-    $point = New-Object CryptoHudGuiScaleSmokeWin32+POINT
-    $point.X = $X
-    $point.Y = $Y
-    [void][CryptoHudGuiScaleSmokeWin32]::ClientToScreen($WindowHandle, [ref]$point)
-    [void][CryptoHudGuiScaleSmokeWin32]::SetCursorPos($point.X, $point.Y)
-    Start-Sleep -Milliseconds 80
-    [CryptoHudGuiScaleSmokeWin32]::mouse_event(
-        [CryptoHudGuiScaleSmokeWin32]::MOUSEEVENTF_LEFTDOWN,
-        0,
-        0,
-        0,
-        [UIntPtr]::Zero
+function Get-AutomationControl(
+    [IntPtr]$WindowHandle,
+    [string]$Name,
+    [System.Windows.Automation.ControlType]$ControlType
+) {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($WindowHandle)
+    $nameCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        $Name
     )
-    Start-Sleep -Milliseconds 80
-    [CryptoHudGuiScaleSmokeWin32]::mouse_event(
-        [CryptoHudGuiScaleSmokeWin32]::MOUSEEVENTF_LEFTUP,
-        0,
-        0,
-        0,
-        [UIntPtr]::Zero
+    $typeCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        $ControlType
     )
+    $condition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.Condition[]]@($nameCondition, $typeCondition)
+    )
+    $element = $root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $condition
+    )
+    if (-not $element) {
+        throw "Could not find accessible $ControlType control named '$Name'"
+    }
+    $element
+}
+
+function Invoke-AutomationButton([IntPtr]$WindowHandle, [string]$Name) {
+    $element = Get-AutomationControl `
+        -WindowHandle $WindowHandle `
+        -Name $Name `
+        -ControlType ([System.Windows.Automation.ControlType]::Button)
+    $pattern = $null
+    if ($element.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern,
+            [ref]$pattern
+        )) {
+        ([System.Windows.Automation.InvokePattern]$pattern).Invoke()
+    } elseif ($element.TryGetCurrentPattern(
+            [System.Windows.Automation.TogglePattern]::Pattern,
+            [ref]$pattern
+        )) {
+        ([System.Windows.Automation.TogglePattern]$pattern).Toggle()
+    } else {
+        try {
+            $point = $element.GetClickablePoint()
+        } catch {
+            throw "Accessible control '$Name' exposes no action pattern or clickable point: $($_.Exception.Message)"
+        }
+        [void][CryptoHudGuiScaleSmokeWin32]::SetCursorPos(
+            [int][Math]::Round($point.X),
+            [int][Math]::Round($point.Y)
+        )
+        [CryptoHudGuiScaleSmokeWin32]::mouse_event(
+            [CryptoHudGuiScaleSmokeWin32]::MOUSEEVENTF_LEFTDOWN,
+            0,
+            0,
+            0,
+            [UIntPtr]::Zero
+        )
+        Start-Sleep -Milliseconds 80
+        [CryptoHudGuiScaleSmokeWin32]::mouse_event(
+            [CryptoHudGuiScaleSmokeWin32]::MOUSEEVENTF_LEFTUP,
+            0,
+            0,
+            0,
+            [UIntPtr]::Zero
+        )
+    }
+    Start-Sleep -Milliseconds 350
+}
+
+function Set-AutomationRangeValue([IntPtr]$WindowHandle, [string]$Name, [double]$Value) {
+    $element = Get-AutomationControl `
+        -WindowHandle $WindowHandle `
+        -Name $Name `
+        -ControlType ([System.Windows.Automation.ControlType]::Spinner)
+    $pattern = $null
+    if (-not $element.TryGetCurrentPattern(
+            [System.Windows.Automation.RangeValuePattern]::Pattern,
+            [ref]$pattern
+        )) {
+        throw "Accessible control '$Name' does not expose RangeValue"
+    }
+    ([System.Windows.Automation.RangeValuePattern]$pattern).SetValue($Value)
     Start-Sleep -Milliseconds 350
 }
 
@@ -188,7 +256,7 @@ function Assert-ScaledQuoteBoardContentVisible([object]$Window) {
     $graphics.CopyFromScreen([int]$Window.Left, [int]$Window.Top, 0, 0, $bitmap.Size)
     $graphics.Dispose()
 
-    $capturePath = Join-Path $StateDir "quote-board-10-scale.png"
+    $capturePath = Join-Path $StateDir "quote-board-30-scale.png"
     $bitmap.Save($capturePath, [System.Drawing.Imaging.ImageFormat]::Png)
 
     $colorCounts = @{}
@@ -223,13 +291,15 @@ function Assert-ScaledQuoteBoardContentVisible([object]$Window) {
     $bitmap.Dispose()
 
     if ($detailPixels -lt 8) {
-        throw "Quote Board 10% screenshot looks clipped; expected scaled detail pixels, saw $detailPixels. Capture: $capturePath"
+        throw "Quote Board 30% screenshot looks clipped; expected scaled detail pixels, saw $detailPixels. Capture: $capturePath"
     }
 }
 
 $env:CRYPTO_HUD_STATE_DIR = $StateDir
 $env:CRYPTO_HUD_GUI_SMOKE_READY_FILE = $ReadyFile
 $env:CRYPTO_HUD_INSTANCE_ID = "com.crypto-hud.gui-widget-scale-smoke.$PID"
+$env:CRYPTO_HUD_GUI_SMOKE_OFFLINE = "1"
+$env:CRYPTO_HUD_DISABLE_UPDATE_CHECK = "1"
 $env:SLINT_BACKEND = "software"
 
 Push-Location $RepoRoot
@@ -245,6 +315,10 @@ try {
         -PassThru
     try {
         Wait-ForFile $ReadyFile 5000
+        $ready = Get-Content -LiteralPath $ReadyFile -Raw | ConvertFrom-Json
+        if (-not [bool]$ready.marketDataReady) {
+            throw "GUI widget scale smoke marker did not report market data ready"
+        }
         Start-Sleep -Milliseconds 700
 
         $windows = @(Get-ProcessWindows $app.Id)
@@ -262,10 +336,10 @@ try {
         [void][CryptoHudGuiScaleSmokeWin32]::SetForegroundWindow([IntPtr]$settingsWindow.Handle)
         Start-Sleep -Milliseconds 300
 
-        Click-ClientPoint ([IntPtr]$settingsWindow.Handle) 832 489 "show icon toggle"
-        Click-ClientPoint ([IntPtr]$settingsWindow.Handle) 832 539 "hide quote asset toggle"
+        Invoke-AutomationButton ([IntPtr]$settingsWindow.Handle) "Show coin logos"
+        Invoke-AutomationButton ([IntPtr]$settingsWindow.Handle) "Hide quote asset"
         [void](Wait-ForWidgetState 224 101 100)
-        Click-ClientPoint ([IntPtr]$settingsWindow.Handle) 885 598 "scale increase"
+        Set-AutomationRangeValue ([IntPtr]$settingsWindow.Handle) "Scale" 105
 
         $widgetState = Wait-ForWidgetState 235 106 105
         if ([bool]$widgetState.config.show_coin_logos) {
@@ -288,22 +362,20 @@ try {
             throw "Live widget height expected 106, saw $($liveWidget.Height)"
         }
 
-        for ($click = 0; $click -lt 19; $click += 1) {
-            Click-ClientPoint ([IntPtr]$settingsWindow.Handle) 783 598 "scale decrease"
-        }
+        Set-AutomationRangeValue ([IntPtr]$settingsWindow.Handle) "Scale" 30
 
-        [void](Wait-ForWidgetState 22 10 10)
+        [void](Wait-ForWidgetState 67 30 30)
         $minimumScaleWidget = @(Get-ProcessWindows $app.Id) |
             Where-Object { $_.Title -eq "quote-board-1" } |
             Select-Object -First 1
         if (-not $minimumScaleWidget) {
             throw "Live widget window was not found after scaling down"
         }
-        if ([int]$minimumScaleWidget.Width -ne 22) {
-            throw "Live widget width at 10% expected 22, saw $($minimumScaleWidget.Width)"
+        if ([int]$minimumScaleWidget.Width -ne 67) {
+            throw "Live widget width at 30% expected 67, saw $($minimumScaleWidget.Width)"
         }
-        if ([int]$minimumScaleWidget.Height -ne 10) {
-            throw "Live widget height at 10% expected 10, saw $($minimumScaleWidget.Height)"
+        if ([int]$minimumScaleWidget.Height -ne 30) {
+            throw "Live widget height at 30% expected 30, saw $($minimumScaleWidget.Height)"
         }
         Assert-ScaledQuoteBoardContentVisible $minimumScaleWidget
     } finally {
@@ -316,4 +388,6 @@ try {
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_INSTANCE_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_OFFLINE -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_DISABLE_UPDATE_CHECK -ErrorAction SilentlyContinue
 }

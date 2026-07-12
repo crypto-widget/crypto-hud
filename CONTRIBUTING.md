@@ -17,9 +17,7 @@ mise install
 3. Check the workspace:
 
 ```powershell
-mise run format-check
-mise run check
-mise run test
+mise run ci
 ```
 
 ## Common Commands
@@ -27,6 +25,7 @@ mise run test
 ```powershell
 mise run run-app
 mise run format
+mise run clippy
 powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
 ```
 
@@ -53,9 +52,7 @@ mise run run-app
 For code changes, run at least:
 
 ```powershell
-mise run format-check
-mise run check
-mise run test
+mise run ci
 ```
 
 For UI, shell, packaging, or installer changes, also run the relevant PowerShell

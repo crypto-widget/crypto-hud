@@ -28,8 +28,8 @@ use crate::{
     desktop_shell::{
         install_settings_drag_handler, open_external_url, open_path, refresh_tray_text,
     },
-    feature_flags, i18n, notifications, plugin, shortcuts, AppTray, SettingsWindow,
-    ABOUT_REPOSITORY_URL, WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT,
+    feature_flags, i18n, notifications, plugin, shortcuts, updater, AppTray, SettingsWindow,
+    ABOUT_REPOSITORY_URL, RELEASES_URL, WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT,
 };
 use crate::{
     runtime_bridge::{
@@ -42,7 +42,7 @@ use crate::{
     widget_host::WidgetRuntime,
     window_manager::{
         apply_tray_hover_display, apply_widget_pinning_for_settings_mode, desktop_size,
-        leave_settings_mode, schedule_settings_window_configuration,
+        desktop_work_areas, leave_settings_mode, schedule_settings_window_configuration,
         schedule_widget_shell_window_configuration, TrayHoverDisplayState,
     },
 };
@@ -537,6 +537,7 @@ const SYMBOL_METADATA: &[SymbolMetadata] = &[
 ];
 const STATUS_STRIP_PREVIOUS_BLOCK_WIDTH: i32 = 150;
 const STATUS_STRIP_PREVIOUS_TIGHT_BLOCK_WIDTH: i32 = 136;
+const STATUS_STRIP_PREVIOUS_GRID_PADDING: i32 = 8;
 const STATUS_STRIP_LEGACY_BLOCK_WIDTH: i32 = 168;
 const STATUS_STRIP_LEGACY_SIDE_MARGIN: i32 = 160;
 const STATUS_STRIP_LEGACY_HEIGHT: i32 = 260;
@@ -798,6 +799,7 @@ struct WidgetReorderState {
 #[derive(Debug, Clone, Default)]
 struct SymbolCatalogState {
     catalog: market::SymbolCatalog,
+    warnings: Vec<market::SymbolCatalogWarning>,
     fallback_symbols: Vec<String>,
     loading: bool,
     fallback_only: bool,
@@ -888,6 +890,7 @@ fn request_symbol_catalog_refresh(
     if let Ok(mut state) = shared_symbol_catalog_state().lock() {
         state.loading = true;
         state.last_error = None;
+        state.warnings.clear();
         state.fallback_symbols = sorted_symbol_values(
             state
                 .fallback_symbols
@@ -915,7 +918,13 @@ fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
         let Some((generation, request)) = next_symbol_catalog_request(&coordinator) else {
             return;
         };
-        let result = market::fetch_symbol_catalog(request.proxy_url.as_deref());
+        let result = if feature_flags::gui_smoke_offline_network_disabled() {
+            Err(anyhow::Error::msg(
+                "symbol catalog network access is disabled for offline GUI smoke",
+            ))
+        } else {
+            market::fetch_symbol_catalog_with_warnings(request.proxy_url.as_deref())
+        };
 
         let Ok(requests) = coordinator.requests.lock() else {
             return;
@@ -923,21 +932,8 @@ fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
         if !requests.is_current(generation) {
             continue;
         }
-        let fallback_message = result.is_err();
         if let Ok(mut state) = shared_symbol_catalog_state().lock() {
-            state.loading = false;
-            match result {
-                Ok(catalog) => {
-                    state.catalog = catalog;
-                    state.fallback_only = false;
-                    state.last_error = None;
-                }
-                Err(error) => {
-                    state.catalog = market::SymbolCatalog::default();
-                    state.fallback_only = true;
-                    state.last_error = Some(error.to_string());
-                }
-            }
+            apply_symbol_catalog_fetch_result(&mut state, result);
             state.fallback_symbols = sorted_symbol_values(
                 state
                     .fallback_symbols
@@ -956,11 +952,54 @@ fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
             }
             let state = symbol_catalog_snapshot();
             refresh_symbol_selector_models_from_ui(&ui, &state, locale);
-            if fallback_message {
-                ui.set_status_text(i18n::text(locale).status_symbol_catalog_fallback.into());
+            if let Some(status) = symbol_catalog_status_text(&state, locale) {
+                ui.set_status_text(status.into());
             }
         });
     }
+}
+
+fn apply_symbol_catalog_fetch_result(
+    state: &mut SymbolCatalogState,
+    result: Result<market::SymbolCatalogFetch>,
+) {
+    state.loading = false;
+    match result {
+        Ok(fetch) => {
+            state.catalog = fetch.catalog;
+            state.warnings = fetch.warnings;
+            state.fallback_only = false;
+            state.last_error = None;
+        }
+        Err(error) => {
+            state.catalog = market::SymbolCatalog::default();
+            state.warnings.clear();
+            state.fallback_only = true;
+            state.last_error = Some(error.to_string());
+        }
+    }
+}
+
+fn symbol_catalog_status_text(state: &SymbolCatalogState, locale: i18n::Locale) -> Option<String> {
+    let text = i18n::text(locale);
+    if state.fallback_only {
+        return Some(text.status_symbol_catalog_fallback.to_string());
+    }
+    if state.warnings.is_empty() {
+        return None;
+    }
+
+    let sources = state
+        .warnings
+        .iter()
+        .map(|warning| warning.source.label())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(i18n::status_failure_message(
+        locale,
+        text.status_symbol_catalog_partial,
+        sources,
+    ))
 }
 
 fn next_symbol_catalog_request(
@@ -1062,8 +1101,9 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
               refresh_interval_seconds,
               tray_icon_enabled,
               tray_hover_display_enabled| {
-            let previous = commit.current_settings();
-            let mut settings = AppSettings {
+            let previous_store = commit.layouts.borrow().clone();
+            let previous = previous_store.settings.clone().normalized();
+            let settings = AppSettings {
                 widgets_always_on_top: default_widgets_always_on_top,
                 opacity_percent: clamp_opacity(default_opacity_percent),
                 widget_scale_percent: settings::clamp_default_widget_scale_percent(
@@ -1091,47 +1131,51 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 alert_rules: previous.alert_rules.clone(),
             }
             .normalized();
-            let mut status = status_saved(settings.clone());
-
-            if previous.auto_start_enabled != settings.auto_start_enabled {
-                let widget_count = commit.layouts.borrow().widgets.len().max(1);
-                if let Err(error) =
-                    autostart::apply_auto_start(settings.auto_start_enabled, widget_count)
-                {
-                    settings.auto_start_enabled = previous.auto_start_enabled;
-                    let locale = i18n::resolve_locale(settings.language);
-                    status = i18n::status_failure_message(
-                        locale,
-                        i18n::text(locale).status_auto_start_failed,
-                        error,
-                    );
+            let candidate =
+                settings_candidate_store(&previous_store, &commit.plugin_catalog, settings);
+            let committed = commit_settings_transaction(
+                &previous_store,
+                candidate,
+                |store| {
+                    save_layout_store(&commit.state_path, store)
+                        .map_err(|error| format!("{error:#}"))
+                },
+                autostart::apply_auto_start,
+                |shortcut| shortcut_manager.borrow_mut().apply(shortcut),
+            );
+            let committed = match committed {
+                Ok(store) => store,
+                Err(failure) => {
+                    for rollback_error in &failure.rollback_errors {
+                        eprintln!("failed to roll back settings side effect: {rollback_error}");
+                    }
+                    let locale = i18n::resolve_locale(previous.language);
+                    let status = match failure.stage {
+                        SettingsCommitFailureStage::Persistence => {
+                            i18n::save_failure_message(locale, failure.error)
+                        }
+                        SettingsCommitFailureStage::AutoStart => i18n::status_failure_message(
+                            locale,
+                            i18n::text(locale).status_auto_start_failed,
+                            failure.error,
+                        ),
+                        SettingsCommitFailureStage::Shortcut => i18n::status_failure_message(
+                            locale,
+                            i18n::text(locale).status_shortcut_failed,
+                            failure.error,
+                        ),
+                    };
+                    *commit.settings_status.borrow_mut() = status;
+                    commit.refresh_settings_window(&weak);
+                    return;
                 }
-            }
-
-            if previous.shortcut != settings.shortcut {
-                if let Err(error) = shortcut_manager.borrow_mut().apply(settings.shortcut) {
-                    settings.shortcut = previous.shortcut;
-                    let locale = i18n::resolve_locale(settings.language);
-                    status = i18n::status_failure_message(
-                        locale,
-                        i18n::text(locale).status_shortcut_failed,
-                        error,
-                    );
-                }
-            }
-
-            if previous.widget_scale_percent != settings.widget_scale_percent {
-                apply_default_widget_scale_to_instances(
-                    &commit.layouts,
-                    &commit.plugin_catalog,
-                    settings.widget_scale_percent,
-                );
-            }
-            apply_settings_to_store(&commit.layouts, &commit.state_path, settings.clone());
+            };
+            *commit.layouts.borrow_mut() = committed;
+            let settings = commit.current_settings();
+            *commit.settings_status.borrow_mut() = status_saved(settings.clone());
             commit.apply_settings_to_widgets();
             commit.apply_widget_pinning_for_settings_mode();
             commit.update_market_feed_config_from_store();
-            commit.set_persisted_status(settings.clone(), status);
             if let Some(tray) = tray_handle
                 .borrow()
                 .as_ref()
@@ -1505,33 +1549,22 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         let weak = ui.as_weak();
         move || {
             let status_settings = commit.current_settings();
-            let mut changed = false;
-            {
+            let changed = {
                 let mut store = commit.layouts.borrow_mut();
-                let app_settings = store.settings.clone().normalized();
-                for (index, instance) in store.widgets.iter_mut().enumerate() {
-                    let current_size = WidgetSize {
-                        width: instance.layout.width,
-                        height: instance.layout.height,
-                    };
-                    let layout = settings::default_layout_for_size(
-                        index,
-                        current_size,
-                        app_settings.clone(),
-                        desktop_size(),
-                    );
-                    if instance.layout.x != layout.x || instance.layout.y != layout.y {
-                        instance.layout.x = layout.x;
-                        instance.layout.y = layout.y;
-                        changed = true;
-                    }
-                }
+                let definitions = widget_definitions_from_catalog(&commit.plugin_catalog);
+                let changed = settings::reset_widget_positions_in_work_areas(
+                    &mut store,
+                    &definitions,
+                    desktop_size(),
+                    &desktop_work_areas(),
+                );
                 if changed {
                     if let Err(error) = save_layout_store(&commit.state_path, &store) {
                         eprintln!("failed to reset widget positions: {error:#}");
                     }
                 }
-            }
+                changed
+            };
 
             if changed {
                 commit.finish_runtime_change(
@@ -1955,9 +1988,17 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
-    ui.on_open_about_link(move || {
-        if let Err(error) = open_external_url(ABOUT_REPOSITORY_URL) {
-            eprintln!("failed to open about link: {error:#}");
+    ui.on_open_about_link({
+        let weak = ui.as_weak();
+        move || {
+            let release_url = weak.upgrade().and_then(|ui| {
+                ui.get_update_available()
+                    .then(|| ui.get_update_release_url().to_string())
+            });
+            let target = release_url.as_deref().unwrap_or(ABOUT_REPOSITORY_URL);
+            if let Err(error) = open_external_url(target) {
+                eprintln!("failed to open about link: {error:#}");
+            }
         }
     });
 
@@ -2101,6 +2142,9 @@ fn normalized_network_proxy_input(
         if proxy_url.is_empty() {
             return Err(NetworkProxyInputError::EmptyAddress);
         }
+        if settings::network_proxy_url_has_userinfo(&proxy_url) {
+            return Err(NetworkProxyInputError::CredentialsNotAllowed);
+        }
         ureq::Proxy::new(&proxy_url)
             .map_err(|error| NetworkProxyInputError::InvalidProxy(error.to_string()))?;
     }
@@ -2110,6 +2154,7 @@ fn normalized_network_proxy_input(
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NetworkProxyInputError {
     EmptyAddress,
+    CredentialsNotAllowed,
     InvalidProxy(String),
 }
 
@@ -2121,6 +2166,9 @@ impl NetworkProxyInputError {
                 i18n::text(locale).status_network_proxy_invalid,
                 i18n::network_proxy_empty_address_detail(locale),
             ),
+            Self::CredentialsNotAllowed => {
+                i18n::text(locale).status_network_proxy_invalid.to_string()
+            }
             Self::InvalidProxy(error) => i18n::status_failure_message(
                 locale,
                 i18n::text(locale).status_network_proxy_invalid,
@@ -2139,17 +2187,38 @@ fn apply_settings_to_store(
     store.settings = settings;
 }
 
-fn apply_default_widget_scale_to_instances(
-    layouts: &Rc<RefCell<LayoutStore>>,
+fn settings_candidate_store(
+    current: &LayoutStore,
+    plugin_catalog: &plugin::PluginCatalog,
+    settings: AppSettings,
+) -> LayoutStore {
+    let mut candidate = current.clone();
+    let scale_changed = candidate.settings.widget_scale_percent != settings.widget_scale_percent;
+    candidate.settings = settings;
+    if scale_changed {
+        let next_scale_percent = candidate.settings.widget_scale_percent;
+        apply_default_widget_scale_to_store(&mut candidate, plugin_catalog, next_scale_percent);
+    }
+    normalize_store_with_catalog(&mut candidate, 0, Some(plugin_catalog));
+    candidate
+}
+
+fn apply_default_widget_scale_to_store(
+    store: &mut LayoutStore,
     plugin_catalog: &plugin::PluginCatalog,
     next_scale_percent: i32,
 ) {
     let definitions = widget_definitions_from_catalog(plugin_catalog);
-    let mut store = layouts.borrow_mut();
     for instance in &mut store.widgets {
+        let known_plugin = instance.builtin_widget_type().is_some()
+            || plugin_catalog
+                .find(&instance.plugin_id)
+                .is_some_and(plugin::PluginDefinition::is_available);
+        if !known_plugin {
+            continue;
+        }
         apply_widget_scale_to_instance(instance, &definitions, next_scale_percent);
     }
-    normalize_store_with_catalog(&mut store, 0, Some(plugin_catalog));
 }
 
 fn model_symbols(model: ModelRc<SharedString>) -> Vec<String> {
@@ -2349,6 +2418,13 @@ where
     let instance = selected_id
         .as_deref()
         .and_then(|id| store.widgets.iter_mut().find(|instance| instance.id == id))?;
+    let editable = instance.builtin_widget_type().is_some()
+        || plugin_catalog
+            .find(&instance.plugin_id)
+            .is_some_and(plugin::PluginDefinition::is_available);
+    if !editable {
+        return None;
+    }
     let min = settings::symbol_min_for_instance(instance, &definitions);
     let limit = settings::symbol_limit_for_instance(instance, &definitions);
     let fallback =
@@ -3093,6 +3169,15 @@ pub(crate) fn refresh_settings_window(
     ui.set_app_version_label_text(text.app_version.into());
     ui.set_app_version_value_text(app_version_value_text(locale).into());
     ui.set_app_version_signature_text(app_version_signature_text(locale).into());
+    ui.set_update_available_accessible_text(
+        i18n::update_available_notification_title(locale).into(),
+    );
+    let update_version_tag = ui.get_update_version_tag().to_string();
+    if !update_version_tag.is_empty() {
+        ui.set_update_version_text(
+            i18n::ltr_isolate_for_locale(locale, &update_version_tag).into(),
+        );
+    }
     ui.set_about_us_text(text.about_us.into());
     ui.set_icon_cache_text(text.icon_cache.into());
     ui.set_icon_cache_help_text(text.icon_cache_help.into());
@@ -3392,11 +3477,9 @@ pub(crate) fn refresh_settings_window(
     );
     let status = status_override
         .filter(|status| !status.trim().is_empty())
-        .unwrap_or(if symbol_catalog_state.fallback_only {
-            text.status_symbol_catalog_fallback
-        } else {
-            ""
-        });
+        .map(str::to_string)
+        .or_else(|| symbol_catalog_status_text(&symbol_catalog_state, locale))
+        .unwrap_or_default();
     ui.set_status_text(status.into());
     apply_theme_to_settings_window(ui, settings);
 }
@@ -3426,18 +3509,31 @@ pub(crate) fn widget_display_name(
     locale: i18n::Locale,
 ) -> String {
     let name = widget.name.trim();
+    let Some(widget_type) = widget.builtin_widget_type() else {
+        return if name.is_empty() {
+            widget.plugin_id.clone()
+        } else {
+            widget.name.clone()
+        };
+    };
     let fallback_number = widget_default_number(widget, fallback_index);
-    if name.is_empty() || parse_default_widget_name(name, widget.widget_type()).is_some() {
-        localized_default_widget_name(widget.widget_type(), fallback_number, locale)
+    if name.is_empty() || parse_default_widget_name(name, widget_type).is_some() {
+        localized_default_widget_name(widget_type, fallback_number, locale)
     } else {
         widget.name.clone()
     }
 }
 
 pub(crate) fn widget_default_number(widget: &WidgetInstance, fallback_index: usize) -> u64 {
-    parse_default_widget_name(&widget.name, widget.widget_type())
+    widget
+        .builtin_widget_type()
+        .and_then(|widget_type| parse_default_widget_name(&widget.name, widget_type))
         .or_else(|| widget_id_suffix(&widget.id))
-        .unwrap_or(fallback_index as u64 + 1)
+        .unwrap_or_else(|| {
+            u64::try_from(fallback_index)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1)
+        })
 }
 
 fn widget_id_suffix(id: &str) -> Option<u64> {
@@ -3606,6 +3702,13 @@ fn status_strip_previous_tight_base_size(instance: &WidgetInstance) -> Option<Wi
     })
 }
 
+fn status_strip_previous_grid_base_size(instance: &WidgetInstance) -> Option<WidgetSize> {
+    let mut base_size = status_strip_previous_tight_base_size(instance)?;
+    base_size.width += STATUS_STRIP_PREVIOUS_GRID_PADDING;
+    base_size.height += STATUS_STRIP_PREVIOUS_GRID_PADDING;
+    Some(base_size)
+}
+
 fn status_strip_legacy_block_base_size(instance: &WidgetInstance) -> Option<WidgetSize> {
     if instance.plugin_id != STATUS_STRIP_PLUGIN_ID {
         return None;
@@ -3648,6 +3751,7 @@ fn status_strip_existing_scale_percent(
 ) -> Option<i32> {
     let previous_base = status_strip_previous_base_size(instance)?;
     let previous_tight_base = status_strip_previous_tight_base_size(instance)?;
+    let previous_grid_base = status_strip_previous_grid_base_size(instance)?;
     let legacy_block_base = status_strip_legacy_block_base_size(instance)?;
     let legacy_base = status_strip_legacy_base_size(instance)?;
     let current_size = settings::clamp_widget_size(WidgetSize {
@@ -3658,6 +3762,8 @@ fn status_strip_existing_scale_percent(
     let previous_scale = settings::widget_scale_percent_for_size(current_size, previous_base);
     let previous_tight_scale =
         settings::widget_scale_percent_for_size(current_size, previous_tight_base);
+    let previous_grid_scale =
+        settings::widget_scale_percent_for_size(current_size, previous_grid_base);
     let legacy_block_scale =
         settings::widget_scale_percent_for_size(current_size, legacy_block_base);
     let legacy_scale = settings::widget_scale_percent_for_size(current_size, legacy_base);
@@ -3673,6 +3779,10 @@ fn status_strip_existing_scale_percent(
         (
             previous_tight_scale,
             scale_reconstruction_error(current_size, previous_tight_base, previous_tight_scale),
+        ),
+        (
+            previous_grid_scale,
+            scale_reconstruction_error(current_size, previous_grid_base, previous_grid_scale),
         ),
         (
             legacy_block_scale,
@@ -3749,6 +3859,108 @@ fn app_version_value_text(locale: i18n::Locale) -> String {
 
 fn app_version_signature_text(locale: i18n::Locale) -> String {
     i18n::ltr_isolate_for_locale(locale, &format!("v{}", env!("CARGO_PKG_VERSION")))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsCommitFailureStage {
+    Persistence,
+    AutoStart,
+    Shortcut,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SettingsCommitFailure {
+    stage: SettingsCommitFailureStage,
+    error: String,
+    rollback_errors: Vec<String>,
+}
+
+fn commit_settings_transaction<Save, AutoStart, Shortcut>(
+    previous: &LayoutStore,
+    candidate: LayoutStore,
+    mut save: Save,
+    mut apply_auto_start: AutoStart,
+    mut apply_shortcut: Shortcut,
+) -> std::result::Result<LayoutStore, SettingsCommitFailure>
+where
+    Save: FnMut(&LayoutStore) -> std::result::Result<(), String>,
+    AutoStart: FnMut(bool, usize) -> std::result::Result<(), String>,
+    Shortcut: FnMut(ShortcutPreference) -> std::result::Result<(), String>,
+{
+    if let Err(error) = save(&candidate) {
+        return Err(SettingsCommitFailure {
+            stage: SettingsCommitFailureStage::Persistence,
+            error,
+            rollback_errors: Vec::new(),
+        });
+    }
+
+    let auto_start_changed =
+        previous.settings.auto_start_enabled != candidate.settings.auto_start_enabled;
+    let shortcut_changed = previous.settings.shortcut != candidate.settings.shortcut;
+    let widget_count = candidate.widgets.len().max(1);
+
+    if auto_start_changed {
+        if let Err(error) = apply_auto_start(candidate.settings.auto_start_enabled, widget_count) {
+            let mut rollback_errors = Vec::new();
+            if let Err(rollback_error) = apply_auto_start(
+                previous.settings.auto_start_enabled,
+                previous.widgets.len().max(1),
+            ) {
+                rollback_errors.push(format!("auto-start rollback failed: {rollback_error}"));
+            }
+            if let Err(rollback_error) = save(previous) {
+                rollback_errors.push(format!("settings rollback failed: {rollback_error}"));
+            }
+            return Err(SettingsCommitFailure {
+                stage: SettingsCommitFailureStage::AutoStart,
+                error,
+                rollback_errors,
+            });
+        }
+    }
+
+    if shortcut_changed {
+        if let Err(error) = apply_shortcut(candidate.settings.shortcut) {
+            let mut rollback_errors = Vec::new();
+            if let Err(rollback_error) = apply_shortcut(previous.settings.shortcut) {
+                rollback_errors.push(format!("shortcut rollback failed: {rollback_error}"));
+            }
+            if auto_start_changed {
+                if let Err(rollback_error) = apply_auto_start(
+                    previous.settings.auto_start_enabled,
+                    previous.widgets.len().max(1),
+                ) {
+                    rollback_errors.push(format!("auto-start rollback failed: {rollback_error}"));
+                }
+            }
+            if let Err(rollback_error) = save(previous) {
+                rollback_errors.push(format!("settings rollback failed: {rollback_error}"));
+            }
+            return Err(SettingsCommitFailure {
+                stage: SettingsCommitFailureStage::Shortcut,
+                error,
+                rollback_errors,
+            });
+        }
+    }
+
+    Ok(candidate)
+}
+
+pub(crate) fn apply_available_update(
+    ui: &SettingsWindow,
+    update: &updater::UpdateInfo,
+    locale: i18n::Locale,
+) {
+    let release_url = updater::trusted_release_page_url(update).unwrap_or(RELEASES_URL);
+    ui.set_update_version_tag(update.tag_name.clone().into());
+    ui.set_update_version_text(i18n::ltr_isolate_for_locale(locale, &update.tag_name).into());
+    ui.set_update_release_url(release_url.into());
+    ui.set_update_available_accessible_text(
+        i18n::update_available_notification_title(locale).into(),
+    );
+    ui.set_update_available(true);
 }
 
 fn symbol_picker_title_text(mode: i32, locale: i18n::Locale) -> &'static str {
@@ -4836,6 +5048,25 @@ mod tests {
     }
 
     #[test]
+    fn github_signature_prioritizes_available_update_state() {
+        let source = settings_window_ui_source();
+
+        for required in [
+            "in property <bool> update-available: false;",
+            "status-text: root.status-text;",
+            "update-available: root.update-available;",
+            "update-version-text: root.update-version-text;",
+            "text: root.update-available ? root.update-version-text : root.status-text;",
+            "visible: root.update-available;",
+        ] {
+            assert!(
+                source.contains(required),
+                "GitHub signature should expose update state: {required}"
+            );
+        }
+    }
+
+    #[test]
     fn symbol_picker_text_rows_follow_rtl_layout() {
         let source = settings_window_ui_source();
 
@@ -5084,6 +5315,11 @@ mod tests {
             normalized_network_proxy_input(true, "ftp://127.0.0.1:21").unwrap_err(),
             NetworkProxyInputError::InvalidProxy(_)
         ));
+        assert_eq!(
+            normalized_network_proxy_input(true, "http://alice:do-not-store@127.0.0.1:7890")
+                .unwrap_err(),
+            NetworkProxyInputError::CredentialsNotAllowed
+        );
     }
 
     #[test]
@@ -5183,6 +5419,133 @@ mod tests {
         assert!(!settings::widget_show_coin_logos(widget));
         assert!(settings::widget_hide_quote_asset(widget));
         assert_eq!(settings::widget_theme_preference(widget), "light");
+    }
+
+    #[test]
+    fn missing_plugin_round_trip_preserves_opaque_widget_state() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let definitions = widget_definitions_from_catalog(&catalog);
+        let plugin_id = "com.example.unavailable.private-widget";
+        let original = WidgetInstance {
+            id: "private-widget-42".to_string(),
+            plugin_id: plugin_id.to_string(),
+            legacy_widget_type: None,
+            name: String::new(),
+            visible: false,
+            layout: settings::WidgetLayout {
+                x: -8_765,
+                y: 4_321,
+                always_on_top: true,
+                opacity_percent: 137,
+                locked: true,
+                scale_percent: 173,
+                width: 333,
+                height: 177,
+            },
+            symbols: vec!["opaque-symbol".to_string(), String::new()],
+            config: serde_json::json!({
+                "private-option": "preserve verbatim",
+                "nested": { "count": 7 }
+            }),
+        };
+        let state_path = temp_state_path("missing-plugin-round-trip");
+        save_layout_store(
+            &state_path,
+            &LayoutStore {
+                selected_widget_id: Some(original.id.clone()),
+                widgets: vec![original.clone()],
+                ..LayoutStore::default()
+            },
+        )
+        .unwrap();
+
+        let mut store = settings::load_layout_store(&state_path, 0, &definitions, (1920, 1080));
+        normalize_store_with_catalog(&mut store, 0, Some(&catalog));
+        assert_eq!(
+            widget_display_name(&store.widgets[0], 0, i18n::Locale::En),
+            plugin_id
+        );
+        assert!(!apply_widget_settings_to_store(
+            &mut store,
+            WidgetSettingsUpdate {
+                selected_index: 0,
+                widget_name: "Overwrite Attempt",
+                always_on_top: false,
+                layout_locked: false,
+                opacity_percent: 42,
+                widget_scale_percent: 90,
+                widget_theme_index: 1,
+                show_coin_logos: false,
+                hide_quote_asset: true,
+                locale: i18n::Locale::En,
+                plugin_catalog: &catalog,
+            },
+        ));
+        assert!(!apply_widget_scale_to_store(&mut store, 0, 90, &catalog));
+        assert!(!apply_widget_integer_parameter_to_store(
+            &mut store, 0, 0, 99, &catalog
+        ));
+        let guarded_layouts = Rc::new(RefCell::new(store.clone()));
+        assert!(
+            add_widget_symbol_to_store(&guarded_layouts, &state_path, 0, "BTC", &catalog,)
+                .is_none()
+        );
+        assert_eq!(
+            guarded_layouts.borrow().widgets[0].symbols,
+            original.symbols
+        );
+        store = guarded_layouts.borrow().clone();
+
+        let unavailable_catalog =
+            plugin::PluginCatalog::from_plugins_for_tests(vec![plugin::PluginDefinition {
+                id: plugin_id.to_string(),
+                name: "Unavailable Private Widget".to_string(),
+                version: semver::Version::new(1, 0, 0),
+                source: plugin::PluginSource::LocalUnsigned,
+                renderer: plugin::PluginRendererDefinition::Builtin(
+                    plugin::BuiltinRenderer::QuoteBoard,
+                ),
+                default_size: plugin::PluginSize {
+                    width: 999,
+                    height: 555,
+                },
+                size_policy: plugin::PluginSizePolicy::Fixed,
+                min_symbol_limit: 1,
+                symbol_limit: 1,
+                default_symbols: vec!["BTC".to_string()],
+                preview_images: Vec::new(),
+                themes: plugin::single_default_theme(),
+                data_requirements: Vec::new(),
+                parameters: Vec::new(),
+                status: plugin::PluginStatus::Unavailable("renderer missing".to_string()),
+            }]);
+        assert!(widget_definitions_from_catalog(&unavailable_catalog).is_empty());
+        assert!(!apply_widget_scale_to_store(
+            &mut store,
+            0,
+            75,
+            &unavailable_catalog,
+        ));
+        let mut next_settings = store.settings.clone();
+        next_settings.widget_scale_percent = 75;
+        store = settings_candidate_store(&store, &unavailable_catalog, next_settings.normalized());
+        save_layout_store(&state_path, &store).unwrap();
+
+        let persisted = settings::try_load_persisted_layout_store(&state_path)
+            .unwrap()
+            .unwrap();
+        let settings::PersistedLayoutStore::Current(persisted) = persisted else {
+            panic!("opaque widget should remain in the current layout schema");
+        };
+        let round_tripped = &persisted.widgets[0];
+        assert_eq!(round_tripped.plugin_id, original.plugin_id);
+        assert_eq!(round_tripped.name, original.name);
+        assert_eq!(round_tripped.visible, original.visible);
+        assert_eq!(round_tripped.layout, original.layout);
+        assert_eq!(round_tripped.symbols, original.symbols);
+        assert_eq!(round_tripped.config, original.config);
+
+        let _ = std::fs::remove_file(state_path);
     }
 
     #[test]
@@ -5382,6 +5745,44 @@ mod tests {
         let third = requests.replace("third");
         assert!(requests.is_current(third));
         assert_eq!(requests.take(), Some((third, "third")));
+    }
+
+    #[test]
+    fn partial_symbol_catalog_result_keeps_entries_and_surfaces_failed_sources() {
+        let entry = catalog_entry(
+            settings::MarketDataSource::Binance,
+            settings::MarketType::Spot,
+            "BTC",
+            "USDT",
+        );
+        let warning = market::SymbolCatalogWarning {
+            source: settings::MarketDataSource::Coinbase,
+            message: "catalog unavailable".to_string(),
+        };
+        let mut state = SymbolCatalogState {
+            loading: true,
+            ..SymbolCatalogState::default()
+        };
+
+        apply_symbol_catalog_fetch_result(
+            &mut state,
+            Ok(market::SymbolCatalogFetch {
+                catalog: market::SymbolCatalog {
+                    entries: vec![entry.clone()],
+                },
+                warnings: vec![warning.clone()],
+            }),
+        );
+
+        assert!(!state.loading);
+        assert!(!state.fallback_only);
+        assert_eq!(state.catalog.entries, vec![entry]);
+        assert_eq!(state.warnings, vec![warning]);
+        assert!(state.last_error.is_none());
+        let status = symbol_catalog_status_text(&state, i18n::Locale::En).unwrap();
+        assert!(status.contains(i18n::text(i18n::Locale::En).status_symbol_catalog_partial));
+        assert!(status.contains("Coinbase"));
+        assert!(!status.contains("catalog unavailable"));
     }
 
     #[test]
@@ -5796,6 +6197,115 @@ mod tests {
     }
 
     #[test]
+    fn settings_transaction_does_not_apply_side_effects_when_persistence_fails() {
+        let previous = LayoutStore {
+            settings: AppSettings {
+                auto_start_enabled: false,
+                shortcut: ShortcutPreference::Disabled,
+                ..AppSettings::default()
+            },
+            ..LayoutStore::default()
+        };
+        let mut candidate = previous.clone();
+        candidate.settings.auto_start_enabled = true;
+        candidate.settings.shortcut = ShortcutPreference::AltC;
+        let events = Rc::new(RefCell::new(Vec::<String>::new()));
+        let save_events = events.clone();
+        let auto_start_events = events.clone();
+        let shortcut_events = events.clone();
+
+        let failure = commit_settings_transaction(
+            &previous,
+            candidate,
+            move |_| {
+                save_events.borrow_mut().push("save".to_string());
+                Err("disk full".to_string())
+            },
+            move |enabled, _| {
+                auto_start_events
+                    .borrow_mut()
+                    .push(format!("auto-start:{enabled}"));
+                Ok(())
+            },
+            move |shortcut| {
+                shortcut_events
+                    .borrow_mut()
+                    .push(format!("shortcut:{shortcut:?}"));
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(failure.stage, SettingsCommitFailureStage::Persistence);
+        assert_eq!(failure.error, "disk full");
+        assert!(failure.rollback_errors.is_empty());
+        assert_eq!(&*events.borrow(), &["save"]);
+    }
+
+    #[test]
+    fn settings_transaction_rolls_back_side_effects_and_persistence_in_reverse_order() {
+        let previous = LayoutStore {
+            settings: AppSettings {
+                auto_start_enabled: false,
+                shortcut: ShortcutPreference::Disabled,
+                ..AppSettings::default()
+            },
+            ..LayoutStore::default()
+        };
+        let mut candidate = previous.clone();
+        candidate.settings.auto_start_enabled = true;
+        candidate.settings.shortcut = ShortcutPreference::AltC;
+        let events = Rc::new(RefCell::new(Vec::<String>::new()));
+        let save_events = events.clone();
+        let auto_start_events = events.clone();
+        let shortcut_events = events.clone();
+
+        let failure = commit_settings_transaction(
+            &previous,
+            candidate,
+            move |store| {
+                save_events.borrow_mut().push(format!(
+                    "save:{}:{:?}",
+                    store.settings.auto_start_enabled, store.settings.shortcut
+                ));
+                Ok(())
+            },
+            move |enabled, _| {
+                auto_start_events
+                    .borrow_mut()
+                    .push(format!("auto-start:{enabled}"));
+                Ok(())
+            },
+            move |shortcut| {
+                shortcut_events
+                    .borrow_mut()
+                    .push(format!("shortcut:{shortcut:?}"));
+                if shortcut == ShortcutPreference::AltC {
+                    Err("shortcut unavailable".to_string())
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(failure.stage, SettingsCommitFailureStage::Shortcut);
+        assert_eq!(failure.error, "shortcut unavailable");
+        assert!(failure.rollback_errors.is_empty());
+        assert_eq!(
+            &*events.borrow(),
+            &[
+                "save:true:AltC",
+                "auto-start:true",
+                "shortcut:AltC",
+                "shortcut:Disabled",
+                "auto-start:false",
+                "save:false:Disabled",
+            ]
+        );
+    }
+
+    #[test]
     fn failed_persistence_never_reports_saved_status() {
         let english = AppSettings::default();
         let failed: Result<()> = Err(anyhow::anyhow!("access denied"));
@@ -5975,7 +6485,7 @@ mod tests {
             ..LayoutStore::default()
         }));
 
-        apply_default_widget_scale_to_instances(&layouts, &catalog, 150);
+        apply_default_widget_scale_to_store(&mut layouts.borrow_mut(), &catalog, 150);
         let store = layouts.borrow();
 
         assert_eq!(store.widgets[0].layout.width, quote_scale_150.width);
@@ -6300,6 +6810,36 @@ mod tests {
         ));
         assert_eq!(store.widgets[0].layout.width, 374);
         assert_eq!(store.widgets[0].layout.height, 92);
+    }
+
+    #[test]
+    fn status_strip_auto_size_migrates_previous_grid_scaled_size() {
+        let mut store = LayoutStore {
+            widgets: vec![WidgetInstance {
+                id: "plugin-strip-1".to_string(),
+                plugin_id: STATUS_STRIP_PLUGIN_ID.to_string(),
+                legacy_widget_type: None,
+                name: "Status Strip 1".to_string(),
+                visible: true,
+                layout: settings::WidgetLayout {
+                    width: 624,
+                    height: 138,
+                    scale_percent: 0,
+                    ..settings::WidgetLayout::default()
+                },
+                symbols: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
+                config: settings::default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+
+        assert!(apply_dynamic_widget_auto_sizes_for_definitions(
+            &mut store,
+            &status_strip_definitions()
+        ));
+        assert_eq!(store.widgets[0].layout.scale_percent, 150);
+        assert_eq!(store.widgets[0].layout.width, 561);
+        assert_eq!(store.widgets[0].layout.height, 138);
     }
 
     #[test]

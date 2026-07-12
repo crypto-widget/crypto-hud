@@ -46,6 +46,9 @@ $seedState = [ordered]@{
     settings = [ordered]@{
         widgets_always_on_top = $false
         opacity_percent = 96
+        shortcut = "disabled"
+        tray_icon_enabled = $false
+        auto_start_enabled = $false
     }
     selected_widget_id = $seedWidgets[0].id
     next_widget_number = $Widgets + 1
@@ -58,6 +61,8 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $env:CRYPTO_HUD_STATE_DIR = $StateDir
 $env:CRYPTO_HUD_GUI_SMOKE_READY_FILE = $ReadyFile
 $env:CRYPTO_HUD_INSTANCE_ID = "com.crypto-hud.gui-smoke.$PID"
+$env:CRYPTO_HUD_GUI_SMOKE_OFFLINE = "1"
+$env:CRYPTO_HUD_DISABLE_UPDATE_CHECK = "1"
 $env:SLINT_BACKEND = "software"
 
 Push-Location $RepoRoot
@@ -74,6 +79,9 @@ try {
     $ready = Get-Content -LiteralPath $ReadyFile -Raw | ConvertFrom-Json
     if (-not $ready.ready) {
         throw "GUI smoke marker did not report ready"
+    }
+    if (-not $ready.marketDataReady) {
+        throw "GUI smoke marker was written before market data became ready"
     }
     if ([int]$ready.widgetCount -lt $Widgets) {
         throw "Expected at least $Widgets widgets, saw $($ready.widgetCount)"
@@ -92,6 +100,12 @@ try {
         throw "GUI smoke did not observe any unlocked widget layout"
     }
     foreach ($widget in $readyWidgets) {
+        if ([int]$widget.marketDataRowCount -le 0) {
+            throw "Widget $($widget.id) did not receive any deterministic market rows"
+        }
+        if ([int]$widget.marketDataRowCount -ne [int]$widget.symbolCount) {
+            throw "Widget $($widget.id) received $($widget.marketDataRowCount) rows for $($widget.symbolCount) symbols"
+        }
         if ([int]$widget.layoutWidth -lt 160 -or [int]$widget.layoutHeight -lt 80) {
             throw "Widget $($widget.id) reported an invalid persisted size"
         }
@@ -110,4 +124,6 @@ try {
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_INSTANCE_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_OFFLINE -ErrorAction SilentlyContinue
+    Remove-Item Env:\CRYPTO_HUD_DISABLE_UPDATE_CHECK -ErrorAction SilentlyContinue
 }

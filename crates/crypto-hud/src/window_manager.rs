@@ -476,6 +476,10 @@ fn platform_desktop_work_areas() -> Vec<DesktopWorkArea> {
     use windows_sys::Win32::Graphics::Gdi::{
         EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
     };
+    use windows_sys::Win32::UI::{
+        HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
+        WindowsAndMessaging::MONITORINFOF_PRIMARY,
+    };
 
     unsafe extern "system" fn enum_monitor(
         monitor: HMONITOR,
@@ -493,11 +497,21 @@ fn platform_desktop_work_areas() -> Vec<DesktopWorkArea> {
             let width = rect.right - rect.left;
             let height = rect.bottom - rect.top;
             if width > 0 && height > 0 {
+                let mut dpi_x = settings::DEFAULT_MONITOR_DPI;
+                let mut dpi_y = settings::DEFAULT_MONITOR_DPI;
+                if unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) }
+                    != 0
+                    || dpi_x == 0
+                {
+                    dpi_x = settings::DEFAULT_MONITOR_DPI;
+                }
                 work_areas.push(DesktopWorkArea {
                     x: rect.left,
                     y: rect.top,
                     width,
                     height,
+                    dpi: dpi_x,
+                    is_primary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
                 });
             }
         }

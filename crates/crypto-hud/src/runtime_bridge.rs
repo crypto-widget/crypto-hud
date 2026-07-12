@@ -3,7 +3,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{mpsc::Receiver, Arc, Mutex},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -24,7 +24,7 @@ use slint_interpreter::{ComponentInstance, Value};
 use crate::{
     coin_icons::CoinIconRegistry,
     feature_flags, i18n, notifications, plugin,
-    settings_window::widget_type_title,
+    settings_window::{apply_available_update, widget_type_title},
     state_bridge::{
         layout_for_instance, normalized_symbols_for_instance, symbols_from_store,
         widget_definitions_from_catalog,
@@ -34,6 +34,7 @@ use crate::{
         apply_runtime_view_to_widget, logical_size_from_physical, WidgetRuntime, WidgetUi,
     },
     window_manager::schedule_widget_shell_window_configuration,
+    SettingsWindow,
 };
 
 const NOTIFICATION_COOLDOWN: Duration = Duration::from_secs(300);
@@ -77,8 +78,9 @@ pub(crate) struct RuntimeEventTimerDeps {
     pub(crate) quote_cache: Rc<RefCell<QuoteCache>>,
     pub(crate) coin_icons: Rc<CoinIconRegistry>,
     pub(crate) plugin_catalog: Rc<plugin::PluginCatalog>,
-    pub(crate) market_updates: Receiver<market::MarketEvent>,
-    pub(crate) update_events: Option<Receiver<updater::UpdateEvent>>,
+    pub(crate) settings_window: slint::Weak<SettingsWindow>,
+    pub(crate) market_updates: market::MarketFeed,
+    pub(crate) update_events: Option<std::sync::mpsc::Receiver<updater::UpdateEvent>>,
 }
 
 pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer {
@@ -88,6 +90,7 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
         quote_cache,
         coin_icons,
         plugin_catalog,
+        settings_window,
         market_updates,
         update_events,
     } = deps;
@@ -166,11 +169,11 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
                     match event {
                         updater::UpdateEvent::Available(update) => {
                             let settings = layouts.borrow().settings.clone().normalized();
-                            notify_update_available(
-                                &notification_throttle,
-                                i18n::resolve_locale(settings.language),
-                                &update,
-                            );
+                            let locale = i18n::resolve_locale(settings.language);
+                            if let Some(ui) = settings_window.upgrade() {
+                                apply_available_update(&ui, &update, locale);
+                            }
+                            notify_update_available(&notification_throttle, locale, &update);
                         }
                         updater::UpdateEvent::UpToDate => {}
                         updater::UpdateEvent::Error(error) => {

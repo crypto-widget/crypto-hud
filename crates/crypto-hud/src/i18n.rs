@@ -192,6 +192,7 @@ pub struct UiText {
     pub status_icon_cache_clear_failed: &'static str,
     pub status_custom_components_folder_open_failed: &'static str,
     pub status_symbol_catalog_fallback: &'static str,
+    pub status_symbol_catalog_partial: &'static str,
 }
 
 const EN_TEXT: UiText = UiText {
@@ -327,6 +328,7 @@ const EN_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "Icon cache clear failed",
     status_custom_components_folder_open_failed: "Could not open custom widgets folder",
     status_symbol_catalog_fallback: "Using popular pairs list",
+    status_symbol_catalog_partial: "Some market sources could not be loaded",
 };
 
 const ZH_HANS_TEXT: UiText = UiText {
@@ -461,6 +463,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "图标缓存清理失败",
     status_custom_components_folder_open_failed: "无法打开自定义小组件目录",
     status_symbol_catalog_fallback: "正在使用热门交易对目录",
+    status_symbol_catalog_partial: "部分行情源目录加载失败",
 };
 
 const ZH_HANT_TEXT: UiText = UiText {
@@ -595,6 +598,7 @@ const ZH_HANT_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "圖示快取清理失敗",
     status_custom_components_folder_open_failed: "無法開啟自訂小工具目錄",
     status_symbol_catalog_fallback: "正在使用熱門交易對目錄",
+    status_symbol_catalog_partial: "部分行情來源目錄載入失敗",
 };
 
 const ES_419_TEXT: UiText = UiText {
@@ -729,6 +733,7 @@ const ES_419_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "No se pudo borrar la caché de iconos",
     status_custom_components_folder_open_failed: "No se pudo abrir la carpeta de widgets",
     status_symbol_catalog_fallback: "Usando lista de pares populares",
+    status_symbol_catalog_partial: "No se pudieron cargar algunas fuentes de mercado",
 };
 
 const PT_BR_TEXT: UiText = UiText {
@@ -863,6 +868,7 @@ const PT_BR_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "Falha ao limpar cache de ícones",
     status_custom_components_folder_open_failed: "Não foi possível abrir a pasta de widgets",
     status_symbol_catalog_fallback: "Usando lista de pares populares",
+    status_symbol_catalog_partial: "Algumas fontes de mercado não puderam ser carregadas",
 };
 
 const VI_TEXT: UiText = UiText {
@@ -997,6 +1003,7 @@ const VI_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "Không xóa được bộ nhớ đệm biểu tượng",
     status_custom_components_folder_open_failed: "Không mở được thư mục widget tùy chỉnh",
     status_symbol_catalog_fallback: "Đang dùng danh sách cặp phổ biến",
+    status_symbol_catalog_partial: "Không tải được một số nguồn thị trường",
 };
 
 const ID_TEXT: UiText = UiText {
@@ -1131,6 +1138,7 @@ const ID_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "Gagal menghapus cache ikon",
     status_custom_components_folder_open_failed: "Tidak dapat membuka folder widget kustom",
     status_symbol_catalog_fallback: "Memakai daftar pair populer",
+    status_symbol_catalog_partial: "Sebagian sumber pasar tidak dapat dimuat",
 };
 
 const TR_TEXT: UiText = UiText {
@@ -1266,6 +1274,7 @@ const TR_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "Simge önbelleği temizlenemedi",
     status_custom_components_folder_open_failed: "Özel widget klasörü açılamadı",
     status_symbol_catalog_fallback: "Popüler çiftler listesi kullanılıyor",
+    status_symbol_catalog_partial: "Bazı piyasa kaynakları yüklenemedi",
 };
 
 const KO_TEXT: UiText = UiText {
@@ -1400,6 +1409,7 @@ const KO_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "아이콘 캐시를 지우지 못했습니다",
     status_custom_components_folder_open_failed: "사용자 지정 위젯 폴더를 열 수 없습니다",
     status_symbol_catalog_fallback: "인기 페어 목록 사용 중",
+    status_symbol_catalog_partial: "일부 시세 소스를 불러오지 못했습니다",
 };
 
 const JA_TEXT: UiText = UiText {
@@ -1534,6 +1544,7 @@ const JA_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "アイコンキャッシュの削除に失敗しました",
     status_custom_components_folder_open_failed: "カスタムウィジェットフォルダーを開けません",
     status_symbol_catalog_fallback: "人気ペア一覧を使用中",
+    status_symbol_catalog_partial: "一部の市場データソースを読み込めませんでした",
 };
 
 const RU_TEXT: UiText = UiText {
@@ -1668,6 +1679,7 @@ const RU_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "Не удалось очистить кэш значков",
     status_custom_components_folder_open_failed: "Не удалось открыть папку виджетов",
     status_symbol_catalog_fallback: "Используется список популярных пар",
+    status_symbol_catalog_partial: "Не удалось загрузить некоторые источники рынка",
 };
 
 const AR_TEXT: UiText = UiText {
@@ -1803,6 +1815,7 @@ const AR_TEXT: UiText = UiText {
     status_icon_cache_clear_failed: "فشل مسح ذاكرة الأيقونات",
     status_custom_components_folder_open_failed: "تعذر فتح مجلد الأدوات المخصصة",
     status_symbol_catalog_fallback: "يتم استخدام قائمة الأزواج الشائعة",
+    status_symbol_catalog_partial: "تعذر تحميل بعض مصادر السوق",
 };
 
 pub fn resolve_locale(preference: LanguagePreference) -> Locale {
@@ -5142,6 +5155,10 @@ mod tests {
             (
                 "status_symbol_catalog_fallback",
                 text.status_symbol_catalog_fallback,
+            ),
+            (
+                "status_symbol_catalog_partial",
+                text.status_symbol_catalog_partial,
             ),
         ]
     }

@@ -37,6 +37,9 @@ New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 $seedState = [ordered]@{
     settings = [ordered]@{
         show_main_window_on_startup = $false
+        shortcut = "disabled"
+        tray_icon_enabled = $false
+        auto_start_enabled = $false
     }
     selected_widget_id = "quote-board-1"
     next_widget_number = 2
@@ -90,10 +93,15 @@ try {
     $first.Environment["CRYPTO_HUD_GUI_SMOKE_ACTIVATION_FILE"] = $ActivationFile
     $first.Environment["CRYPTO_HUD_INSTANCE_ID"] = $InstanceId
     $first.Environment["CRYPTO_HUD_DISABLE_UPDATE_CHECK"] = "1"
+    $first.Environment["CRYPTO_HUD_GUI_SMOKE_OFFLINE"] = "1"
     $first.Environment["SLINT_BACKEND"] = "software"
     $process = [System.Diagnostics.Process]::Start($first)
 
     Wait-ForFile -Path $ReadyFile -Timeout 5000
+    $ready = Get-Content -LiteralPath $ReadyFile -Raw | ConvertFrom-Json
+    if (-not [bool]$ready.marketDataReady) {
+        throw "Primary instance marker did not report market data ready"
+    }
     if ($process.HasExited) {
         throw "Primary instance exited before activation with code $($process.ExitCode)"
     }
@@ -105,6 +113,7 @@ try {
     $second.Environment["CRYPTO_HUD_STATE_DIR"] = $StateDir
     $second.Environment["CRYPTO_HUD_INSTANCE_ID"] = $InstanceId
     $second.Environment["CRYPTO_HUD_DISABLE_UPDATE_CHECK"] = "1"
+    $second.Environment["CRYPTO_HUD_GUI_SMOKE_OFFLINE"] = "1"
     $second.Environment["SLINT_BACKEND"] = "software"
     $secondaryProcess = [System.Diagnostics.Process]::Start($second)
     if (-not $secondaryProcess.WaitForExit(5000)) {

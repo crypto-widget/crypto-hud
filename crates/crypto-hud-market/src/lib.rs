@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{
-        mpsc::{self, Receiver},
+        mpsc::{self, RecvTimeoutError, TryRecvError},
         Arc, Mutex,
     },
     thread,
@@ -10,9 +10,8 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use crypto_hud_core::{
-    clamp_refresh_interval, default_enabled_market_sources, market_pair_source,
-    normalize_market_pair_key, parse_market_pair, MarketDataSource, MarketPair,
-    MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS,
+    clamp_refresh_interval, market_pair_source, normalize_market_pair_key, parse_market_pair,
+    MarketDataSource, MarketPair, MarketProviderPreference, MarketType,
 };
 use serde::Deserialize;
 
@@ -22,7 +21,10 @@ const OKX_BASE_URL: &str = "https://www.okx.com";
 const HYPERLIQUID_BASE_URL: &str = "https://api.hyperliquid.xyz";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_CONCURRENT_PAIR_FETCHES: usize = 4;
+const CONFIG_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(60);
 const CANDLE_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const MAX_CANDLE_FAILURE_BACKOFF: Duration = Duration::from_secs(60 * 60);
 const CANDLE_LIMIT_24H_5M: usize = 24 * 60 / 5;
 const HYPERLIQUID_CANDLE_INTERVAL: &str = "5m";
 const HYPERLIQUID_24H_MILLIS: u64 = 24 * 60 * 60 * 1000;
@@ -55,7 +57,7 @@ pub enum MarketEvent {
     Error(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketFeedConfig {
     pub symbols: Vec<String>,
     pub provider: MarketProviderPreference,
@@ -78,10 +80,31 @@ pub struct SymbolCatalog {
     pub entries: Vec<SymbolCatalogEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolCatalogWarning {
+    pub source: MarketDataSource,
+    pub message: String,
+}
+
+impl std::fmt::Display for SymbolCatalogWarning {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.source.label(), self.message)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SymbolCatalogFetch {
+    pub catalog: SymbolCatalog,
+    pub warnings: Vec<SymbolCatalogWarning>,
+}
+
 #[derive(Debug, Clone)]
 struct CandleCacheEntry {
     candles: Vec<MarketCandle>,
-    fetched_at: Instant,
+    fetched_at: Option<Instant>,
+    retry_at: Option<Instant>,
+    consecutive_failures: u32,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +112,7 @@ struct CandleFetchOutcome {
     candles: Vec<MarketCandle>,
     fetched_at: Option<Instant>,
     error: Option<String>,
+    new_failure: bool,
 }
 
 type CandleCache = HashMap<String, CandleCacheEntry>;
@@ -103,113 +127,324 @@ struct MarketBatch {
     errors: Vec<String>,
 }
 
-pub fn spawn_market_feed(config: Arc<Mutex<MarketFeedConfig>>) -> Receiver<MarketEvent> {
-    let (sender, receiver) = mpsc::channel();
+enum MarketFeedControl {
+    Stop,
+}
 
-    thread::spawn(move || {
-        let mut agent = build_agent(None).expect("direct market agent should be valid");
-        let mut agent_proxy_url: Option<String> = None;
-        let mut candle_cache = CandleCache::new();
+enum MarketFeedWait {
+    Elapsed,
+    ConfigChanged,
+    Stop,
+}
 
-        loop {
-            let config = config
-                .lock()
-                .map(|config| config.clone())
-                .unwrap_or_else(|_| MarketFeedConfig {
-                    symbols: Vec::new(),
-                    provider: MarketProviderPreference::default(),
-                    refresh_interval_seconds: DEFAULT_REFRESH_INTERVAL_SECONDS,
-                    enabled_sources: default_enabled_market_sources(),
-                    proxy_url: None,
-                });
-            let symbols = unique_market_pair_keys(config.symbols)
-                .into_iter()
-                .filter(|symbol| {
-                    market_pair_source(symbol).is_some_and(|source| {
-                        config.enabled_sources.is_empty()
-                            || config.enabled_sources.contains(&source)
-                    })
-                })
-                .collect::<Vec<_>>();
-            let refresh_interval =
-                Duration::from_secs(clamp_refresh_interval(config.refresh_interval_seconds) as u64);
-            let proxy_url = normalized_proxy_url(config.proxy_url);
+pub struct MarketFeed {
+    events: mpsc::Receiver<MarketEvent>,
+    control: mpsc::Sender<MarketFeedControl>,
+}
 
-            if agent_proxy_url != proxy_url {
-                match build_agent(proxy_url.as_deref()) {
-                    Ok(next_agent) => {
-                        agent = next_agent;
-                        agent_proxy_url = proxy_url;
-                        candle_cache.clear();
-                    }
-                    Err(error) => {
-                        if sender.send(MarketEvent::Error(error.to_string())).is_err() {
-                            return;
-                        }
-                        thread::sleep(refresh_interval);
-                        continue;
-                    }
-                }
+impl MarketFeed {
+    pub fn from_events(events: Vec<MarketEvent>) -> Self {
+        let (event_sender, event_receiver) = mpsc::channel();
+        for event in events {
+            if event_sender.send(event).is_err() {
+                break;
             }
-
-            match fetch_symbols(&agent, &symbols, &mut candle_cache) {
-                Ok(MarketBatch { snapshots, errors }) => {
-                    for snapshot in snapshots {
-                        if sender.send(MarketEvent::Snapshot(snapshot)).is_err() {
-                            return;
-                        }
-                    }
-                    if !errors.is_empty()
-                        && sender.send(MarketEvent::Error(errors.join("; "))).is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(error) => {
-                    if sender.send(MarketEvent::Error(error.to_string())).is_err() {
-                        return;
-                    }
-                }
-            }
-
-            thread::sleep(refresh_interval);
         }
-    });
+        drop(event_sender);
+        let (control, control_receiver) = mpsc::channel();
+        drop(control_receiver);
+        Self {
+            events: event_receiver,
+            control,
+        }
+    }
 
-    receiver
+    pub fn try_recv(&self) -> std::result::Result<MarketEvent, TryRecvError> {
+        self.events.try_recv()
+    }
+
+    pub fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> std::result::Result<MarketEvent, RecvTimeoutError> {
+        self.events.recv_timeout(timeout)
+    }
+}
+
+impl Drop for MarketFeed {
+    fn drop(&mut self) {
+        let _ = self.control.send(MarketFeedControl::Stop);
+    }
+}
+
+pub fn spawn_market_feed(config: Arc<Mutex<MarketFeedConfig>>) -> MarketFeed {
+    let (event_sender, events) = mpsc::channel();
+    let (control, control_receiver) = mpsc::channel();
+    let worker_sender = event_sender.clone();
+    if let Err(error) = thread::Builder::new()
+        .name("crypto-hud-market-feed".to_string())
+        .spawn(move || {
+            run_market_feed(config, worker_sender, control_receiver);
+        })
+    {
+        let _ = event_sender.send(MarketEvent::Error(format!(
+            "failed to start market feed worker: {error}"
+        )));
+    }
+    drop(event_sender);
+
+    MarketFeed { events, control }
+}
+
+fn run_market_feed(
+    shared_config: Arc<Mutex<MarketFeedConfig>>,
+    sender: mpsc::Sender<MarketEvent>,
+    control: mpsc::Receiver<MarketFeedControl>,
+) {
+    let Ok(mut agent) = build_agent(None) else {
+        let _ = sender.send(MarketEvent::Error(
+            "failed to create direct market agent".to_string(),
+        ));
+        return;
+    };
+    let mut agent_proxy_url: Option<String> = None;
+    let mut candle_cache = CandleCache::new();
+    let mut consecutive_failures = 0_u32;
+
+    'feed: loop {
+        if market_feed_stop_requested(&control) {
+            return;
+        }
+        let config = market_feed_config_snapshot(&shared_config);
+        let refresh_interval =
+            Duration::from_secs(clamp_refresh_interval(config.refresh_interval_seconds) as u64);
+        let proxy_url = normalized_proxy_url(config.proxy_url.clone());
+        let symbols = unique_market_pair_keys(config.symbols.clone())
+            .into_iter()
+            .filter(|symbol| {
+                market_pair_source(symbol).is_some_and(|source| {
+                    config.enabled_sources.is_empty() || config.enabled_sources.contains(&source)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let agent_error = if agent_proxy_url != proxy_url {
+            match build_agent(proxy_url.as_deref()) {
+                Ok(next_agent) => {
+                    agent = next_agent;
+                    agent_proxy_url = proxy_url;
+                    candle_cache.clear();
+                    None
+                }
+                Err(error) => Some(error),
+            }
+        } else {
+            None
+        };
+
+        let cycle_succeeded = if let Some(error) = agent_error {
+            send_market_error(&sender, error.to_string())
+        } else {
+            let mut interrupted_by_stop = false;
+            let mut interrupted_by_config = false;
+            let fetch = fetch_symbols_interruptible(&agent, &symbols, &mut candle_cache, || {
+                interrupted_by_stop = market_feed_stop_requested(&control);
+                interrupted_by_config =
+                    !interrupted_by_stop && market_feed_config_snapshot(&shared_config) != config;
+                interrupted_by_stop || interrupted_by_config
+            });
+            if interrupted_by_stop {
+                return;
+            }
+            if interrupted_by_config {
+                consecutive_failures = 0;
+                continue 'feed;
+            }
+            let Some(fetch) = fetch else {
+                continue 'feed;
+            };
+            send_market_batch(&sender, fetch)
+        };
+
+        let Some(cycle_succeeded) = cycle_succeeded else {
+            return;
+        };
+        if cycle_succeeded {
+            consecutive_failures = 0;
+        } else {
+            consecutive_failures = consecutive_failures.saturating_add(1);
+        }
+        let wait = if cycle_succeeded {
+            refresh_interval
+        } else {
+            failure_backoff(refresh_interval, consecutive_failures)
+        };
+        match wait_for_market_feed(&control, &shared_config, &config, wait) {
+            MarketFeedWait::Elapsed => {}
+            MarketFeedWait::ConfigChanged => {
+                consecutive_failures = 0;
+            }
+            MarketFeedWait::Stop => return,
+        }
+    }
+}
+
+fn send_market_batch(
+    sender: &mpsc::Sender<MarketEvent>,
+    result: Result<MarketBatch>,
+) -> Option<bool> {
+    match result {
+        Ok(MarketBatch { snapshots, errors }) => {
+            for snapshot in snapshots {
+                if sender.send(MarketEvent::Snapshot(snapshot)).is_err() {
+                    return None;
+                }
+            }
+            if !errors.is_empty() && sender.send(MarketEvent::Error(errors.join("; "))).is_err() {
+                return None;
+            }
+            Some(true)
+        }
+        Err(error) => send_market_error(sender, error.to_string()),
+    }
+}
+
+fn send_market_error(sender: &mpsc::Sender<MarketEvent>, error: String) -> Option<bool> {
+    sender.send(MarketEvent::Error(error)).ok().map(|()| false)
+}
+
+fn market_feed_config_snapshot(config: &Arc<Mutex<MarketFeedConfig>>) -> MarketFeedConfig {
+    match config.lock() {
+        Ok(config) => config.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    }
+}
+
+fn market_feed_stop_requested(control: &mpsc::Receiver<MarketFeedControl>) -> bool {
+    matches!(
+        control.try_recv(),
+        Ok(MarketFeedControl::Stop) | Err(TryRecvError::Disconnected)
+    )
+}
+
+fn wait_for_market_feed(
+    control: &mpsc::Receiver<MarketFeedControl>,
+    config: &Arc<Mutex<MarketFeedConfig>>,
+    observed_config: &MarketFeedConfig,
+    wait: Duration,
+) -> MarketFeedWait {
+    let deadline = Instant::now() + wait;
+    loop {
+        if market_feed_stop_requested(control) {
+            return MarketFeedWait::Stop;
+        }
+        if market_feed_config_snapshot(config) != *observed_config {
+            return MarketFeedWait::ConfigChanged;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return MarketFeedWait::Elapsed;
+        }
+        let timeout = deadline
+            .saturating_duration_since(now)
+            .min(CONFIG_POLL_INTERVAL);
+        match control.recv_timeout(timeout) {
+            Ok(MarketFeedControl::Stop) | Err(RecvTimeoutError::Disconnected) => {
+                return MarketFeedWait::Stop;
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+fn failure_backoff(refresh_interval: Duration, consecutive_failures: u32) -> Duration {
+    let multiplier = 1_u32
+        .checked_shl(consecutive_failures.min(6))
+        .unwrap_or(u32::MAX);
+    refresh_interval
+        .saturating_mul(multiplier)
+        .min(MAX_FAILURE_BACKOFF)
 }
 
 pub fn fetch_symbol_catalog(proxy_url: Option<&str>) -> Result<SymbolCatalog> {
+    Ok(fetch_symbol_catalog_with_warnings(proxy_url)?.catalog)
+}
+
+pub fn fetch_symbol_catalog_with_warnings(proxy_url: Option<&str>) -> Result<SymbolCatalogFetch> {
     let agent = build_agent(proxy_url)?;
     fetch_symbol_catalog_with_agent(&agent)
 }
 
-fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalog> {
-    let mut errors = Vec::new();
+fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalogFetch> {
+    let mut warnings = Vec::new();
     let mut catalogs = Vec::new();
 
-    match fetch_binance_symbol_catalog(agent) {
-        Ok(entries) => catalogs.push(entries),
-        Err(error) => errors.push(format!("Binance: {error:#}")),
-    }
-    match fetch_coinbase_symbol_catalog(agent) {
-        Ok(entries) => catalogs.push(entries),
-        Err(error) => errors.push(format!("Coinbase: {error:#}")),
-    }
-    match fetch_okx_symbol_catalog(agent) {
-        Ok(entries) => catalogs.push(entries),
-        Err(error) => errors.push(format!("OKX: {error:#}")),
-    }
-    match fetch_hyperliquid_symbol_catalog(agent) {
-        Ok(entries) => catalogs.push(entries),
-        Err(error) => errors.push(format!("Hyperliquid: {error:#}")),
-    }
+    collect_symbol_catalog_result(
+        MarketDataSource::Binance,
+        fetch_binance_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Coinbase,
+        fetch_coinbase_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Okx,
+        fetch_okx_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Hyperliquid,
+        fetch_hyperliquid_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
 
+    finish_symbol_catalog_fetch(catalogs, warnings)
+}
+
+fn collect_symbol_catalog_result(
+    source: MarketDataSource,
+    result: Result<Vec<SymbolCatalogEntry>>,
+    catalogs: &mut Vec<Vec<SymbolCatalogEntry>>,
+    warnings: &mut Vec<SymbolCatalogWarning>,
+) {
+    match result {
+        Ok(entries) if entries.is_empty() => warnings.push(SymbolCatalogWarning {
+            source,
+            message: "source returned no supported market pairs".to_string(),
+        }),
+        Ok(entries) => catalogs.push(entries),
+        Err(error) => warnings.push(SymbolCatalogWarning {
+            source,
+            message: format!("{error:#}"),
+        }),
+    }
+}
+
+fn finish_symbol_catalog_fetch(
+    catalogs: Vec<Vec<SymbolCatalogEntry>>,
+    warnings: Vec<SymbolCatalogWarning>,
+) -> Result<SymbolCatalogFetch> {
     let catalog = combine_symbol_catalogs(catalogs);
     if catalog.entries.is_empty() {
-        bail!("{}", errors.join("; "));
+        if warnings.is_empty() {
+            bail!("all market sources returned an empty symbol catalog");
+        }
+        bail!(
+            "{}",
+            warnings
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
     }
-    Ok(catalog)
+    Ok(SymbolCatalogFetch { catalog, warnings })
 }
 
 fn build_agent(proxy_url: Option<&str>) -> Result<ureq::Agent> {
@@ -255,13 +490,17 @@ fn unique_market_pair_keys(symbols: Vec<String>) -> Vec<String> {
         })
 }
 
-fn fetch_symbols(
+fn fetch_symbols_interruptible(
     agent: &ureq::Agent,
     symbols: &[String],
     candle_cache: &mut CandleCache,
-) -> Result<MarketBatch> {
+    mut interrupted: impl FnMut() -> bool,
+) -> Option<Result<MarketBatch>> {
+    if interrupted() {
+        return None;
+    }
     if symbols.is_empty() {
-        bail!("no market pairs configured");
+        return Some(Err(anyhow!("no market pairs configured")));
     }
 
     let mut snapshots = Vec::new();
@@ -276,6 +515,9 @@ fn fetch_symbols(
 
     candle_cache.retain(|key, _| symbols.contains(key));
     for chunk in pairs.chunks(MAX_CONCURRENT_PAIR_FETCHES) {
+        if interrupted() {
+            return None;
+        }
         let results = thread::scope(|scope| {
             let handles = chunk
                 .iter()
@@ -320,9 +562,12 @@ fn fetch_symbols(
                 Err(error) => errors.push(format!("{symbol}: {error}")),
             }
         }
+        if interrupted() {
+            return None;
+        }
     }
 
-    market_batch(snapshots, errors)
+    Some(market_batch(snapshots, errors))
 }
 
 fn market_batch(snapshots: Vec<MarketSnapshot>, errors: Vec<String>) -> Result<MarketBatch> {
@@ -422,15 +667,23 @@ fn snapshot_with_candles(
     mut snapshot: MarketSnapshot,
     candles: CandleFetchOutcome,
 ) -> MarketFetchOutcome {
-    snapshot.chart_closes_24h = candles.candles.iter().map(|candle| candle.close).collect();
-    snapshot.chart_candles_24h = candles.candles;
-    snapshot.chart_updated_at = candles.fetched_at;
-    snapshot.chart_error = candles.error.clone();
+    let CandleFetchOutcome {
+        candles,
+        fetched_at,
+        error,
+        new_failure,
+    } = candles;
+    snapshot.chart_closes_24h = candles.iter().map(|candle| candle.close).collect();
+    snapshot.chart_candles_24h = candles;
+    snapshot.chart_updated_at = fetched_at;
+    snapshot.chart_error = error.clone();
     MarketFetchOutcome {
         snapshot,
-        warning: candles
-            .error
-            .map(|error| format!("chart update failed: {error}")),
+        warning: if new_failure {
+            error.map(|error| format!("chart update failed: {error}"))
+        } else {
+            None
+        },
     }
 }
 
@@ -480,11 +733,22 @@ fn cached_or_fetch_candles_at(
 ) -> CandleFetchOutcome {
     let key = pair.key();
     if let Some(entry) = candle_cache.get(&key) {
-        if now.saturating_duration_since(entry.fetched_at) < CANDLE_REFRESH_INTERVAL {
+        if entry.fetched_at.is_some_and(|fetched_at| {
+            now.saturating_duration_since(fetched_at) < CANDLE_REFRESH_INTERVAL
+        }) {
             return CandleFetchOutcome {
                 candles: entry.candles.clone(),
-                fetched_at: Some(entry.fetched_at),
+                fetched_at: entry.fetched_at,
                 error: None,
+                new_failure: false,
+            };
+        }
+        if entry.retry_at.is_some_and(|retry_at| now < retry_at) {
+            return CandleFetchOutcome {
+                candles: entry.candles.clone(),
+                fetched_at: entry.fetched_at,
+                error: entry.last_error.clone(),
+                new_failure: false,
             };
         }
     }
@@ -499,31 +763,48 @@ fn cached_or_fetch_candles_at(
                 key,
                 CandleCacheEntry {
                     candles: candles.clone(),
-                    fetched_at: now,
+                    fetched_at: Some(now),
+                    retry_at: None,
+                    consecutive_failures: 0,
+                    last_error: None,
                 },
             );
             CandleFetchOutcome {
                 candles,
                 fetched_at: Some(now),
                 error: None,
+                new_failure: false,
             }
         }
         Err(error) => {
-            if let Some(entry) = candle_cache.get(&key) {
-                CandleFetchOutcome {
-                    candles: entry.candles.clone(),
-                    fetched_at: Some(entry.fetched_at),
-                    error: Some(error.to_string()),
-                }
-            } else {
-                CandleFetchOutcome {
-                    candles: Vec::new(),
-                    fetched_at: None,
-                    error: Some(error.to_string()),
-                }
+            let error = error.to_string();
+            let entry = candle_cache.entry(key).or_insert_with(|| CandleCacheEntry {
+                candles: Vec::new(),
+                fetched_at: None,
+                retry_at: None,
+                consecutive_failures: 0,
+                last_error: None,
+            });
+            entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
+            entry.retry_at = Some(now + candle_failure_backoff(entry.consecutive_failures));
+            entry.last_error = Some(error.clone());
+            CandleFetchOutcome {
+                candles: entry.candles.clone(),
+                fetched_at: entry.fetched_at,
+                error: Some(error),
+                new_failure: true,
             }
         }
     }
+}
+
+fn candle_failure_backoff(consecutive_failures: u32) -> Duration {
+    let multiplier = 1_u32
+        .checked_shl(consecutive_failures.saturating_sub(1).min(6))
+        .unwrap_or(u32::MAX);
+    CANDLE_REFRESH_INTERVAL
+        .saturating_mul(multiplier)
+        .min(MAX_CANDLE_FAILURE_BACKOFF)
 }
 
 fn ensure_usable_candles(candles: &[MarketCandle]) -> Result<()> {
@@ -717,19 +998,12 @@ fn parse_binance_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
 fn parse_binance_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
     let ticker =
         serde_json::from_str::<BinanceTicker>(body).context("failed to parse Binance ticker")?;
-    Ok(MarketSnapshot {
-        symbol: pair.key(),
-        price: parse_decimal(&ticker.last_price, "Binance lastPrice")?,
-        change_percent_24h: parse_decimal(
-            &ticker.price_change_percent,
-            "Binance priceChangePercent",
-        )?,
-        chart_closes_24h: Vec::new(),
-        chart_candles_24h: Vec::new(),
-        chart_updated_at: None,
-        chart_error: None,
-        source: MarketDataSource::Binance,
-    })
+    market_snapshot(
+        pair,
+        MarketDataSource::Binance,
+        parse_positive_decimal(&ticker.last_price, "Binance lastPrice")?,
+        parse_decimal(&ticker.price_change_percent, "Binance priceChangePercent")?,
+    )
 }
 
 fn parse_binance_klines(body: &str) -> Result<Vec<MarketCandle>> {
@@ -790,22 +1064,15 @@ fn parse_coinbase_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> 
 fn parse_coinbase_stats(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
     let stats =
         serde_json::from_str::<CoinbaseStats>(body).context("failed to parse Coinbase stats")?;
-    let price = parse_decimal(&stats.last, "Coinbase last")?;
-    let open_24h = parse_decimal(&stats.open, "Coinbase open")?;
-    if open_24h <= 0.0 {
-        bail!("Coinbase open must be greater than zero");
-    }
+    let price = parse_positive_decimal(&stats.last, "Coinbase last")?;
+    let open_24h = parse_positive_decimal(&stats.open, "Coinbase open")?;
 
-    Ok(MarketSnapshot {
-        symbol: pair.key(),
+    market_snapshot(
+        pair,
+        MarketDataSource::Coinbase,
         price,
-        change_percent_24h: ((price - open_24h) / open_24h) * 100.0,
-        chart_closes_24h: Vec::new(),
-        chart_candles_24h: Vec::new(),
-        chart_updated_at: None,
-        chart_error: None,
-        source: MarketDataSource::Coinbase,
-    })
+        percent_change(price, open_24h, "Coinbase 24h change")?,
+    )
 }
 
 fn parse_coinbase_candles(body: &str) -> Result<Vec<MarketCandle>> {
@@ -937,22 +1204,15 @@ fn parse_okx_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
         .data
         .first()
         .ok_or_else(|| anyhow!("OKX response did not include ticker data"))?;
-    let price = parse_decimal(&ticker.last, "OKX last")?;
-    let open_24h = parse_decimal(&ticker.open_24h, "OKX open24h")?;
-    if open_24h <= 0.0 {
-        bail!("OKX open24h must be greater than zero");
-    }
+    let price = parse_positive_decimal(&ticker.last, "OKX last")?;
+    let open_24h = parse_positive_decimal(&ticker.open_24h, "OKX open24h")?;
 
-    Ok(MarketSnapshot {
-        symbol: pair.key(),
+    market_snapshot(
+        pair,
+        MarketDataSource::Okx,
         price,
-        change_percent_24h: ((price - open_24h) / open_24h) * 100.0,
-        chart_closes_24h: Vec::new(),
-        chart_candles_24h: Vec::new(),
-        chart_updated_at: None,
-        chart_error: None,
-        source: MarketDataSource::Okx,
-    })
+        percent_change(price, open_24h, "OKX 24h change")?,
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -1017,26 +1277,19 @@ fn parse_hyperliquid_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnaps
         .as_deref()
         .or(context.mid_px.as_deref())
         .ok_or_else(|| anyhow!("Hyperliquid context did not include a mark price"))
-        .and_then(|price| parse_decimal(price, "Hyperliquid markPx"))?;
+        .and_then(|price| parse_positive_decimal(price, "Hyperliquid markPx"))?;
     let prev_day = context
         .prev_day_px
         .as_deref()
         .ok_or_else(|| anyhow!("Hyperliquid context did not include prevDayPx"))
-        .and_then(|price| parse_decimal(price, "Hyperliquid prevDayPx"))?;
-    if prev_day <= 0.0 {
-        bail!("Hyperliquid prevDayPx must be greater than zero");
-    }
+        .and_then(|price| parse_positive_decimal(price, "Hyperliquid prevDayPx"))?;
 
-    Ok(MarketSnapshot {
-        symbol: pair.key(),
+    market_snapshot(
+        pair,
+        MarketDataSource::Hyperliquid,
         price,
-        change_percent_24h: ((price - prev_day) / prev_day) * 100.0,
-        chart_closes_24h: Vec::new(),
-        chart_candles_24h: Vec::new(),
-        chart_updated_at: None,
-        chart_error: None,
-        source: MarketDataSource::Hyperliquid,
-    })
+        percent_change(price, prev_day, "Hyperliquid 24h change")?,
+    )
 }
 
 fn parse_hyperliquid_candles(body: &str) -> Result<Vec<MarketCandle>> {
@@ -1085,7 +1338,8 @@ fn parse_json_decimal(value: Option<&serde_json::Value>, field: &str) -> Result<
         Some(serde_json::Value::String(value)) => parse_decimal(value, field),
         Some(serde_json::Value::Number(value)) => value
             .as_f64()
-            .ok_or_else(|| anyhow!("failed to parse {field}: {value}")),
+            .ok_or_else(|| anyhow!("failed to parse {field}: {value}"))
+            .and_then(|value| ensure_finite_decimal(value, field)),
         Some(value) => bail!("failed to parse {field}: {value}"),
         None => bail!("missing {field}"),
     }
@@ -1106,6 +1360,50 @@ fn parse_decimal(value: &str, field: &str) -> Result<f64> {
     value
         .parse::<f64>()
         .with_context(|| format!("failed to parse {field}: {value}"))
+        .and_then(|value| ensure_finite_decimal(value, field))
+}
+
+fn ensure_finite_decimal(value: f64, field: &str) -> Result<f64> {
+    if !value.is_finite() {
+        bail!("{field} must be finite");
+    }
+    Ok(value)
+}
+
+fn parse_positive_decimal(value: &str, field: &str) -> Result<f64> {
+    let value = parse_decimal(value, field)?;
+    if value <= 0.0 {
+        bail!("{field} must be greater than zero");
+    }
+    Ok(value)
+}
+
+fn percent_change(current: f64, baseline: f64, field: &str) -> Result<f64> {
+    ensure_finite_decimal(((current - baseline) / baseline) * 100.0, field)
+}
+
+fn market_snapshot(
+    pair: &MarketPair,
+    source: MarketDataSource,
+    price: f64,
+    change_percent_24h: f64,
+) -> Result<MarketSnapshot> {
+    let price = ensure_finite_decimal(price, "ticker price")?;
+    if price <= 0.0 {
+        bail!("ticker price must be greater than zero");
+    }
+    let change_percent_24h =
+        ensure_finite_decimal(change_percent_24h, "ticker 24h change percent")?;
+    Ok(MarketSnapshot {
+        symbol: pair.key(),
+        price,
+        change_percent_24h,
+        chart_closes_24h: Vec::new(),
+        chart_candles_24h: Vec::new(),
+        chart_updated_at: None,
+        chart_error: None,
+        source,
+    })
 }
 
 fn parse_u64(value: &str, field: &str) -> Result<u64> {
@@ -1117,6 +1415,7 @@ fn parse_u64(value: &str, field: &str) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_hud_core::{default_enabled_market_sources, DEFAULT_REFRESH_INTERVAL_SECONDS};
 
     fn pair(raw: &str) -> MarketPair {
         parse_market_pair(raw).unwrap()
@@ -1149,6 +1448,93 @@ mod tests {
         Err(anyhow!("candles unavailable"))
     }
 
+    fn unexpected_candle_fetch(_: &ureq::Agent, _: &MarketPair) -> Result<Vec<MarketCandle>> {
+        panic!("candle fetch should remain suppressed during retry backoff")
+    }
+
+    fn feed_config() -> MarketFeedConfig {
+        MarketFeedConfig {
+            symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            provider: MarketProviderPreference::Auto,
+            refresh_interval_seconds: DEFAULT_REFRESH_INTERVAL_SECONDS,
+            enabled_sources: default_enabled_market_sources(),
+            proxy_url: None,
+        }
+    }
+
+    #[test]
+    fn fixed_event_feed_never_starts_network_work() {
+        let feed = MarketFeed::from_events(vec![
+            MarketEvent::Snapshot(snapshot("binance:spot:BTC/USDT")),
+            MarketEvent::Error("offline fixture".to_string()),
+        ]);
+
+        assert!(matches!(feed.try_recv(), Ok(MarketEvent::Snapshot(_))));
+        assert!(
+            matches!(feed.try_recv(), Ok(MarketEvent::Error(error)) if error == "offline fixture")
+        );
+        assert!(matches!(feed.try_recv(), Err(TryRecvError::Disconnected)));
+    }
+
+    #[test]
+    fn market_feed_wait_is_interrupted_by_stop_control() {
+        let config = Arc::new(Mutex::new(feed_config()));
+        let observed = market_feed_config_snapshot(&config);
+        let (control_sender, control_receiver) = mpsc::channel();
+        control_sender.send(MarketFeedControl::Stop).unwrap();
+
+        assert!(matches!(
+            wait_for_market_feed(
+                &control_receiver,
+                &config,
+                &observed,
+                Duration::from_secs(60)
+            ),
+            MarketFeedWait::Stop
+        ));
+    }
+
+    #[test]
+    fn market_feed_wait_detects_config_changes_without_waiting_for_refresh() {
+        let config = Arc::new(Mutex::new(feed_config()));
+        let observed = market_feed_config_snapshot(&config);
+        config.lock().unwrap().symbols = vec!["okx:spot:ETH/USDT".to_string()];
+        let (_control_sender, control_receiver) = mpsc::channel();
+
+        assert!(matches!(
+            wait_for_market_feed(
+                &control_receiver,
+                &config,
+                &observed,
+                Duration::from_secs(60)
+            ),
+            MarketFeedWait::ConfigChanged
+        ));
+    }
+
+    #[test]
+    fn market_feed_failure_backoff_is_deterministic_and_bounded() {
+        let base = Duration::from_secs(5);
+        for (failures, expected_seconds) in [(1, 10), (2, 20), (3, 40), (4, 60), (20, 60)] {
+            assert_eq!(
+                failure_backoff(base, failures),
+                Duration::from_secs(expected_seconds),
+                "unexpected delay after {failures} failures"
+            );
+        }
+    }
+
+    #[test]
+    fn candle_failure_backoff_starts_at_refresh_interval_and_is_bounded() {
+        for (failures, expected_minutes) in [(1, 5), (2, 10), (3, 20), (4, 40), (5, 60), (20, 60)] {
+            assert_eq!(
+                candle_failure_backoff(failures),
+                Duration::from_secs(expected_minutes * 60),
+                "unexpected candle retry delay after {failures} failures"
+            );
+        }
+    }
+
     #[test]
     fn partial_market_batch_keeps_snapshots_and_reports_errors() {
         let batch = market_batch(
@@ -1169,6 +1555,7 @@ mod tests {
                 candles: Vec::new(),
                 fetched_at: None,
                 error: Some("candles unavailable".to_string()),
+                new_failure: true,
             },
         );
 
@@ -1199,7 +1586,10 @@ mod tests {
             pair.key(),
             CandleCacheEntry {
                 candles: cached_candles.clone(),
-                fetched_at,
+                fetched_at: Some(fetched_at),
+                retry_at: None,
+                consecutive_failures: 0,
+                last_error: None,
             },
         )]);
 
@@ -1214,7 +1604,31 @@ mod tests {
         assert_eq!(outcome.candles, cached_candles);
         assert_eq!(outcome.fetched_at, Some(fetched_at));
         assert_eq!(outcome.error.as_deref(), Some("candles unavailable"));
-        assert_eq!(cache[&pair.key()].fetched_at, fetched_at);
+        assert_eq!(cache[&pair.key()].fetched_at, Some(fetched_at));
+        assert_eq!(
+            cache[&pair.key()].retry_at,
+            Some(now + CANDLE_REFRESH_INTERVAL)
+        );
+
+        let suppressed = cached_or_fetch_candles_at(
+            &build_agent(None).unwrap(),
+            &pair,
+            &mut cache,
+            unexpected_candle_fetch,
+            now + Duration::from_secs(30),
+        );
+        assert_eq!(suppressed.candles, cached_candles);
+        assert_eq!(suppressed.fetched_at, Some(fetched_at));
+        assert_eq!(suppressed.error.as_deref(), Some("candles unavailable"));
+        assert!(!suppressed.new_failure);
+
+        let suppressed_outcome =
+            snapshot_with_candles(snapshot("binance:spot:BTC/USDT"), suppressed);
+        assert_eq!(
+            suppressed_outcome.snapshot.chart_error.as_deref(),
+            Some("candles unavailable")
+        );
+        assert_eq!(suppressed_outcome.warning, None);
     }
 
     #[test]
@@ -1230,6 +1644,65 @@ mod tests {
         assert_eq!(snapshot.price, 106800.12);
         assert_eq!(snapshot.change_percent_24h, 1.234);
         assert!(snapshot.chart_closes_24h.is_empty());
+    }
+
+    #[test]
+    fn ticker_parsers_reject_non_finite_and_non_positive_values() {
+        let invalid = [
+            (
+                "Binance non-finite price",
+                parse_binance_ticker(
+                    &pair("binance:spot:BTC/USDT"),
+                    r#"{"lastPrice":"NaN","priceChangePercent":"1.0"}"#,
+                ),
+            ),
+            (
+                "Binance non-finite change",
+                parse_binance_ticker(
+                    &pair("binance:spot:BTC/USDT"),
+                    r#"{"lastPrice":"100","priceChangePercent":"inf"}"#,
+                ),
+            ),
+            (
+                "Coinbase zero price",
+                parse_coinbase_stats(
+                    &pair("coinbase:spot:BTC/USD"),
+                    r#"{"open":"100","last":"0"}"#,
+                ),
+            ),
+            (
+                "Coinbase zero baseline",
+                parse_coinbase_stats(
+                    &pair("coinbase:spot:BTC/USD"),
+                    r#"{"open":"0","last":"100"}"#,
+                ),
+            ),
+            (
+                "OKX negative price",
+                parse_okx_ticker(
+                    &pair("okx:spot:ETH/USDT"),
+                    r#"{"code":"0","msg":"","data":[{"last":"-1","open24h":"100"}]}"#,
+                ),
+            ),
+            (
+                "OKX overflowing change",
+                parse_okx_ticker(
+                    &pair("okx:spot:ETH/USDT"),
+                    r#"{"code":"0","msg":"","data":[{"last":"1e308","open24h":"1e-308"}]}"#,
+                ),
+            ),
+            (
+                "Hyperliquid non-finite baseline",
+                parse_hyperliquid_ticker(
+                    &pair("hyperliquid:perp:BTC/USDC"),
+                    r#"[{"universe":[{"name":"BTC"}]},[{"markPx":"100","prevDayPx":"NaN"}]]"#,
+                ),
+            ),
+        ];
+
+        for (label, result) in invalid {
+            assert!(result.is_err(), "{label} should be rejected");
+        }
     }
 
     #[test]
@@ -1284,6 +1757,63 @@ mod tests {
                 candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
             ]
         );
+    }
+
+    #[test]
+    fn candle_validation_rejects_invalid_ohlc_tables() {
+        let valid = vec![
+            candle(1, 100.0, 105.0, 95.0, 101.5),
+            candle(2, 101.5, 106.0, 99.0, 104.25),
+        ];
+        assert!(ensure_usable_candles(&valid).is_ok());
+
+        let invalid = vec![
+            ("too few rows", vec![valid[0]]),
+            (
+                "zero timestamp",
+                vec![candle(0, 100.0, 105.0, 95.0, 101.5), valid[1]],
+            ),
+            (
+                "NaN open",
+                vec![candle(1, f64::NAN, 105.0, 95.0, 101.5), valid[1]],
+            ),
+            (
+                "infinite high",
+                vec![candle(1, 100.0, f64::INFINITY, 95.0, 101.5), valid[1]],
+            ),
+            (
+                "zero low",
+                vec![candle(1, 100.0, 105.0, 0.0, 101.5), valid[1]],
+            ),
+            (
+                "negative close",
+                vec![candle(1, 100.0, 105.0, 95.0, -1.0), valid[1]],
+            ),
+            (
+                "low above body",
+                vec![candle(1, 100.0, 105.0, 100.5, 101.5), valid[1]],
+            ),
+            (
+                "high below body",
+                vec![candle(1, 100.0, 101.0, 95.0, 101.5), valid[1]],
+            ),
+            (
+                "low above high",
+                vec![candle(1, 100.0, 99.0, 101.0, 100.0), valid[1]],
+            ),
+            (
+                "duplicate timestamps",
+                vec![valid[0], candle(1, 101.5, 106.0, 99.0, 104.25)],
+            ),
+            ("descending timestamps", vec![valid[1], valid[0]]),
+        ];
+
+        for (label, candles) in invalid {
+            assert!(
+                ensure_usable_candles(&candles).is_err(),
+                "{label} should be rejected"
+            );
+        }
     }
 
     #[test]
@@ -1494,6 +2024,76 @@ mod tests {
                 "okx:spot:BTC/USDT"
             ]
         );
+    }
+
+    #[test]
+    fn partial_symbol_catalog_keeps_source_warnings() {
+        let warning = SymbolCatalogWarning {
+            source: MarketDataSource::Okx,
+            message: "timeout".to_string(),
+        };
+        let fetched = finish_symbol_catalog_fetch(
+            vec![vec![catalog_entry(
+                MarketDataSource::Binance,
+                MarketType::Spot,
+                "BTC",
+                "USDT",
+            )
+            .unwrap()]],
+            vec![warning.clone()],
+        )
+        .unwrap();
+
+        assert_eq!(fetched.catalog.entries.len(), 1);
+        assert_eq!(fetched.warnings, vec![warning]);
+    }
+
+    #[test]
+    fn empty_symbol_catalog_reports_every_source_warning() {
+        let error = finish_symbol_catalog_fetch(
+            Vec::new(),
+            vec![
+                SymbolCatalogWarning {
+                    source: MarketDataSource::Binance,
+                    message: "blocked".to_string(),
+                },
+                SymbolCatalogWarning {
+                    source: MarketDataSource::Okx,
+                    message: "timeout".to_string(),
+                },
+            ],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("Binance: blocked"));
+        assert!(error.contains("OKX: timeout"));
+    }
+
+    #[test]
+    fn empty_symbol_catalog_without_source_warnings_has_a_useful_error() {
+        let error = finish_symbol_catalog_fetch(Vec::new(), Vec::new())
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "all market sources returned an empty symbol catalog");
+    }
+
+    #[test]
+    fn empty_source_catalog_is_reported_as_a_partial_warning() {
+        let mut catalogs = Vec::new();
+        let mut warnings = Vec::new();
+        collect_symbol_catalog_result(
+            MarketDataSource::Coinbase,
+            Ok(Vec::new()),
+            &mut catalogs,
+            &mut warnings,
+        );
+
+        assert!(catalogs.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].source, MarketDataSource::Coinbase);
+        assert!(warnings[0].message.contains("no supported market pairs"));
     }
 
     #[test]

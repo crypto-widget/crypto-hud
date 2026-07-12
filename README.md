@@ -211,7 +211,10 @@ mise run run-app
   Releases are produced with the local Windows scripts. The package workflow
   creates a zip, checksum, and release manifest in `dist/`. Production packages
   must be Authenticode signed; the smoke scripts use an explicit local-only
-  unsigned override.
+  unsigned override. Bundled widgets are installed under `plugins/`; preview
+  images and the application icon are installed under `resources/previews/`
+  and `resources/icon.ico`, with every shipped file bound to the signed release
+  integrity metadata.
 
   ```powershell
   cargo test --locked --workspace
@@ -219,9 +222,24 @@ mise run run-app
   powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
   powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
   powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
-  # Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) first.
+  # Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) and
+  # CRYPTO_HUD_SIGN_CERT_PASSWORD first. Signed packages always rebuild.
   powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
   ```
+
+  For a production first install, verify the installer before executing any of
+  its code. Confirm that `Status` is `Valid` and that `SignerCertificate.Subject`
+  matches the publisher identity published with the release, then use
+  `AllSigned` rather than bypassing PowerShell policy:
+
+  ```powershell
+  Get-AuthenticodeSignature -LiteralPath .\install.ps1 | Format-List Status,SignerCertificate
+  powershell -ExecutionPolicy AllSigned -File .\install.ps1
+  ```
+
+  `-ExecutionPolicy Bypass` and `CRYPTO_HUD_ALLOW_UNSIGNED_SMOKE=1` are reserved
+  for the repository's isolated unsigned smoke tests; they are not production
+  installation options.
 </details>
 
 ## Roadmap

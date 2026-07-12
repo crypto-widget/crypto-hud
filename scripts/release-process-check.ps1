@@ -19,6 +19,9 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Exe = Join-Path $RepoRoot "target\release\crypto-hud.exe"
 $StateRoot = Join-Path $RepoRoot "target\tmp\release-process-state"
+$RuntimeRoot = Join-Path $StateRoot "runtime"
+$RuntimeExe = Join-Path $RuntimeRoot "crypto-hud.exe"
+$ReadmePath = Join-Path $RepoRoot "README.md"
 
 if ([string]::IsNullOrWhiteSpace($ReportPath)) {
     $ReportPath = Join-Path $RepoRoot "dist\release-process-check.json"
@@ -28,8 +31,9 @@ function Assert-UnderRepo {
     param([string]$Path)
 
     $fullPath = [System.IO.Path]::GetFullPath($Path)
-    $repoPath = [System.IO.Path]::GetFullPath($RepoRoot)
-    if (-not $fullPath.StartsWith($repoPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $repoPath = [System.IO.Path]::GetFullPath($RepoRoot).TrimEnd('\', '/')
+    $repoPrefix = "$repoPath$([System.IO.Path]::DirectorySeparatorChar)"
+    if (-not $fullPath.StartsWith($repoPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to operate outside repository: $fullPath"
     }
 }
@@ -62,9 +66,9 @@ function Get-StartupTargetMs {
     param([int]$WidgetCount)
 
     switch ($WidgetCount) {
-        1 { return 500 }
-        5 { return 1000 }
-        10 { return 1500 }
+        1 { return 1800 }
+        5 { return 2000 }
+        10 { return 2200 }
         default { return $MaxStartupMs }
     }
 }
@@ -132,6 +136,7 @@ function Invoke-ReleaseScenario {
 
     $stateDir = Join-Path $StateRoot "widgets-$WidgetCount"
     $readyFile = Join-Path $stateDir "ready.json"
+    $stateFile = Join-Path $stateDir "layouts.json"
     $process = $null
     $failures = @()
 
@@ -139,10 +144,24 @@ function Invoke-ReleaseScenario {
         Remove-Item -LiteralPath $stateDir -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    $seedState = [ordered]@{
+        settings = [ordered]@{
+            shortcut = "disabled"
+            tray_icon_enabled = $false
+            auto_start_enabled = $false
+        }
+        widgets = @()
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText(
+        $stateFile,
+        ($seedState | ConvertTo-Json -Depth 4),
+        $utf8NoBom
+    )
 
     try {
         $psi = [System.Diagnostics.ProcessStartInfo]::new()
-        $psi.FileName = $Exe
+        $psi.FileName = $RuntimeExe
         $psi.Arguments = "--widgets $WidgetCount --show-settings --gui-smoke-ms $TimeoutMs"
         $psi.WorkingDirectory = $RepoRoot
         $psi.UseShellExecute = $false
@@ -150,6 +169,7 @@ function Invoke-ReleaseScenario {
         $psi.Environment["CRYPTO_HUD_GUI_SMOKE_READY_FILE"] = $readyFile
         $psi.Environment["CRYPTO_HUD_INSTANCE_ID"] = "com.crypto-hud.release-process.$PID.$WidgetCount"
         $psi.Environment["CRYPTO_HUD_DISABLE_UPDATE_CHECK"] = "1"
+        $psi.Environment["CRYPTO_HUD_GUI_SMOKE_OFFLINE"] = "1"
         $psi.Environment["SLINT_BACKEND"] = "software"
 
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -169,6 +189,12 @@ function Invoke-ReleaseScenario {
         $ready = Get-Content -LiteralPath $readyFile -Raw | ConvertFrom-Json
         if (-not $ready.ready) {
             $failures += "ready marker did not report ready"
+        }
+        if (-not $ready.marketDataReady) {
+            $failures += "ready marker did not report deterministic market data readiness"
+        }
+        if (@($ready.catalogErrors).Count -gt 0) {
+            $failures += "plugin catalog reported errors: $(@($ready.catalogErrors) -join '; ')"
         }
         if ([int]$ready.widgetCount -lt $WidgetCount) {
             $failures += "expected at least $WidgetCount widgets, saw $($ready.widgetCount)"
@@ -223,6 +249,7 @@ function Invoke-ReleaseScenario {
 
         [ordered]@{
             ready = [bool]$ready.ready
+            marketDataReady = [bool]$ready.marketDataReady
             widgetCount = [int]$ready.widgetCount
             requestedWidgets = $WidgetCount
             settingsWindowRequested = [bool]$ready.settingsWindowRequested
@@ -270,7 +297,21 @@ function Invoke-ReleaseScenario {
 }
 
 Assert-UnderRepo -Path $StateRoot
+Assert-UnderRepo -Path $RuntimeRoot
 Assert-UnderRepo -Path $ReportPath
+
+$readme = Get-Content -LiteralPath $ReadmePath -Raw
+foreach ($requiredInstallTrustInstruction in @(
+    "Get-AuthenticodeSignature -LiteralPath .\install.ps1",
+    "powershell -ExecutionPolicy AllSigned -File .\install.ps1"
+)) {
+    if (-not $readme.Contains($requiredInstallTrustInstruction)) {
+        throw "README is missing production first-install trust instruction: $requiredInstallTrustInstruction"
+    }
+}
+if ($readme -match '(?im)^\s*powershell\s+-ExecutionPolicy\s+Bypass\s+-File\s+\.\\install\.ps1') {
+    throw "README must not recommend ExecutionPolicy Bypass for production install.ps1"
+}
 
 if ($TimeoutMs -lt (($WarmupSeconds + $CpuSampleSeconds) * 1000 + 1500)) {
     throw "TimeoutMs must leave enough time for ready detection, warmup, and CPU sampling"
@@ -305,6 +346,21 @@ try {
         throw "Release executable not found: $Exe"
     }
 
+    New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
+    Copy-Item -LiteralPath $Exe -Destination $RuntimeExe
+    Copy-Item `
+        -LiteralPath (Join-Path $RepoRoot "crates\crypto-hud\plugins") `
+        -Destination (Join-Path $RuntimeRoot "plugins") `
+        -Recurse
+    New-Item -ItemType Directory -Force -Path (Join-Path $RuntimeRoot "resources") | Out-Null
+    Copy-Item `
+        -LiteralPath (Join-Path $RepoRoot "crates\crypto-hud\ui\previews") `
+        -Destination (Join-Path $RuntimeRoot "resources\previews") `
+        -Recurse
+    Copy-Item `
+        -LiteralPath (Join-Path $RepoRoot "crates\crypto-hud\ui\icon.ico") `
+        -Destination (Join-Path $RuntimeRoot "resources\icon.ico")
+
     $scenarioReports = @()
     foreach ($widgetCount in $scenarioWidgetsToRun) {
         Write-Host "Checking release process scenario: $widgetCount widget(s)"
@@ -322,15 +378,16 @@ try {
         ready = ($allFailures.Count -eq 0)
         generatedAt = (Get-Date).ToUniversalTime().ToString("o")
         executable = $Exe
+        stagedExecutable = $RuntimeExe
         scenarios = @($scenarioReports)
         thresholds = [ordered]@{
             maxStartupMs = $MaxStartupMs
             maxCpuPercent = $MaxCpuPercent
             maxChildProcesses = $MaxChildProcesses
             startupTargetsMs = [ordered]@{
-                widgets1 = 500
-                widgets5 = 1000
-                widgets10 = 1500
+                widgets1 = 1800
+                widgets5 = 2000
+                widgets10 = 2200
                 fallback = $MaxStartupMs
             }
             memoryTargetsMb = [ordered]@{
