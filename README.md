@@ -65,6 +65,11 @@ matters.
   </tr>
 </table>
 
+<p align="center">
+  <strong>Measured in the default test: 0.070% average CPU · about 20 MiB private memory</strong><br>
+  <sub>One widget · 3 market pairs · 5-second refresh · <a href="docs/performance-reports/README.md">Full performance report →</a></sub>
+</p>
+
 ## Widget gallery
 
 Choose a compact ticker, a richer chart, or a multi-market view. Built-in

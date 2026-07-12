@@ -50,6 +50,10 @@ widget ở vị trí thuận mắt, tiếp tục công việc và chỉ liếc n
 ## Được thiết kế để chạy yên lặng trong nền
 
 - **Native và nhẹ**: Rust + Slint, không dùng Electron, Tauri, WebView hay trình duyệt nhúng.
+- **Mức sử dụng nhẹ đã đo**: trong thử nghiệm mặc định với một widget, 3 cặp thị
+  trường và chu kỳ làm mới 5 giây, mức trung bình khi chạy ổn định là
+  **0,070% CPU** và khoảng **20 MiB bộ nhớ riêng của tiến trình**.
+  [Xem báo cáo hiệu năng đầy đủ](docs/performance-reports/README.vi.md).
 - **Nắm bắt trong một ánh nhìn**: widget có thể kéo, luôn nổi và giữ số liệu quan trọng trong tầm mắt.
 - **Ưu tiên cục bộ**: bố cục và tùy chọn nằm trên máy của bạn; không cần tài khoản hay API Key.
 - **Ẩn khi cần tập trung**: nhấn <kbd>Alt</kbd> + <kbd>C</kbd> để ẩn hoặc khôi phục mọi widget.

@@ -50,6 +50,10 @@ for mais confortável, continue trabalhando e olhe o mercado apenas quando preci
 ## Feito para ficar em segundo plano
 
 - **Nativo e leve**: Rust + Slint, sem Electron, Tauri, WebView ou navegador integrado.
+- **Uso leve medido**: no teste padrão, com um widget, 3 pares e atualização a
+  cada 5 segundos, a média estável foi de **0,070% de CPU** e cerca de
+  **20 MiB de memória privada do processo**.
+  [Veja o relatório completo de desempenho](docs/performance-reports/README.pt-BR.md).
 - **Informação em um olhar**: widgets móveis e sempre visíveis mantêm os números importantes por perto.
 - **Local primeiro**: layout e preferências ficam no seu computador; sem conta ou API Key.
 - **Silencioso quando quiser**: oculte ou restaure tudo com <kbd>Alt</kbd> + <kbd>C</kbd>.

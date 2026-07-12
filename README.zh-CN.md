@@ -64,6 +64,11 @@ Crypto HUD 是一款轻量、本地优先的桌面行情工具，适合想关注
   </tr>
 </table>
 
+<p align="center">
+  <strong>默认配置实测：平均 CPU 约 0.070% · 进程私有内存约 20 MiB</strong><br>
+  <sub>单个组件 · 3 个币对 · 5 秒刷新 · <a href="docs/performance-reports/README.zh-CN.md">查看完整性能报告 →</a></sub>
+</p>
+
 ## 组件效果
 
 你可以选择极简行情条、完整图表卡片或多币种看板。内置组件和自定义组件
