@@ -249,11 +249,11 @@ mod tests {
               "prerelease": {prerelease},
               "assets": [
                 {{
-                  "name": "crypto-hud-{tag}-windows-x64.zip",
+                  "name": "crypto-hud-{tag}-windows-x64-portable.zip",
                   "browser_download_url": "https://example.test/{tag}.zip"
                 }},
                 {{
-                  "name": "crypto-hud-{tag}-windows-x64.zip.sha256",
+                  "name": "crypto-hud-{tag}-windows-x64-portable.zip.sha256",
                   "browser_download_url": "https://example.test/{tag}.zip.sha256"
                 }}
               ]
@@ -271,11 +271,11 @@ mod tests {
         assert_eq!(update.version, Version::parse("0.1.1").unwrap());
         assert_eq!(
             update.asset_name.as_deref(),
-            Some("crypto-hud-v0.1.1-windows-x64.zip")
+            Some("crypto-hud-v0.1.1-windows-x64-portable.zip")
         );
         assert_eq!(
             update.checksum_asset_name.as_deref(),
-            Some("crypto-hud-v0.1.1-windows-x64.zip.sha256")
+            Some("crypto-hud-v0.1.1-windows-x64-portable.zip.sha256")
         );
     }
 

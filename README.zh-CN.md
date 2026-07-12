@@ -204,10 +204,29 @@ mise run run-app
   <summary><strong>Windows 发布打包</strong></summary>
   <br>
 
-  发布包由本地 Windows 脚本生成。打包流程会在 `dist/` 中创建 zip、校验和与
-  release manifest。生产包必须使用 Authenticode 签名；smoke 脚本仅通过明确的
-  本地开发开关使用未签名包。内置组件安装到 `plugins/`；预览图和应用图标分别
-  安装到 `resources/previews/` 与 `resources/icon.ico`。所有随包文件都由已签名的
+  推送与 workspace 版本完全一致的 `vX.Y.Z` tag 后，
+  `.github/workflows/release-portable.yml` 会校验 tag 对应的源码，构建未签名的
+  Windows x64 便携 ZIP，生成 SHA-256 文件，并把两者发布到 GitHub Release。
+  便携包不包含安装、卸载或更新 PowerShell 脚本。它无需安装，但应用状态仍写入
+  正常的用户配置目录；启用开机启动前，应先把 ZIP 解压到固定目录。
+
+  ```powershell
+  # 仅在版本提交已进入默认分支且 CI 通过后执行。
+  git tag -a v0.9.8 -m "Release v0.9.8"
+  git push origin v0.9.8
+  ```
+
+  未使用 Authenticode 签名时，Windows 可能显示 SmartScreen 警告。SHA-256
+  可以发现下载内容被改动，但不能证明发布者身份。本地可用同一入口生成便携包：
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v0.9.8
+  ```
+
+  现有可安装包流程保持独立：它会在 `dist/` 中创建 zip、校验和与已签名的
+  release manifest。生产可安装包必须使用 Authenticode 签名；smoke 脚本仅通过
+  明确的本地开发开关使用未签名包。内置组件安装到 `plugins/`；预览图和应用图标
+  分别安装到 `resources/previews/` 与 `resources/icon.ico`，所有随包文件都由已签名的
   发布完整性元数据绑定。
 
   ```powershell

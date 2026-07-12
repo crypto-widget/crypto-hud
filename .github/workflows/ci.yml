@@ -71,6 +71,7 @@ jobs:
         shell: pwsh
         run: |
           & .\scripts\package-smoke.ps1 -Version v9999.0.1-smoke
+          & .\scripts\portable-package-smoke.ps1 -Version v9999.0.1-smoke -SkipBuild
           & .\scripts\update-smoke.ps1 -SkipBuild
 
   toolkit-crates:

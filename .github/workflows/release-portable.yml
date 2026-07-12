@@ -1,0 +1,160 @@
+name: Release portable Windows package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-portable-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-portable:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --component rustfmt,clippy
+
+      - name: Select pinned Rust toolchain
+        run: rustup override set 1.96.0
+
+      - name: Validate release tag
+        shell: pwsh
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cargo = Get-Content -LiteralPath .\Cargo.toml -Raw
+          $match = [regex]::Match(
+            $cargo,
+            '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"'
+          )
+          if (-not $match.Success) {
+            throw "Could not read the workspace version"
+          }
+          $workspaceVersion = $match.Groups[1].Value
+          $expectedTag = "v$workspaceVersion"
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$' -or
+              $env:RELEASE_TAG -ne $expectedTag) {
+            throw "Release tag $env:RELEASE_TAG must exactly match workspace version $expectedTag"
+          }
+
+          $appManifest = Get-Content -LiteralPath .\crates\crypto-hud\ui\app.manifest -Raw
+          $appVersionMatch = [regex]::Match(
+            $appManifest,
+            '(?s)<assemblyIdentity\b[^>]*\bversion="([^"]+)"'
+          )
+          $expectedAppVersion = "$($workspaceVersion.Split('-')[0]).0"
+          if (-not $appVersionMatch.Success -or
+              $appVersionMatch.Groups[1].Value -ne $expectedAppVersion) {
+            throw "Windows app manifest version must be $expectedAppVersion"
+          }
+
+          git merge-base --is-ancestor HEAD "origin/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tagged commit must be reachable from the default branch $env:DEFAULT_BRANCH"
+          }
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked --workspace --all-targets --no-fail-fast
+
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: Audit locked dependencies
+        run: cargo audit
+
+      - name: Check release process
+        shell: pwsh
+        run: .\scripts\release-process-check.ps1
+
+      - name: Smoke-test portable packaging
+        shell: pwsh
+        run: .\scripts\portable-package-smoke.ps1 -SkipBuild
+
+      - name: Build tagged portable package
+        shell: pwsh
+        run: .\scripts\package-portable-windows.ps1 -Version "${{ github.ref_name }}" -SkipBuild
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto-hud-${{ github.ref_name }}-windows-x64
+          path: |
+            dist/crypto-hud-${{ github.ref_name }}-windows-x64-portable.zip
+            dist/crypto-hud-${{ github.ref_name }}-windows-x64-portable.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    needs: build-portable
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download verified release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: crypto-hud-${{ github.ref_name }}-windows-x64
+          path: dist
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $savedPreference = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          gh release view $env:RELEASE_TAG --repo $env:GH_REPO *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+          $ErrorActionPreference = $savedPreference
+          if ($releaseExists) {
+            throw "Release $env:RELEASE_TAG already exists; refusing to replace published assets"
+          }
+
+          $zip = "dist/crypto-hud-$env:RELEASE_TAG-windows-x64-portable.zip"
+          $checksum = "$zip.sha256"
+          foreach ($asset in @($zip, $checksum)) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+              throw "Missing release asset: $asset"
+            }
+          }
+
+          $arguments = @(
+            "release", "create", $env:RELEASE_TAG,
+            $zip, $checksum,
+            "--repo", $env:GH_REPO,
+            "--verify-tag",
+            "--title", "Crypto HUD $env:RELEASE_TAG",
+            "--notes", "Unsigned Windows x64 portable build. Extract the ZIP to a fixed directory before running it or enabling autostart. The SHA-256 file verifies download integrity but does not authenticate the publisher.",
+            "--generate-notes"
+          )
+          if ($env:RELEASE_TAG.Contains("-")) {
+            $arguments += "--prerelease"
+          }
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release creation failed with code $LASTEXITCODE"
+          }

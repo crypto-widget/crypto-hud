@@ -213,12 +213,34 @@ mise run run-app
   <summary><strong>Windows release packaging</strong></summary>
   <br>
 
-  Releases are produced with the local Windows scripts. The package workflow
-  creates a zip, checksum, and release manifest in `dist/`. Production packages
-  must be Authenticode signed; the smoke scripts use an explicit local-only
+  Pushing a `vX.Y.Z` tag that exactly matches the workspace version triggers
+  `.github/workflows/release-portable.yml`. It validates the tagged source,
+  builds an unsigned Windows x64 portable zip, creates its SHA-256 file, and
+  publishes both assets in a GitHub Release. The portable archive contains no
+  installer, uninstaller, or update PowerShell scripts. It is installation-free,
+  but application state still uses the normal user profile directory. Extract
+  it to a fixed directory before enabling autostart.
+
+  ```powershell
+  # Run this only after the version commit is on the default branch and CI passes.
+  git tag -a v0.9.8 -m "Release v0.9.8"
+  git push origin v0.9.8
+  ```
+
+  Without Authenticode signing, Windows may show a SmartScreen warning. The
+  SHA-256 file detects a changed download but does not authenticate its publisher.
+  A local copy of the same portable package can be produced with:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v0.9.8
+  ```
+
+  The existing installable package path remains separate. It creates a zip,
+  checksum, and signed release manifest in `dist/`. Production installable
+  packages must be Authenticode signed; smoke scripts use an explicit local-only
   unsigned override. Bundled widgets are installed under `plugins/`; preview
   images and the application icon are installed under `resources/previews/`
-  and `resources/icon.ico`, with every shipped file bound to the signed release
+  and `resources/icon.ico`, with every shipped file bound to signed release
   integrity metadata.
 
   ```powershell
