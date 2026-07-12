@@ -229,7 +229,7 @@ mise run run-app
   powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
   # Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) and
   # CRYPTO_HUD_SIGN_CERT_PASSWORD first. Signed packages always rebuild.
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.7 -Sign
+  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.8 -Sign
   ```
 
   For a production first install, verify the installer before executing any of
