@@ -398,20 +398,38 @@ fn validate_default_symbols(symbols: &[String], min: usize, limit: usize) -> Res
 }
 
 pub fn validate_relative_path(raw: &str, label: &str) -> Result<()> {
-    let path = Path::new(raw);
     if raw.trim().is_empty() {
         bail!("{label} must be non-empty");
     }
-    if path.is_absolute() {
-        bail!("{label} must be relative");
-    }
-    if raw.contains("..")
-        || path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
+
+    // Validate both separators explicitly so a manifest produced on another
+    // platform cannot smuggle a Windows rooted or drive-relative path through
+    // a host whose `Path` parser gives it different semantics.
+    if raw.starts_with(['/', '\\'])
+        || raw
+            .as_bytes()
+            .get(1)
+            .is_some_and(|separator| *separator == b':')
     {
-        bail!("{label} must not contain ..");
+        bail!("{label} must be a relative path made of normal components");
     }
+
+    for component in raw.split(['/', '\\']) {
+        match component {
+            ".." => bail!("{label} must not contain .."),
+            "." => bail!("{label} must not contain . components"),
+            "" => bail!("{label} must contain only normal path components"),
+            _ => {}
+        }
+    }
+
+    if Path::new(raw)
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        bail!("{label} must be a relative path made of normal components");
+    }
+
     Ok(())
 }
 
@@ -2006,6 +2024,71 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("must not contain .."));
+    }
+
+    #[test]
+    fn rejects_non_normal_manifest_entry_paths_on_every_platform() {
+        for entry in [
+            r"\Windows\main.slint",
+            r"C:main.slint",
+            r"C:\Windows\main.slint",
+            "/usr/share/main.slint",
+            "./ui/main.slint",
+            "ui/./main.slint",
+            "ui//main.slint",
+        ] {
+            let json = valid_manifest_json().replace(
+                r#""entry": "ui/main.slint""#,
+                &format!("\"entry\": {}", serde_json::to_string(entry).unwrap()),
+            );
+
+            let error = parse_manifest(&json).unwrap_err().to_string();
+            assert!(
+                !error.contains("failed to parse plugin manifest"),
+                "renderer.entry test for {entry:?} must reach path validation: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_normal_preview_image_paths_on_every_platform() {
+        for image in [
+            r"\Windows\preview.png",
+            r"C:preview.png",
+            r"C:\Windows\preview.png",
+            "/tmp/preview.png",
+            "../preview.png",
+            "ui/./preview.png",
+        ] {
+            let json = valid_manifest_json().replace(
+                r#""dataRequirements": ["#,
+                &format!(
+                    "\"previewImages\": [{}],\n            \"dataRequirements\": [",
+                    serde_json::to_string(image).unwrap()
+                ),
+            );
+
+            assert!(
+                parse_manifest(&json).is_err(),
+                "previewImages should reject {image:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_nested_manifest_paths_with_normal_components() {
+        let json = valid_manifest_json()
+            .replace("ui/main.slint", "ui/cards/main.slint")
+            .replace(
+                r#""dataRequirements": ["#,
+                r#""previewImages": ["ui/previews/card..light.png"],
+            "dataRequirements": ["#,
+            );
+
+        let manifest = parse_manifest(&json).unwrap();
+
+        assert_eq!(manifest.renderer.entry, "ui/cards/main.slint");
+        assert_eq!(manifest.preview_images, vec!["ui/previews/card..light.png"]);
     }
 
     #[test]

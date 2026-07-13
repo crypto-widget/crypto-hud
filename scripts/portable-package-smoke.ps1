@@ -45,7 +45,7 @@ try {
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"
     }
-    & $PowerShellExe @packageArgs
+    & $PowerShellExe -NoProfile @packageArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Portable package script failed with code $LASTEXITCODE"
     }

@@ -303,13 +303,13 @@ Assert-UnderRepo -Path $ReportPath
 $readme = Get-Content -LiteralPath $ReadmePath -Raw
 foreach ($requiredInstallTrustInstruction in @(
     "Get-AuthenticodeSignature -LiteralPath .\install.ps1",
-    "powershell -ExecutionPolicy AllSigned -File .\install.ps1"
+    "powershell -NoProfile -ExecutionPolicy AllSigned -File .\install.ps1"
 )) {
     if (-not $readme.Contains($requiredInstallTrustInstruction)) {
         throw "README is missing production first-install trust instruction: $requiredInstallTrustInstruction"
     }
 }
-if ($readme -match '(?im)^\s*powershell\s+-ExecutionPolicy\s+Bypass\s+-File\s+\.\\install\.ps1') {
+if ($readme -match '(?im)^\s*powershell\s+(?:-NoProfile\s+)?-ExecutionPolicy\s+Bypass\s+-File\s+\.\\install\.ps1') {
     throw "README must not recommend ExecutionPolicy Bypass for production install.ps1"
 }
 

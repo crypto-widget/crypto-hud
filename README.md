@@ -203,9 +203,9 @@ mise run run-app
   ```
 
   ```powershell
-  powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
-  powershell -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
-  powershell -ExecutionPolicy Bypass -File .\scripts\single-instance-smoke.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\single-instance-smoke.ps1
   ```
 </details>
 
@@ -232,7 +232,7 @@ mise run run-app
   A local copy of the same portable package can be produced with:
 
   ```powershell
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v0.9.8
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v0.9.8
   ```
 
   The existing installable package path remains separate. It creates a zip,
@@ -246,12 +246,12 @@ mise run run-app
   ```powershell
   cargo test --locked --workspace
   cargo audit
-  powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
-  powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
   # Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) and
   # CRYPTO_HUD_SIGN_CERT_PASSWORD first. Signed packages always rebuild.
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.8 -Sign
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.8 -Sign
   ```
 
   For a production first install, verify the installer before executing any of
@@ -261,7 +261,7 @@ mise run run-app
 
   ```powershell
   Get-AuthenticodeSignature -LiteralPath .\install.ps1 | Format-List Status,SignerCertificate
-  powershell -ExecutionPolicy AllSigned -File .\install.ps1
+  powershell -NoProfile -ExecutionPolicy AllSigned -File .\install.ps1
   ```
 
   `-ExecutionPolicy Bypass` and `CRYPTO_HUD_ALLOW_UNSIGNED_SMOKE=1` are reserved

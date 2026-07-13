@@ -71,14 +71,21 @@ Manifest requirements:
 - `version` must be valid SemVer.
 - `hostApiVersion` must match the host API, for example `>=0.1.0, <1.0.0`.
 - `renderer.kind` must be `slint`.
-- `renderer.entry` must be a relative path and must not contain `..`.
+- `renderer.entry` must contain only ordinary relative path components. Absolute, rooted,
+  drive-relative, `.`, and `..` components are rejected.
 - `renderer.component` must be the exported component name in the entry Slint file.
 - `permissions.network` and `permissions.filesystem` must both be `false`.
 - `defaultSize` must be between `120x80` and `1200x900`.
 - `minSymbolLimit` and `symbolLimit` must be between `1` and `8`, with `minSymbolLimit <= symbolLimit`.
 - `defaultSymbols` is optional. If present, its length must satisfy the symbol limits and every entry must be a valid market pair.
 - `previewImages` is optional. It may contain up to 5 images and only supports `png`, `jpg`, and `jpeg`.
+  Each entry follows the same strict relative-path rule as `renderer.entry` and must resolve inside
+  the plugin directory.
 - `dataRequirements` currently supports `market.price` and `market.candles`.
+
+All `.slint` imports and `@image-url()` resources must resolve inside the plugin directory. Image
+resources support `png`, `jpg`, `jpeg`, and `svg`, with a 1 MiB limit per asset. File imports other
+than `.slint` are rejected; custom fonts and other external filesystem resources are not supported.
 
 Pairs without an explicit source are normalized as Binance spot pairs quoted in USDT. For example, `BTC` is equivalent to `binance:spot:BTC/USDT`.
 

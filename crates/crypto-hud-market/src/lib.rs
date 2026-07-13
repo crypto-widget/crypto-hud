@@ -1,6 +1,8 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    io::Read,
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError, TryRecvError},
         Arc, Mutex,
     },
@@ -20,6 +22,7 @@ const COINBASE_EXCHANGE_BASE_URL: &str = "https://api.exchange.coinbase.com";
 const OKX_BASE_URL: &str = "https://www.okx.com";
 const HYPERLIQUID_BASE_URL: &str = "https://api.hyperliquid.xyz";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_MARKET_RESPONSE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CONCURRENT_PAIR_FETCHES: usize = 4;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(60);
@@ -140,6 +143,7 @@ enum MarketFeedWait {
 pub struct MarketFeed {
     events: mpsc::Receiver<MarketEvent>,
     control: mpsc::Sender<MarketFeedControl>,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl MarketFeed {
@@ -156,6 +160,7 @@ impl MarketFeed {
         Self {
             events: event_receiver,
             control,
+            cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -173,6 +178,7 @@ impl MarketFeed {
 
 impl Drop for MarketFeed {
     fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
         let _ = self.control.send(MarketFeedControl::Stop);
     }
 }
@@ -180,11 +186,13 @@ impl Drop for MarketFeed {
 pub fn spawn_market_feed(config: Arc<Mutex<MarketFeedConfig>>) -> MarketFeed {
     let (event_sender, events) = mpsc::channel();
     let (control, control_receiver) = mpsc::channel();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_cancelled = Arc::clone(&cancelled);
     let worker_sender = event_sender.clone();
     if let Err(error) = thread::Builder::new()
         .name("crypto-hud-market-feed".to_string())
         .spawn(move || {
-            run_market_feed(config, worker_sender, control_receiver);
+            run_market_feed(config, worker_sender, control_receiver, worker_cancelled);
         })
     {
         let _ = event_sender.send(MarketEvent::Error(format!(
@@ -193,13 +201,18 @@ pub fn spawn_market_feed(config: Arc<Mutex<MarketFeedConfig>>) -> MarketFeed {
     }
     drop(event_sender);
 
-    MarketFeed { events, control }
+    MarketFeed {
+        events,
+        control,
+        cancelled,
+    }
 }
 
 fn run_market_feed(
     shared_config: Arc<Mutex<MarketFeedConfig>>,
     sender: mpsc::Sender<MarketEvent>,
     control: mpsc::Receiver<MarketFeedControl>,
+    cancelled: Arc<AtomicBool>,
 ) {
     let Ok(mut agent) = build_agent(None) else {
         let _ = sender.send(MarketEvent::Error(
@@ -212,7 +225,7 @@ fn run_market_feed(
     let mut consecutive_failures = 0_u32;
 
     'feed: loop {
-        if market_feed_stop_requested(&control) {
+        if market_feed_stop_requested(&control, &cancelled) {
             return;
         }
         let config = market_feed_config_snapshot(&shared_config);
@@ -245,18 +258,16 @@ fn run_market_feed(
         let cycle_succeeded = if let Some(error) = agent_error {
             send_market_error(&sender, error.to_string())
         } else {
-            let mut interrupted_by_stop = false;
-            let mut interrupted_by_config = false;
-            let fetch = fetch_symbols_interruptible(&agent, &symbols, &mut candle_cache, || {
-                interrupted_by_stop = market_feed_stop_requested(&control);
-                interrupted_by_config =
-                    !interrupted_by_stop && market_feed_config_snapshot(&shared_config) != config;
-                interrupted_by_stop || interrupted_by_config
-            });
-            if interrupted_by_stop {
+            let interrupted = || {
+                cancelled.load(Ordering::Acquire)
+                    || market_feed_config_snapshot(&shared_config) != config
+            };
+            let fetch =
+                fetch_symbols_interruptible(&agent, &symbols, &mut candle_cache, &interrupted);
+            if cancelled.load(Ordering::Acquire) {
                 return;
             }
-            if interrupted_by_config {
+            if market_feed_config_snapshot(&shared_config) != config {
                 consecutive_failures = 0;
                 continue 'feed;
             }
@@ -279,7 +290,7 @@ fn run_market_feed(
         } else {
             failure_backoff(refresh_interval, consecutive_failures)
         };
-        match wait_for_market_feed(&control, &shared_config, &config, wait) {
+        match wait_for_market_feed(&control, &cancelled, &shared_config, &config, wait) {
             MarketFeedWait::Elapsed => {}
             MarketFeedWait::ConfigChanged => {
                 consecutive_failures = 0;
@@ -320,22 +331,33 @@ fn market_feed_config_snapshot(config: &Arc<Mutex<MarketFeedConfig>>) -> MarketF
     }
 }
 
-fn market_feed_stop_requested(control: &mpsc::Receiver<MarketFeedControl>) -> bool {
-    matches!(
+fn market_feed_stop_requested(
+    control: &mpsc::Receiver<MarketFeedControl>,
+    cancelled: &AtomicBool,
+) -> bool {
+    if cancelled.load(Ordering::Acquire) {
+        return true;
+    }
+    let stopped = matches!(
         control.try_recv(),
         Ok(MarketFeedControl::Stop) | Err(TryRecvError::Disconnected)
-    )
+    );
+    if stopped {
+        cancelled.store(true, Ordering::Release);
+    }
+    stopped
 }
 
 fn wait_for_market_feed(
     control: &mpsc::Receiver<MarketFeedControl>,
+    cancelled: &AtomicBool,
     config: &Arc<Mutex<MarketFeedConfig>>,
     observed_config: &MarketFeedConfig,
     wait: Duration,
 ) -> MarketFeedWait {
     let deadline = Instant::now() + wait;
     loop {
-        if market_feed_stop_requested(control) {
+        if market_feed_stop_requested(control, cancelled) {
             return MarketFeedWait::Stop;
         }
         if market_feed_config_snapshot(config) != *observed_config {
@@ -350,6 +372,7 @@ fn wait_for_market_feed(
             .min(CONFIG_POLL_INTERVAL);
         match control.recv_timeout(timeout) {
             Ok(MarketFeedControl::Stop) | Err(RecvTimeoutError::Disconnected) => {
+                cancelled.store(true, Ordering::Release);
                 return MarketFeedWait::Stop;
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -448,14 +471,55 @@ fn finish_symbol_catalog_fetch(
 }
 
 fn build_agent(proxy_url: Option<&str>) -> Result<ureq::Agent> {
-    let mut builder = ureq::AgentBuilder::new()
-        .timeout_connect(REQUEST_TIMEOUT)
-        .timeout_read(REQUEST_TIMEOUT);
-    if let Some(proxy_url) = proxy_url.and_then(non_empty_trimmed) {
-        let proxy = ureq::Proxy::new(proxy_url).context("invalid proxy URL")?;
-        builder = builder.proxy(proxy);
+    build_agent_with_timeout(proxy_url, REQUEST_TIMEOUT)
+}
+
+fn build_agent_with_timeout(
+    proxy_url: Option<&str>,
+    request_timeout: Duration,
+) -> Result<ureq::Agent> {
+    // The global deadline includes DNS, redirects, and consuming the response body. Phase
+    // deadlines keep every individual transport operation bounded by the same limit.
+    let proxy = proxy_url
+        .and_then(non_empty_trimmed)
+        .map(configured_proxy)
+        .transpose()
+        .context("invalid proxy URL")?;
+    let config = ureq::Agent::config_builder()
+        // ureq 3 enables environment proxy discovery by default. Supplying None explicitly
+        // preserves the application's opt-in proxy setting.
+        .proxy(proxy)
+        .timeout_global(Some(request_timeout))
+        .timeout_resolve(Some(request_timeout))
+        .timeout_connect(Some(request_timeout))
+        .timeout_send_request(Some(request_timeout))
+        .timeout_send_body(Some(request_timeout))
+        .timeout_recv_response(Some(request_timeout))
+        .timeout_recv_body(Some(request_timeout))
+        .build();
+    Ok(config.into())
+}
+
+fn configured_proxy(proxy_url: &str) -> std::result::Result<ureq::Proxy, ureq::Error> {
+    let proxy = ureq::Proxy::new(proxy_url)?;
+    if proxy.protocol() != ureq::ProxyProtocol::Socks5 {
+        return Ok(proxy);
     }
-    Ok(builder.build())
+
+    // ureq 2 sent hostnames through socks5:// and socks:// for proxy-side resolution. ureq 3
+    // resolves those schemes locally by default, so rebuild the proxy to preserve persisted
+    // configuration behavior. socks5h:// already uses proxy-side resolution.
+    let mut builder = ureq::Proxy::builder(proxy.protocol())
+        .host(proxy.host())
+        .port(proxy.port())
+        .resolve_target(false);
+    if let Some(username) = proxy.username() {
+        builder = builder.username(username);
+    }
+    if let Some(password) = proxy.password() {
+        builder = builder.password(password);
+    }
+    builder.build()
 }
 
 fn normalized_proxy_url(proxy_url: Option<String>) -> Option<String> {
@@ -494,8 +558,27 @@ fn fetch_symbols_interruptible(
     agent: &ureq::Agent,
     symbols: &[String],
     candle_cache: &mut CandleCache,
-    mut interrupted: impl FnMut() -> bool,
+    interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Option<Result<MarketBatch>> {
+    fetch_symbols_interruptible_with(agent, symbols, candle_cache, interrupted, fetch_pair)
+}
+
+fn fetch_symbols_interruptible_with<F>(
+    agent: &ureq::Agent,
+    symbols: &[String],
+    candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
+    fetch: F,
+) -> Option<Result<MarketBatch>>
+where
+    F: Fn(
+            &ureq::Agent,
+            &MarketPair,
+            &mut CandleCache,
+            &(dyn Fn() -> bool + Sync),
+        ) -> Result<MarketFetchOutcome>
+        + Sync,
+{
     if interrupted() {
         return None;
     }
@@ -518,6 +601,7 @@ fn fetch_symbols_interruptible(
         if interrupted() {
             return None;
         }
+        let fetch = &fetch;
         let results = thread::scope(|scope| {
             let handles = chunk
                 .iter()
@@ -532,7 +616,7 @@ fn fetch_symbols_interruptible(
                         if let Some(entry) = cached_entry {
                             local_cache.insert(key.clone(), entry);
                         }
-                        let result = fetch_pair(&agent, &pair, &mut local_cache);
+                        let result = fetch(&agent, &pair, &mut local_cache, interrupted);
                         (symbol, result, local_cache.remove(&key))
                     })
                 })
@@ -581,12 +665,13 @@ fn fetch_pair(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
     match pair.source {
-        MarketDataSource::Binance => fetch_binance(agent, pair, candle_cache),
-        MarketDataSource::Coinbase => fetch_coinbase(agent, pair, candle_cache),
-        MarketDataSource::Okx => fetch_okx(agent, pair, candle_cache),
-        MarketDataSource::Hyperliquid => fetch_hyperliquid(agent, pair, candle_cache),
+        MarketDataSource::Binance => fetch_binance(agent, pair, candle_cache, interrupted),
+        MarketDataSource::Coinbase => fetch_coinbase(agent, pair, candle_cache, interrupted),
+        MarketDataSource::Okx => fetch_okx(agent, pair, candle_cache, interrupted),
+        MarketDataSource::Hyperliquid => fetch_hyperliquid(agent, pair, candle_cache, interrupted),
     }
 }
 
@@ -594,12 +679,16 @@ fn fetch_binance(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
     ensure_spot_pair(pair)?;
     let ticker_symbol = binance_ticker_symbol(pair);
     let url = format!("{BINANCE_BASE_URL}/api/v3/ticker/24hr?symbol={ticker_symbol}");
     let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
     let snapshot = parse_binance_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
     Ok(snapshot_with_candles(
         snapshot,
         cached_or_fetch_candles(agent, pair, candle_cache, fetch_binance_candles),
@@ -610,12 +699,16 @@ fn fetch_coinbase(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
     ensure_spot_pair(pair)?;
     let product_id = coinbase_product_id(pair);
     let url = format!("{COINBASE_EXCHANGE_BASE_URL}/products/{product_id}/stats");
     let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
     let snapshot = parse_coinbase_stats(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
     Ok(snapshot_with_candles(
         snapshot,
         cached_or_fetch_candles(agent, pair, candle_cache, fetch_coinbase_candles),
@@ -626,12 +719,16 @@ fn fetch_okx(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
     ensure_spot_pair(pair)?;
     let instrument_id = okx_instrument_id(pair);
     let url = format!("{OKX_BASE_URL}/api/v5/market/ticker?instId={instrument_id}");
     let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
     let snapshot = parse_okx_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
     Ok(snapshot_with_candles(
         snapshot,
         cached_or_fetch_candles(agent, pair, candle_cache, fetch_okx_candles),
@@ -642,7 +739,9 @@ fn fetch_hyperliquid(
     agent: &ureq::Agent,
     pair: &MarketPair,
     candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
     if pair.market_type != MarketType::Perp {
         bail!("Hyperliquid spot pairs are not supported yet");
     }
@@ -656,11 +755,20 @@ fn fetch_hyperliquid(
         &url,
         serde_json::json!({ "type": "metaAndAssetCtxs" }),
     )?;
+    ensure_fetch_active(interrupted)?;
     let snapshot = parse_hyperliquid_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
     Ok(snapshot_with_candles(
         snapshot,
         cached_or_fetch_candles(agent, pair, candle_cache, fetch_hyperliquid_candles),
     ))
+}
+
+fn ensure_fetch_active(interrupted: &(dyn Fn() -> bool + Sync)) -> Result<()> {
+    if interrupted() {
+        bail!("market fetch interrupted");
+    }
+    Ok(())
 }
 
 fn snapshot_with_candles(
@@ -695,24 +803,66 @@ fn ensure_spot_pair(pair: &MarketPair) -> Result<()> {
 }
 
 fn get_json(agent: &ureq::Agent, url: &str) -> Result<String> {
-    agent
+    let deadline = request_deadline(agent);
+    let mut response = agent
         .get(url)
-        .set("User-Agent", USER_AGENT)
+        .header("User-Agent", USER_AGENT)
         .call()
-        .with_context(|| format!("request failed: {url}"))?
-        .into_string()
-        .context("failed to read response body")
+        .with_context(|| format!("request failed: {url}"))?;
+    read_response_string(&mut response, deadline)
 }
 
 fn post_json(agent: &ureq::Agent, url: &str, body: serde_json::Value) -> Result<String> {
-    agent
+    let deadline = request_deadline(agent);
+    let mut response = agent
         .post(url)
-        .set("User-Agent", USER_AGENT)
-        .set("Content-Type", "application/json")
-        .send_string(&body.to_string())
-        .with_context(|| format!("request failed: {url}"))?
-        .into_string()
-        .context("failed to read response body")
+        .header("User-Agent", USER_AGENT)
+        .header("Content-Type", "application/json")
+        .send(body.to_string())
+        .with_context(|| format!("request failed: {url}"))?;
+    read_response_string(&mut response, deadline)
+}
+
+fn request_deadline(agent: &ureq::Agent) -> Option<Instant> {
+    agent
+        .config()
+        .timeouts()
+        .global
+        .map(|timeout| Instant::now() + timeout)
+}
+
+fn read_response_string(
+    response: &mut ureq::http::Response<ureq::Body>,
+    deadline: Option<Instant>,
+) -> Result<String> {
+    read_response_string_inner(response, deadline).context("failed to read response body")
+}
+
+fn read_response_string_inner(
+    response: &mut ureq::http::Response<ureq::Body>,
+    deadline: Option<Instant>,
+) -> Result<String> {
+    let mut reader = response
+        .body_mut()
+        .with_config()
+        .limit(MAX_MARKET_RESPONSE_BYTES)
+        .reader();
+    let mut body = Vec::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            bail!("response body deadline exceeded");
+        }
+        let read = reader.read(&mut buffer)?;
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            bail!("response body deadline exceeded");
+        }
+        if read == 0 {
+            break;
+        }
+        body.extend_from_slice(&buffer[..read]);
+    }
+    String::from_utf8(body).context("response body was not valid UTF-8")
 }
 
 fn cached_or_fetch_candles(
@@ -1416,6 +1566,79 @@ fn parse_u64(value: &str, field: &str) -> Result<u64> {
 mod tests {
     use super::*;
     use crypto_hud_core::{default_enabled_market_sources, DEFAULT_REFRESH_INTERVAL_SECONDS};
+    use std::{
+        io::{ErrorKind, Write},
+        net::TcpListener,
+        sync::atomic::AtomicBool,
+    };
+
+    struct SlowResponseServer {
+        url: String,
+        started: Option<mpsc::Receiver<()>>,
+        stop: Arc<AtomicBool>,
+        worker: Option<thread::JoinHandle<()>>,
+    }
+
+    impl SlowResponseServer {
+        fn spawn(chunk_interval: Duration) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let stop = Arc::new(AtomicBool::new(false));
+            let worker_stop = Arc::clone(&stop);
+            let (started_sender, started) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                listener.set_nonblocking(true).unwrap();
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                            if worker_stop.load(Ordering::Acquire) {
+                                return;
+                            }
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(_) => return,
+                    }
+                };
+                let header = concat!(
+                    "HTTP/1.1 200 OK\r\n",
+                    "Content-Type: application/json\r\n",
+                    "Content-Length: 1000000\r\n",
+                    "Connection: close\r\n",
+                    "\r\n"
+                );
+                if stream.write_all(header.as_bytes()).is_err() {
+                    return;
+                }
+                let _ = started_sender.send(());
+                while !worker_stop.load(Ordering::Acquire) {
+                    if stream.write_all(b" ").is_err() || stream.flush().is_err() {
+                        break;
+                    }
+                    thread::sleep(chunk_interval);
+                }
+            });
+            Self {
+                url: format!("http://{address}/slow.json"),
+                started: Some(started),
+                stop,
+                worker: Some(worker),
+            }
+        }
+
+        fn take_started(&mut self) -> mpsc::Receiver<()> {
+            self.started.take().unwrap()
+        }
+    }
+
+    impl Drop for SlowResponseServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
 
     fn pair(raw: &str) -> MarketPair {
         parse_market_pair(raw).unwrap()
@@ -1477,15 +1700,27 @@ mod tests {
     }
 
     #[test]
+    fn dropping_market_feed_publishes_cancellation_before_control_disconnects() {
+        let feed = MarketFeed::from_events(Vec::new());
+        let cancelled = Arc::clone(&feed.cancelled);
+
+        assert!(!cancelled.load(Ordering::Acquire));
+        drop(feed);
+        assert!(cancelled.load(Ordering::Acquire));
+    }
+
+    #[test]
     fn market_feed_wait_is_interrupted_by_stop_control() {
         let config = Arc::new(Mutex::new(feed_config()));
         let observed = market_feed_config_snapshot(&config);
         let (control_sender, control_receiver) = mpsc::channel();
+        let cancelled = AtomicBool::new(false);
         control_sender.send(MarketFeedControl::Stop).unwrap();
 
         assert!(matches!(
             wait_for_market_feed(
                 &control_receiver,
+                &cancelled,
                 &config,
                 &observed,
                 Duration::from_secs(60)
@@ -1495,15 +1730,104 @@ mod tests {
     }
 
     #[test]
+    fn market_feed_wait_is_interrupted_by_shared_cancellation() {
+        let config = Arc::new(Mutex::new(feed_config()));
+        let observed = market_feed_config_snapshot(&config);
+        let (_control_sender, control_receiver) = mpsc::channel();
+        let cancelled = AtomicBool::new(true);
+
+        assert!(matches!(
+            wait_for_market_feed(
+                &control_receiver,
+                &cancelled,
+                &config,
+                &observed,
+                Duration::from_secs(60)
+            ),
+            MarketFeedWait::Stop
+        ));
+    }
+
+    #[test]
+    fn market_agent_total_deadline_stops_a_continuously_trickling_response() {
+        let mut server = SlowResponseServer::spawn(Duration::from_millis(20));
+        let response_started = server.take_started();
+        let timeout = Duration::from_millis(250);
+        let agent = build_agent_with_timeout(None, timeout).unwrap();
+        let started_at = Instant::now();
+
+        let error = get_json(&agent, &server.url).unwrap_err();
+        let elapsed = started_at.elapsed();
+
+        assert!(response_started
+            .recv_timeout(Duration::from_secs(1))
+            .is_ok());
+        assert!(
+            elapsed >= Duration::from_millis(100),
+            "request ended before exercising the overall deadline: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "overall request deadline was not enforced: {elapsed:?}"
+        );
+        assert!(error.to_string().contains("failed to read response body"));
+    }
+
+    #[test]
+    fn cancelled_fetch_batch_finishes_after_the_in_flight_request_deadline() {
+        let mut server = SlowResponseServer::spawn(Duration::from_millis(20));
+        let response_started = server.take_started();
+        let agent = build_agent_with_timeout(None, Duration::from_millis(250)).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let canceller_flag = Arc::clone(&cancelled);
+        let canceller = thread::spawn(move || {
+            response_started
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap();
+            canceller_flag.store(true, Ordering::Release);
+        });
+        let interrupted = || cancelled.load(Ordering::Acquire);
+        let mut candle_cache = CandleCache::new();
+        let symbols = vec!["binance:spot:BTC/USDT".to_string()];
+        let started_at = Instant::now();
+        let url = server.url.clone();
+
+        let result = fetch_symbols_interruptible_with(
+            &agent,
+            &symbols,
+            &mut candle_cache,
+            &interrupted,
+            |agent, pair, _, interrupted| {
+                get_json(agent, &url)?;
+                ensure_fetch_active(interrupted)?;
+                Ok(MarketFetchOutcome {
+                    snapshot: snapshot(&pair.key()),
+                    warning: None,
+                })
+            },
+        );
+        canceller.join().unwrap();
+        let elapsed = started_at.elapsed();
+
+        assert!(result.is_none());
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "cancelled fetch batch outlived the request deadline: {elapsed:?}"
+        );
+    }
+
+    #[test]
     fn market_feed_wait_detects_config_changes_without_waiting_for_refresh() {
         let config = Arc::new(Mutex::new(feed_config()));
         let observed = market_feed_config_snapshot(&config);
         config.lock().unwrap().symbols = vec!["okx:spot:ETH/USDT".to_string()];
         let (_control_sender, control_receiver) = mpsc::channel();
+        let cancelled = AtomicBool::new(false);
 
         assert!(matches!(
             wait_for_market_feed(
                 &control_receiver,
+                &cancelled,
                 &config,
                 &observed,
                 Duration::from_secs(60)
@@ -2098,10 +2422,25 @@ mod tests {
 
     #[test]
     fn market_agent_accepts_http_and_socks_proxy_urls() {
-        assert!(build_agent(None).is_ok());
+        let direct_agent = build_agent(None).unwrap();
+        assert!(direct_agent.config().proxy().is_none());
         assert!(build_agent(Some("http://127.0.0.1:7890")).is_ok());
         assert!(build_agent(Some("socks5://127.0.0.1:1080")).is_ok());
+        assert!(build_agent(Some("socks5h://127.0.0.1:1080")).is_ok());
         assert!(build_agent(Some("ftp://127.0.0.1:21")).is_err());
+    }
+
+    #[test]
+    fn legacy_socks_proxy_schemes_keep_proxy_side_dns_resolution() {
+        assert!(!configured_proxy("socks5://127.0.0.1:1080")
+            .unwrap()
+            .resolve_target());
+        assert!(!configured_proxy("socks://127.0.0.1:1080")
+            .unwrap()
+            .resolve_target());
+        assert!(!configured_proxy("socks5h://127.0.0.1:1080")
+            .unwrap()
+            .resolve_target());
     }
 
     #[test]
