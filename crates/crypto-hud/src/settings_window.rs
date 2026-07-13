@@ -4203,8 +4203,12 @@ mod tests {
         assert_eq!(move_widget_in_store(&mut store, 0, 1), Some(1));
         save_layout_store(&state_path, &store).unwrap();
 
-        let persisted: LayoutStore =
-            serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap();
+        let persisted = settings::try_load_persisted_layout_store(&state_path)
+            .unwrap()
+            .unwrap();
+        let settings::PersistedLayoutStore::Current(persisted) = persisted else {
+            panic!("reordered widgets should use the current layout schema");
+        };
         assert_eq!(
             persisted
                 .widgets

@@ -72,6 +72,13 @@ pub const BUILTIN_QUOTE_BOARD_PLUGIN_ID: &str = "builtin.quote-board";
 pub const BUILTIN_MINI_TICKER_PLUGIN_ID: &str = "builtin.mini-ticker";
 pub const LAYOUT_STATE_FILE_NAME: &str = "layouts.json";
 pub const LEGACY_LAYOUT_STATE_FILE_NAME: &str = "poc-layouts.json";
+// Bump this version whenever persisted fields are added or changed in a way
+// that an older release could ignore and later overwrite. The top-level loader
+// is strict, but nested structures such as AppSettings remain serde-compatible
+// and may otherwise discard fields they do not recognize.
+pub const LAYOUT_STORE_SCHEMA_VERSION: u32 = 1;
+
+const LAYOUT_STORE_SCHEMA_VERSION_FIELD: &str = "schema_version";
 
 static SAVE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -374,6 +381,7 @@ impl Default for WidgetLayout {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LayoutStore {
     #[serde(default)]
     pub settings: AppSettings,
@@ -415,6 +423,7 @@ impl WidgetInstance {
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LegacyLayoutStore {
     #[serde(default)]
     pub settings: AppSettings,
@@ -424,11 +433,35 @@ pub struct LegacyLayoutStore {
     pub widgets: HashMap<String, WidgetLayout>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum PersistedLayoutStore {
     Current(LayoutStore),
     Legacy(LegacyLayoutStore),
+}
+
+#[derive(Debug)]
+struct ParsedPersistedLayoutStore {
+    store: PersistedLayoutStore,
+    requires_schema_migration: bool,
+}
+
+#[derive(Serialize)]
+struct VersionedLayoutStore<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    store: &'a LayoutStore,
+}
+
+impl<'de> Deserialize<'de> for PersistedLayoutStore {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        parse_persisted_layout_store_value(value)
+            .map(|parsed| parsed.store)
+            .map_err(de::Error::custom)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1219,7 +1252,11 @@ pub fn save_layout_store(path: &Path, store: &LayoutStore) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let contents = format!("{}\n", serde_json::to_string_pretty(store)?);
+    let persisted = VersionedLayoutStore {
+        schema_version: LAYOUT_STORE_SCHEMA_VERSION,
+        store,
+    };
+    let contents = format!("{}\n", serde_json::to_string_pretty(&persisted)?);
     let temp_path = temporary_layout_store_path(path);
     let result = write_layout_store_temp_file(&temp_path, contents.as_bytes())
         .and_then(|()| replace_file(&temp_path, path));
@@ -1285,6 +1322,13 @@ fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 pub fn try_load_persisted_layout_store(
     path: &Path,
 ) -> std::result::Result<Option<PersistedLayoutStore>, LayoutStoreReadError> {
+    try_load_persisted_layout_store_with_metadata(path)
+        .map(|persisted| persisted.map(|persisted| persisted.store))
+}
+
+fn try_load_persisted_layout_store_with_metadata(
+    path: &Path,
+) -> std::result::Result<Option<ParsedPersistedLayoutStore>, LayoutStoreReadError> {
     let contents = match fs::read(path) {
         Ok(contents) => contents,
         Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -1295,12 +1339,93 @@ pub fn try_load_persisted_layout_store(
             });
         }
     };
-    serde_json::from_slice::<PersistedLayoutStore>(&contents)
+    parse_persisted_layout_store(&contents)
         .map(Some)
         .map_err(|source| LayoutStoreReadError::Parse {
             path: path.to_path_buf(),
             source,
         })
+}
+
+fn parse_persisted_layout_store(
+    contents: &[u8],
+) -> std::result::Result<ParsedPersistedLayoutStore, serde_json::Error> {
+    let value = serde_json::from_slice::<Value>(contents)?;
+    parse_persisted_layout_store_value(value).map_err(|message| {
+        serde_json::Error::io(io::Error::new(io::ErrorKind::InvalidData, message))
+    })
+}
+
+fn parse_persisted_layout_store_value(
+    value: Value,
+) -> std::result::Result<ParsedPersistedLayoutStore, String> {
+    let Value::Object(mut object) = value else {
+        return Err("layout state must be a JSON object".to_string());
+    };
+
+    if let Some(schema_value) = object.remove(LAYOUT_STORE_SCHEMA_VERSION_FIELD) {
+        let schema_version = schema_value.as_u64().ok_or_else(|| {
+            format!("{LAYOUT_STORE_SCHEMA_VERSION_FIELD} must be an unsigned integer")
+        })?;
+        if schema_version != u64::from(LAYOUT_STORE_SCHEMA_VERSION) {
+            return Err(format!(
+                "unsupported layout state schema version {schema_version}; expected {LAYOUT_STORE_SCHEMA_VERSION}"
+            ));
+        }
+        for required_field in [
+            "settings",
+            "selected_widget_id",
+            "next_widget_number",
+            "widgets",
+        ] {
+            if !object.contains_key(required_field) {
+                return Err(format!(
+                    "layout state schema {LAYOUT_STORE_SCHEMA_VERSION} is missing required field `{required_field}`"
+                ));
+            }
+        }
+        let store = serde_json::from_value::<LayoutStore>(Value::Object(object))
+            .map_err(|error| error.to_string())?;
+        return Ok(ParsedPersistedLayoutStore {
+            store: PersistedLayoutStore::Current(store),
+            requires_schema_migration: false,
+        });
+    }
+
+    // Published unversioned current files serialize widgets as an array and
+    // include current-only selection/counter fields. Legacy files use a widget
+    // map plus the former store-wide symbols field. Keep these discriminators
+    // explicit so serde defaults cannot turn arbitrary objects into valid state.
+    let is_current = object.contains_key("selected_widget_id")
+        || object.contains_key("next_widget_number")
+        || matches!(object.get("widgets"), Some(Value::Array(_)));
+    let is_legacy = object.contains_key("symbols")
+        || matches!(object.get("widgets"), Some(Value::Object(_)))
+        || (!is_current && object.contains_key("settings"));
+
+    if is_current && is_legacy {
+        return Err("layout state mixes current and legacy top-level fields".to_string());
+    }
+
+    if is_current {
+        let store = serde_json::from_value::<LayoutStore>(Value::Object(object))
+            .map_err(|error| error.to_string())?;
+        return Ok(ParsedPersistedLayoutStore {
+            store: PersistedLayoutStore::Current(store),
+            requires_schema_migration: true,
+        });
+    }
+
+    if is_legacy {
+        let store = serde_json::from_value::<LegacyLayoutStore>(Value::Object(object))
+            .map_err(|error| error.to_string())?;
+        return Ok(ParsedPersistedLayoutStore {
+            store: PersistedLayoutStore::Legacy(store),
+            requires_schema_migration: true,
+        });
+    }
+
+    Err("layout state has no recognized current or legacy fields".to_string())
 }
 
 pub fn load_persisted_layout_store(path: &Path) -> Option<PersistedLayoutStore> {
@@ -1373,21 +1498,21 @@ pub fn load_layout_store_with_diagnostics_and_work_areas(
     desktop_size: (i32, i32),
     work_areas: &[DesktopWorkArea],
 ) -> LoadedLayoutStore {
-    match try_load_persisted_layout_store(path) {
-        Ok(Some(persisted)) => {
-            let original_store = match &persisted {
+    match try_load_persisted_layout_store_with_metadata(path) {
+        Ok(Some(parsed)) => {
+            let original_store = match &parsed.store {
                 PersistedLayoutStore::Current(store) => Some(store.clone()),
                 PersistedLayoutStore::Legacy(_) => None,
             };
             let loaded = finish_loaded_layout_store(
-                persisted,
+                parsed.store,
                 LayoutStoreLoadSource::Current,
                 requested_widget_count,
                 catalog,
                 desktop_size,
                 work_areas,
             );
-            if original_store.as_ref() != Some(&loaded.store) {
+            if parsed.requires_schema_migration || original_store.as_ref() != Some(&loaded.store) {
                 if let Err(error) = save_layout_store(path, &loaded.store) {
                     eprintln!(
                         "failed to save normalized layout state at {}: {error:#}",
@@ -1413,10 +1538,10 @@ pub fn load_layout_store_with_diagnostics_and_work_areas(
         if legacy_path.as_path() == path {
             continue;
         }
-        match try_load_persisted_layout_store(&legacy_path) {
-            Ok(Some(persisted)) => {
+        match try_load_persisted_layout_store_with_metadata(&legacy_path) {
+            Ok(Some(parsed)) => {
                 let loaded = finish_loaded_layout_store(
-                    persisted,
+                    parsed.store,
                     LayoutStoreLoadSource::Legacy(legacy_path),
                     requested_widget_count,
                     catalog,
@@ -1586,9 +1711,16 @@ fn migrate_legacy_store_in_work_areas(
     work_areas: &[DesktopWorkArea],
 ) -> LayoutStore {
     let settings = legacy.settings.clone().normalized();
+    let has_explicit_symbols = !legacy.symbols.is_empty();
     let symbols = normalized_symbols_for_type(WidgetKind::QuoteBoard, legacy.symbols);
     let mut widgets = legacy.widgets.into_iter().collect::<Vec<_>>();
     widgets.sort_by(|left, right| left.0.cmp(&right.0));
+    if widgets.is_empty() && has_explicit_symbols {
+        widgets.push((
+            format!("{}-1", WidgetKind::QuoteBoard.id_prefix()),
+            WidgetLayout::default(),
+        ));
+    }
 
     let mut store = LayoutStore {
         settings,
@@ -4171,6 +4303,11 @@ mod tests {
         save_layout_store(&path, &store).unwrap();
 
         let contents = fs::read_to_string(&path).unwrap();
+        let persisted_json = serde_json::from_str::<Value>(&contents).unwrap();
+        assert_eq!(
+            persisted_json[LAYOUT_STORE_SCHEMA_VERSION_FIELD],
+            LAYOUT_STORE_SCHEMA_VERSION
+        );
         assert!(contents.contains("\"opacity_percent\": 77"));
         assert!(fs::read_dir(&dir).unwrap().all(|entry| {
             !entry
@@ -4179,6 +4316,113 @@ mod tests {
                 .to_string_lossy()
                 .ends_with(".tmp")
         }));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn symbols_only_legacy_state_migrates_without_losing_symbols() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-symbols-only-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, r#"{"symbols":["ETH"]}"#).unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 1, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::Current);
+        assert!(loaded.warning.is_none());
+        assert_eq!(loaded.store.widgets.len(), 1);
+        assert_eq!(loaded.store.widgets[0].symbols, ["binance:spot:ETH/USDT"]);
+        let persisted_json =
+            serde_json::from_str::<Value>(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            persisted_json[LAYOUT_STORE_SCHEMA_VERSION_FIELD],
+            LAYOUT_STORE_SCHEMA_VERSION
+        );
+        assert!(persisted_json.get("symbols").is_none());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unversioned_current_state_is_loaded_and_upgraded() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-unversioned-current-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        fs::create_dir_all(&dir).unwrap();
+        let old_store = LayoutStore {
+            settings: AppSettings {
+                opacity_percent: 77,
+                ..AppSettings::default()
+            },
+            ..LayoutStore::default()
+        };
+        let old_contents = serde_json::to_string_pretty(&old_store).unwrap();
+        assert!(!old_contents.contains(LAYOUT_STORE_SCHEMA_VERSION_FIELD));
+        fs::write(&path, old_contents).unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::Current);
+        assert!(loaded.warning.is_none());
+        assert_eq!(loaded.store.settings.opacity_percent, 77);
+        let persisted_json =
+            serde_json::from_str::<Value>(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            persisted_json[LAYOUT_STORE_SCHEMA_VERSION_FIELD],
+            LAYOUT_STORE_SCHEMA_VERSION
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_widget_map_is_migrated_to_versioned_current_state() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-legacy-map-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            &path,
+            r#"{
+              "settings": { "opacity_percent": 77 },
+              "symbols": ["ETH"],
+              "widgets": {
+                "quote-board-4": {
+                  "x": 120,
+                  "y": 140,
+                  "always_on_top": false,
+                  "opacity_percent": 88
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::Current);
+        assert!(loaded.warning.is_none());
+        assert_eq!(loaded.store.settings.opacity_percent, 77);
+        assert_eq!(loaded.store.widgets[0].id, "quote-board-4");
+        assert_eq!(loaded.store.widgets[0].symbols, ["binance:spot:ETH/USDT"]);
+        let persisted_json =
+            serde_json::from_str::<Value>(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            persisted_json[LAYOUT_STORE_SCHEMA_VERSION_FIELD],
+            LAYOUT_STORE_SCHEMA_VERSION
+        );
+        assert!(persisted_json["widgets"].is_array());
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -4442,6 +4686,91 @@ mod tests {
         assert!(warning.to_string().contains("was preserved at"));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn misspelled_top_level_field_is_preserved_and_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-unknown-field-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        let suspicious_contents = br#"{"widgtes":[]}"#;
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, suspicious_contents).unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::DefaultsAfterError);
+        let warning = loaded
+            .warning
+            .expect("the misspelled field should be reported");
+        assert_eq!(warning.kind, LayoutStoreReadErrorKind::Parse);
+        let preserved_path = warning
+            .preserved_path
+            .expect("the suspicious state should be backed up");
+        assert_eq!(fs::read(&path).unwrap(), suspicious_contents);
+        assert_eq!(fs::read(preserved_path).unwrap(), suspicious_contents);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn future_schema_state_is_preserved_and_not_downgraded() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-future-schema-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        let future_contents = format!(
+            r#"{{
+              "schema_version": {},
+              "settings": {{}},
+              "selected_widget_id": null,
+              "next_widget_number": 1,
+              "widgets": [],
+              "future_field": true
+            }}"#,
+            LAYOUT_STORE_SCHEMA_VERSION + 1
+        );
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, &future_contents).unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::DefaultsAfterError);
+        let warning = loaded
+            .warning
+            .expect("the future schema should be reported");
+        assert_eq!(warning.kind, LayoutStoreReadErrorKind::Parse);
+        assert!(warning.error.contains("unsupported layout state schema"));
+        let preserved_path = warning
+            .preserved_path
+            .expect("the future state should be backed up");
+        assert_eq!(fs::read_to_string(&path).unwrap(), future_contents);
+        assert_eq!(fs::read_to_string(preserved_path).unwrap(), future_contents);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn current_schema_rejects_unknown_top_level_fields() {
+        let contents = format!(
+            r#"{{
+              "schema_version": {LAYOUT_STORE_SCHEMA_VERSION},
+              "settings": {{}},
+              "selected_widget_id": null,
+              "next_widget_number": 1,
+              "widgets": [],
+              "unexpected": true
+            }}"#
+        );
+
+        let error = serde_json::from_str::<PersistedLayoutStore>(&contents).unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `unexpected`"));
     }
 
     #[test]
