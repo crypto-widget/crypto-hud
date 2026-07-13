@@ -68,6 +68,24 @@ $seedWidgets = @(
         }
         symbols = @("BTC", "ETH", "SOL")
         config = [ordered]@{}
+    },
+    [ordered]@{
+        id = "status-strip-100-single"
+        plugin_id = "com.cryptohud.status-strip"
+        name = "Status Strip 100 Single"
+        visible = $true
+        layout = [ordered]@{
+            x = 680
+            y = 140
+            always_on_top = $false
+            opacity_percent = 96
+            locked = $false
+            scale_percent = 100
+            width = 130
+            height = 92
+        }
+        symbols = @("BTC")
+        config = [ordered]@{}
     }
 )
 
@@ -86,7 +104,7 @@ $seedState = [ordered]@{
         auto_start_enabled = $false
     }
     selected_widget_id = "focus-ticker-30"
-    next_widget_number = 4
+    next_widget_number = 5
     widgets = $seedWidgets
 }
 $seedJson = $seedState | ConvertTo-Json -Depth 8
@@ -164,6 +182,58 @@ function Wait-ForFile([string]$Path, [int]$TimeoutMilliseconds) {
     }
 }
 
+function Assert-RoundedOuterCorners([System.Drawing.Bitmap]$Bitmap, [string]$Title) {
+    $background = $Bitmap.GetPixel(0, 0)
+    $minimumVisiblePixels = [Math]::Max(3, [int]($Bitmap.Width / 2))
+    $visibleRows = [System.Collections.Generic.List[object]]::new()
+
+    for ($y = 0; $y -lt $Bitmap.Height; $y += 1) {
+        $left = -1
+        $right = -1
+        $count = 0
+        for ($x = 0; $x -lt $Bitmap.Width; $x += 1) {
+            $pixel = $Bitmap.GetPixel($x, $y)
+            $distance =
+                [Math]::Abs([int]$pixel.R - [int]$background.R) +
+                [Math]::Abs([int]$pixel.G - [int]$background.G) +
+                [Math]::Abs([int]$pixel.B - [int]$background.B)
+            if ($distance -gt 75) {
+                if ($left -lt 0) {
+                    $left = $x
+                }
+                $right = $x
+                $count += 1
+            }
+        }
+
+        if ($count -ge $minimumVisiblePixels) {
+            $visibleRows.Add([pscustomobject]@{
+                Y = $y
+                Left = $left
+                Right = $right
+                Count = $count
+            })
+        }
+    }
+
+    if ($visibleRows.Count -lt 3) {
+        throw "$Title screenshot does not contain enough visible card rows to inspect its corners"
+    }
+
+    $top = $visibleRows[0]
+    $bottom = $visibleRows[$visibleRows.Count - 1]
+    $widest = $visibleRows | Sort-Object Count -Descending | Select-Object -First 1
+    $insets = @(
+        ([int]$top.Left - [int]$widest.Left)
+        ([int]$widest.Right - [int]$top.Right)
+        ([int]$bottom.Left - [int]$widest.Left)
+        ([int]$widest.Right - [int]$bottom.Right)
+    )
+    if (@($insets | Where-Object { $_ -lt 1 }).Count -gt 0) {
+        throw "$Title outer corners are square; expected visible top-left, top-right, bottom-left, and bottom-right insets, saw $($insets -join ', ')"
+    }
+}
+
 function Assert-ScaledContentVisible([object]$Window, [string]$Title, [int]$ExpectedWidth, [int]$ExpectedHeight) {
     if ([int]$Window.Width -ne $ExpectedWidth) {
         throw "$Title width expected $ExpectedWidth, saw $($Window.Width)"
@@ -224,10 +294,21 @@ function Assert-ScaledContentVisible([object]$Window, [string]$Title, [int]$Expe
             }
         }
     }
+    $roundedCornerFailure = $null
+    if ($Title -like "status-strip-*") {
+        try {
+            Assert-RoundedOuterCorners $bitmap $Title
+        } catch {
+            $roundedCornerFailure = $_.Exception.Message
+        }
+    }
     $bitmap.Dispose()
 
     if ($detailPixels -lt 6) {
-        throw "$Title 30% screenshot looks clipped; expected scaled detail pixels, saw $detailPixels. Capture: $capturePath"
+        throw "$Title screenshot looks clipped; expected scaled detail pixels, saw $detailPixels. Capture: $capturePath"
+    }
+    if ($roundedCornerFailure) {
+        throw "$roundedCornerFailure Capture: $capturePath"
     }
 }
 
@@ -247,7 +328,7 @@ try {
 
     $app = Start-Process `
         -FilePath (Join-Path $RepoRoot "target\debug\crypto-hud.exe") `
-        -ArgumentList @("--widgets", "3", "--gui-smoke-ms", "$TimeoutMs") `
+        -ArgumentList @("--widgets", "4", "--gui-smoke-ms", "$TimeoutMs") `
         -PassThru
     try {
         Wait-ForFile $ReadyFile 10000
@@ -261,7 +342,8 @@ try {
         $expected = @(
             [pscustomobject]@{ Title = "focus-ticker-30"; Width = 246; Height = 47 },
             [pscustomobject]@{ Title = "trust-card-30"; Width = 156; Height = 116 },
-            [pscustomobject]@{ Title = "status-strip-30"; Width = 112; Height = 28 }
+            [pscustomobject]@{ Title = "status-strip-30"; Width = 112; Height = 28 },
+            [pscustomobject]@{ Title = "status-strip-100-single"; Width = 130; Height = 92 }
         )
 
         foreach ($widget in $expected) {
