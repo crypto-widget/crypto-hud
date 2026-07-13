@@ -922,6 +922,7 @@ fn widget_runtime_view(
 fn widget_display_options(instance: &WidgetInstance) -> WidgetDisplayOptions {
     WidgetDisplayOptions {
         hide_quote_asset: settings::widget_hide_quote_asset(instance),
+        show_header: settings::widget_show_header(instance),
     }
 }
 
@@ -1201,7 +1202,7 @@ mod tests {
             1.5
         );
 
-        settings::set_widget_display_config(&mut instance, false, true);
+        settings::set_widget_display_config(&mut instance, false, true, true);
         instance.layout.width = 336;
         instance.layout.height = 152;
         instance.layout.scale_percent = 0;

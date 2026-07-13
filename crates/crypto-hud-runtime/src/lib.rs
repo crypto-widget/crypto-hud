@@ -747,9 +747,19 @@ pub struct QuoteRowView {
     pub positive: bool,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WidgetDisplayOptions {
     pub hide_quote_asset: bool,
+    pub show_header: bool,
+}
+
+impl Default for WidgetDisplayOptions {
+    fn default() -> Self {
+        Self {
+            hide_quote_asset: false,
+            show_header: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2136,6 +2146,7 @@ mod tests {
         );
         let display_options = WidgetDisplayOptions {
             hide_quote_asset: true,
+            ..WidgetDisplayOptions::default()
         };
 
         let row =
@@ -2236,6 +2247,7 @@ mod tests {
             now: Instant::now(),
             display_options: WidgetDisplayOptions {
                 hide_quote_asset: true,
+                ..WidgetDisplayOptions::default()
             },
         });
 

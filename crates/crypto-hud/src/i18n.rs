@@ -140,6 +140,8 @@ pub struct UiText {
     pub widget_show_coin_logos_help: &'static str,
     pub widget_hide_quote_asset: &'static str,
     pub widget_hide_quote_asset_help: &'static str,
+    pub widget_show_header: &'static str,
+    pub widget_show_header_help: &'static str,
     pub widget_theme: &'static str,
     pub widget_theme_help: &'static str,
     pub widget_topmost: &'static str,
@@ -274,6 +276,8 @@ const EN_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "Display token icons beside pairs.",
     widget_hide_quote_asset: "Hide quote asset",
     widget_hide_quote_asset_help: "Show BTC instead of BTC/USDC.",
+    widget_show_header: "Show header",
+    widget_show_header_help: "Display pairs, source, and update time above the quote rows.",
     widget_theme: "Widget theme",
     widget_theme_help: "Override this widget, or follow the system.",
     widget_topmost: "Always on top",
@@ -409,6 +413,8 @@ const ZH_HANS_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "在交易对旁显示币种图标。",
     widget_hide_quote_asset: "隐藏报价币",
     widget_hide_quote_asset_help: "如 BTC/USDC 仅显示 BTC。",
+    widget_show_header: "显示头部",
+    widget_show_header_help: "在行情行上方显示交易对、数据源和更新时间。",
     widget_theme: "小组件主题",
     widget_theme_help: "单独设置此小组件，或跟随系统。",
     widget_topmost: "总在最前",
@@ -543,6 +549,8 @@ const ZH_HANT_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "在交易對旁顯示幣種圖示。",
     widget_hide_quote_asset: "隱藏報價幣",
     widget_hide_quote_asset_help: "例如 BTC/USDC 只顯示 BTC。",
+    widget_show_header: "顯示頭部",
+    widget_show_header_help: "在行情列上方顯示交易對、資料來源和更新時間。",
     widget_theme: "小工具主題",
     widget_theme_help: "單獨設定此小工具，或跟隨系統。",
     widget_topmost: "總在最上層",
@@ -677,6 +685,8 @@ const ES_419_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "Muestra iconos de tokens junto a los pares.",
     widget_hide_quote_asset: "Ocultar activo cotizado",
     widget_hide_quote_asset_help: "Muestra BTC en vez de BTC/USDC.",
+    widget_show_header: "Mostrar encabezado",
+    widget_show_header_help: "Muestra pares, fuente y hora de actualización sobre las filas.",
     widget_theme: "Tema del widget",
     widget_theme_help: "Sobrescribe este widget o sigue el sistema.",
     widget_topmost: "Siempre arriba",
@@ -811,6 +821,8 @@ const PT_BR_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "Mostra ícones dos tokens ao lado dos pares.",
     widget_hide_quote_asset: "Ocultar ativo de cotação",
     widget_hide_quote_asset_help: "Mostra BTC em vez de BTC/USDC.",
+    widget_show_header: "Mostrar cabeçalho",
+    widget_show_header_help: "Exibe pares, fonte e horário da atualização acima das linhas.",
     widget_theme: "Tema do widget",
     widget_theme_help: "Substitui este widget ou segue o sistema.",
     widget_topmost: "Sempre no topo",
@@ -945,6 +957,8 @@ const VI_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "Hiển thị biểu tượng token cạnh cặp.",
     widget_hide_quote_asset: "Ẩn tài sản định giá",
     widget_hide_quote_asset_help: "Hiển thị BTC thay vì BTC/USDC.",
+    widget_show_header: "Hiện tiêu đề",
+    widget_show_header_help: "Hiển thị cặp, nguồn và thời gian cập nhật phía trên các hàng.",
     widget_theme: "Chủ đề widget",
     widget_theme_help: "Ghi đè widget này hoặc theo hệ thống.",
     widget_topmost: "Luôn ở trên",
@@ -1079,6 +1093,8 @@ const ID_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "Menampilkan ikon token di samping pair.",
     widget_hide_quote_asset: "Sembunyikan aset kuotasi",
     widget_hide_quote_asset_help: "Menampilkan BTC, bukan BTC/USDC.",
+    widget_show_header: "Tampilkan header",
+    widget_show_header_help: "Menampilkan pair, sumber, dan waktu pembaruan di atas baris.",
     widget_theme: "Tema widget",
     widget_theme_help: "Timpa widget ini atau ikuti sistem.",
     widget_topmost: "Selalu di atas",
@@ -1213,6 +1229,9 @@ const TR_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "Çiftlerin yanında token simgelerini gösterir.",
     widget_hide_quote_asset: "Karşıt varlığı gizle",
     widget_hide_quote_asset_help: "BTC/USDC yerine BTC gösterir.",
+    widget_show_header: "Başlığı göster",
+    widget_show_header_help:
+        "Çiftleri, kaynağı ve güncelleme zamanını satırların üzerinde gösterir.",
     widget_theme: "Widget teması",
     widget_theme_help: "Bu widget'ı ayrı ayarla veya sistemi takip et.",
     widget_topmost: "Her zaman üstte",
@@ -1348,6 +1367,8 @@ const KO_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "페어 옆에 토큰 아이콘을 표시합니다.",
     widget_hide_quote_asset: "견적 자산 숨기기",
     widget_hide_quote_asset_help: "BTC/USDC 대신 BTC만 표시합니다.",
+    widget_show_header: "헤더 표시",
+    widget_show_header_help: "시세 행 위에 페어, 소스 및 업데이트 시간을 표시합니다.",
     widget_theme: "위젯 테마",
     widget_theme_help: "이 위젯만 설정하거나 시스템을 따릅니다.",
     widget_topmost: "항상 위",
@@ -1482,6 +1503,8 @@ const JA_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "ペアの横にトークンアイコンを表示します。",
     widget_hide_quote_asset: "クォート資産を非表示",
     widget_hide_quote_asset_help: "BTC/USDC ではなく BTC と表示します。",
+    widget_show_header: "ヘッダーを表示",
+    widget_show_header_help: "相場行の上にペア、データソース、更新時刻を表示します。",
     widget_theme: "ウィジェットテーマ",
     widget_theme_help: "このウィジェットだけ上書きするか、システムに従います。",
     widget_topmost: "常に最前面",
@@ -1616,6 +1639,8 @@ const RU_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "Показывает значки токенов рядом с парами.",
     widget_hide_quote_asset: "Скрыть котируемый актив",
     widget_hide_quote_asset_help: "Показывает BTC вместо BTC/USDC.",
+    widget_show_header: "Показывать заголовок",
+    widget_show_header_help: "Показывает пары, источник и время обновления над строками котировок.",
     widget_theme: "Тема виджета",
     widget_theme_help: "Переопределяет тему виджета или следует системе.",
     widget_topmost: "Всегда поверх",
@@ -1751,6 +1776,8 @@ const AR_TEXT: UiText = UiText {
     widget_show_coin_logos_help: "يعرض أيقونات الرموز بجانب الأزواج.",
     widget_hide_quote_asset: "إخفاء أصل التسعير",
     widget_hide_quote_asset_help: "يعرض \u{2066}BTC\u{2069} بدلا من \u{2066}BTC/USDC\u{2069}.",
+    widget_show_header: "إظهار الرأس",
+    widget_show_header_help: "يعرض الأزواج والمصدر ووقت التحديث أعلى صفوف الأسعار.",
     widget_theme: "سمة الأداة",
     widget_theme_help: "تخصيص هذه الأداة أو اتباع النظام.",
     widget_topmost: "دائما في الأعلى",
@@ -5011,6 +5038,8 @@ mod tests {
                 "widget_hide_quote_asset_help",
                 text.widget_hide_quote_asset_help,
             ),
+            ("widget_show_header", text.widget_show_header),
+            ("widget_show_header_help", text.widget_show_header_help),
             ("widget_theme_help", text.widget_theme_help),
             ("widget_topmost_help", text.widget_topmost_help),
             ("plugin_market_description", text.plugin_market_description),
@@ -5247,6 +5276,7 @@ mod tests {
         assert_eq!(en.preview_source_ok, "Source OK");
         assert_eq!(en.widget_show_coin_logos, "Show coin logos");
         assert_eq!(en.widget_hide_quote_asset, "Hide quote asset");
+        assert_eq!(en.widget_show_header, "Show header");
         assert_eq!(en.source_prefix, "Live feed");
         assert_eq!(en.runtime_source_error, "Source issue");
         assert_eq!(
@@ -5307,6 +5337,7 @@ mod tests {
         assert_eq!(zh.preview_source_ok, "数据正常");
         assert_eq!(zh.widget_show_coin_logos, "显示币种 Logo");
         assert_eq!(zh.widget_hide_quote_asset, "隐藏报价币");
+        assert_eq!(zh.widget_show_header, "显示头部");
         assert_eq!(zh.market_settings, "行情设置");
         assert_eq!(
             widget_title(Locale::ZhHans, WidgetText::QuoteBoard),

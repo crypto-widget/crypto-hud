@@ -38,6 +38,7 @@ pub(super) struct WidgetSettingsUpdate<'a> {
     pub(super) widget_theme_index: i32,
     pub(super) show_coin_logos: bool,
     pub(super) hide_quote_asset: bool,
+    pub(super) show_header: bool,
     pub(super) locale: i18n::Locale,
     pub(super) plugin_catalog: &'a plugin::PluginCatalog,
 }
@@ -56,6 +57,7 @@ pub(super) fn apply_widget_settings_to_store(
         widget_theme_index,
         show_coin_logos,
         hide_quote_asset,
+        show_header,
         locale,
         plugin_catalog,
     } = update;
@@ -81,7 +83,8 @@ pub(super) fn apply_widget_settings_to_store(
         instance.layout.locked = layout_locked;
         instance.layout.opacity_percent = clamp_opacity(opacity_percent);
         let display_config_changed = settings::widget_show_coin_logos(instance) != show_coin_logos
-            || settings::widget_hide_quote_asset(instance) != hide_quote_asset;
+            || settings::widget_hide_quote_asset(instance) != hide_quote_asset
+            || settings::widget_show_header(instance) != show_header;
         let scale_percent = if display_config_changed {
             widget_scale_percent_for_definitions(instance, &definitions)
         } else {
@@ -90,7 +93,12 @@ pub(super) fn apply_widget_settings_to_store(
         let theme_preference =
             widget_theme_preference_for_index(instance, plugin_catalog, widget_theme_index);
         settings::set_widget_theme_preference(instance, &theme_preference);
-        settings::set_widget_display_config(instance, show_coin_logos, hide_quote_asset);
+        settings::set_widget_display_config(
+            instance,
+            show_coin_logos,
+            hide_quote_asset,
+            show_header,
+        );
         apply_widget_scale_to_instance(instance, &definitions, scale_percent);
         true
     } else {
