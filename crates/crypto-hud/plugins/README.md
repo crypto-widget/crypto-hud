@@ -63,7 +63,8 @@ com.example.my-widget/
 - `version` 必须是合法 SemVer。
 - `hostApiVersion` 必须匹配当前宿主 API。
 - `renderer.kind` 必须为 `slint`。
-- `renderer.entry` 必须是相对路径，不能包含 `..`。
+- `renderer.entry` 只能包含普通相对路径组件；绝对路径、根路径、盘符相对路径以及
+  `.`、`..` 组件都会被拒绝。
 - `permissions.network` 和 `permissions.filesystem` 当前都必须是 `false`。
 - `defaultSize` 必须在 `120x80` 到 `1200x900` 之间。
 - `sizePolicy` 可省略，默认 `{ "kind": "fixed" }`。
@@ -74,6 +75,11 @@ com.example.my-widget/
   默认报价规范化，例如 `BTC` 等价于 `binance:spot:BTC/USDT`。
 - `dataRequirements` 当前只支持 `market.price` 和 `market.candles`。
 - 允许的文件扩展名为 `json`、`slint`、`png`、`jpg`、`jpeg`、`svg`。
+- `previewImages` 与 `renderer.entry` 使用相同的严格相对路径规则，且必须解析到插件
+  目录内部。
+- 所有 `.slint` import 和 `@image-url()` 资源都必须解析到插件目录内部。图片资源仅支持
+  `png`、`jpg`、`jpeg`、`svg`，单个文件最大 1 MiB。除 `.slint` 外的文件 import 会被
+  拒绝；当前不支持自定义字体或其他外部文件系统资源。
 
 内容尺寸随币种数量变化的插件建议声明 `symbolGrid`：
 

@@ -11,6 +11,12 @@ pub use crypto_hud_runtime::{
     PluginSize, PluginSizePolicy, PluginTheme, PluginThemeRole, MAX_PREVIEW_IMAGES,
     MIN_SYMBOL_LIMIT,
 };
+use i_slint_compiler::{
+    diagnostics::BuildDiagnostics,
+    parser::{self, SyntaxKind, SyntaxNode},
+    EmbedResourcesKind,
+};
+use i_slint_core::InternalToken;
 use semver::Version;
 use slint_interpreter::{Compiler, ComponentDefinition, ValueType};
 
@@ -580,8 +586,12 @@ pub fn manifest_to_definition(
         .preview_images
         .into_iter()
         .take(MAX_PREVIEW_IMAGES)
-        .map(|image| root_dir.join(image))
-        .collect();
+        .map(|image| {
+            let path = root_dir.join(&image);
+            path_stays_inside(&root_dir, &path)
+                .with_context(|| format!("invalid previewImages entry {image}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(PluginDefinition {
         id: manifest.id,
         name: manifest.name,
@@ -625,6 +635,10 @@ fn compile_slint_renderer(
     parameters: &[PluginParameter],
 ) -> Result<ComponentDefinition> {
     let mut compiler = Compiler::default();
+    // The interpreter normally leaves image paths untouched and does not expose
+    // them to the host. Listing resources keeps their contents unread while
+    // making every resolved path available for the sandbox check below.
+    compiler.set_embed_resources(EmbedResourcesKind::ListAllResources);
     compiler.set_include_paths(vec![root_dir.to_path_buf()]);
     let loader_root = root_dir.to_path_buf();
     compiler.set_file_loader(move |path| {
@@ -638,10 +652,12 @@ fn compile_slint_renderer(
         })
     });
 
-    let result = spin_on::spin_on(compiler.build_from_path(entry));
+    let entry_source = read_plugin_slint_source(root_dir, entry)?;
+    let result = spin_on::spin_on(compiler.build_from_source(entry_source, entry.to_path_buf()));
     if result.has_errors() {
         bail!("Slint compilation failed: {}", diagnostics_text(&result));
     }
+    validate_compiled_plugin_paths(root_dir, result.watch_paths(InternalToken))?;
 
     let definition = result.component(component).ok_or_else(|| {
         anyhow!(
@@ -672,7 +688,99 @@ fn read_plugin_slint_source(root_dir: &Path, path: &Path) -> Result<String> {
             path.display()
         );
     }
-    fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))
+    let source =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    validate_slint_file_imports(&path, &source)?;
+    Ok(source)
+}
+
+fn validate_slint_file_imports(source_path: &Path, source: &str) -> Result<()> {
+    let mut diagnostics = BuildDiagnostics::default();
+    let syntax = parser::parse(source.to_string(), Some(source_path), &mut diagnostics);
+    validate_slint_file_import_nodes(&syntax, source_path)
+}
+
+fn validate_slint_file_import_nodes(node: &SyntaxNode, source_path: &Path) -> Result<()> {
+    if node.kind() == SyntaxKind::ImportSpecifier {
+        for token in node
+            .children_with_tokens()
+            .filter_map(|item| item.into_token())
+        {
+            if token.kind() != SyntaxKind::StringLiteral {
+                continue;
+            }
+            let Some(import_path) = i_slint_compiler::literals::unescape_string(token.text())
+            else {
+                continue;
+            };
+            let is_slint_import = Path::new(import_path.as_str())
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("slint"));
+            if !is_slint_import {
+                bail!(
+                    "plugin Slint source may only import .slint files; use @image-url for local images: {} in {}",
+                    import_path,
+                    source_path.display()
+                );
+            }
+        }
+    }
+
+    for child in node.children() {
+        validate_slint_file_import_nodes(&child, source_path)?;
+    }
+    Ok(())
+}
+
+fn validate_compiled_plugin_paths(root_dir: &Path, paths: &[PathBuf]) -> Result<()> {
+    let root_dir = root_dir
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", root_dir.display()))?;
+
+    for path in paths {
+        let display_path = path.to_string_lossy();
+        if display_path.starts_with("builtin:/") || display_path.starts_with("data:") {
+            continue;
+        }
+        if !path.starts_with(&root_dir) {
+            bail!(
+                "Slint resource {} escapes plugin root {}",
+                path.display(),
+                root_dir.display()
+            );
+        }
+
+        let canonical = path_stays_inside(&root_dir, path)
+            .with_context(|| format!("invalid Slint resource {}", path.display()))?;
+        let metadata = fs::metadata(&canonical)
+            .with_context(|| format!("failed to stat Slint resource {}", canonical.display()))?;
+        if !metadata.is_file() {
+            bail!("Slint resource is not a file: {}", canonical.display());
+        }
+
+        let extension = canonical
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .ok_or_else(|| anyhow!("Slint resource has no extension: {}", canonical.display()))?;
+        let max_bytes = match extension.as_str() {
+            "slint" => SLINT_FILE_MAX_BYTES,
+            "png" | "jpg" | "jpeg" | "svg" => ASSET_MAX_BYTES,
+            _ => bail!(
+                "Slint resource extension is not allowed: {}",
+                canonical.display()
+            ),
+        };
+        if metadata.len() > max_bytes {
+            bail!(
+                "Slint resource exceeds {max_bytes} bytes: {}",
+                canonical.display()
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_slint_contract(
@@ -911,6 +1019,15 @@ export component ExamplePriceCard inherits Window {
     always-on-top: root.pin-to-top;
 }
 "#
+    }
+
+    fn valid_slint_source_with_image(image_path: &str) -> String {
+        valid_slint_source().replace(
+            "    always-on-top: root.pin-to-top;",
+            &format!(
+                "    always-on-top: root.pin-to-top;\n    Image {{ source: @image-url(\"{image_path}\"); }}"
+            ),
+        )
     }
 
     #[test]
@@ -1218,6 +1335,78 @@ export component ExamplePriceCard inherits Window {
         let plugin = catalog.find("com.example.price-card").unwrap();
         assert!(plugin.is_available());
         assert!(catalog.errors().is_empty(), "{:?}", catalog.errors());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn discovers_plugin_with_nested_local_image_resource() {
+        let root = temp_plugin_root("discovers-plugin-with-nested-local-image-resource");
+        let plugin_dir = root.join("com.example.price-card");
+        let asset_dir = plugin_dir.join("ui").join("assets");
+        fs::create_dir_all(&asset_dir).unwrap();
+        fs::write(plugin_dir.join(MANIFEST_FILE_NAME), valid_manifest_json()).unwrap();
+        fs::write(
+            plugin_dir.join("ui").join("main.slint"),
+            valid_slint_source_with_image("assets/icon.svg"),
+        )
+        .unwrap();
+        fs::write(
+            asset_dir.join("icon.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>"#,
+        )
+        .unwrap();
+
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+
+        let plugin = catalog.find("com.example.price-card").unwrap();
+        assert!(plugin.is_available(), "{:?}", plugin.status);
+        assert!(catalog.errors().is_empty(), "{:?}", catalog.errors());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn external_slint_image_resource_marks_plugin_unavailable() {
+        let root = temp_plugin_root("external-slint-image-resource");
+        let plugin_dir = root.join("com.example.price-card");
+        fs::create_dir_all(plugin_dir.join("ui")).unwrap();
+        fs::write(root.join("outside.png"), b"not an image").unwrap();
+        fs::write(plugin_dir.join(MANIFEST_FILE_NAME), valid_manifest_json()).unwrap();
+        fs::write(
+            plugin_dir.join("ui").join("main.slint"),
+            valid_slint_source_with_image("../../outside.png"),
+        )
+        .unwrap();
+
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+
+        let plugin = catalog.find("com.example.price-card").unwrap();
+        assert!(!plugin.is_available());
+        assert_eq!(catalog.errors().len(), 1);
+        assert!(catalog.errors()[0].message.contains("escapes plugin root"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn external_slint_file_import_marks_plugin_unavailable() {
+        let root = temp_plugin_root("external-slint-file-import");
+        let plugin_dir = root.join("com.example.price-card");
+        fs::create_dir_all(plugin_dir.join("ui")).unwrap();
+        fs::write(root.join("outside.ttf"), b"not a font").unwrap();
+        fs::write(plugin_dir.join(MANIFEST_FILE_NAME), valid_manifest_json()).unwrap();
+        fs::write(
+            plugin_dir.join("ui").join("main.slint"),
+            format!("import \"../../outside.ttf\";\n{}", valid_slint_source()),
+        )
+        .unwrap();
+
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+
+        let plugin = catalog.find("com.example.price-card").unwrap();
+        assert!(!plugin.is_available());
+        assert_eq!(catalog.errors().len(), 1);
+        assert!(catalog.errors()[0]
+            .message
+            .contains("may only import .slint files"));
         let _ = fs::remove_dir_all(root);
     }
 
