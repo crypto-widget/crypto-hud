@@ -50,8 +50,8 @@ use settings_window::{
 };
 use slint::{ComponentHandle, Timer, TimerMode};
 use state_bridge::{
-    add_plugin_instance, load_layout_store_with_diagnostics, normalize_store_with_catalog,
-    symbols_from_store, widget_definitions_from_catalog,
+    add_plugin_instance, load_layout_store_with_diagnostics, market_subscriptions_from_store,
+    normalize_store_with_catalog, widget_definitions_from_catalog,
 };
 #[cfg(test)]
 use state_bridge::{
@@ -170,40 +170,46 @@ fn offline_gui_smoke_enabled(gui_smoke_requested: bool, flag: Option<&str>) -> b
     gui_smoke_requested && flag == Some("1")
 }
 
-fn deterministic_gui_smoke_market_events(symbols: &[String]) -> Vec<market::MarketEvent> {
-    let chart_updated_at = Instant::now();
-    symbols
+fn deterministic_gui_smoke_market_events(
+    subscriptions: &[market::MarketSubscription],
+) -> Vec<market::MarketEvent> {
+    subscriptions
         .iter()
         .enumerate()
-        .map(|(index, symbol)| {
+        .map(|(index, subscription)| {
             let price = 100.0 + index as f64 * 25.0;
             let timestamp = 1_700_000_000_000 + index as u64 * 1_000_000;
-            let chart_candles_24h = (0_u32..4)
-                .map(|offset| {
-                    let open = price + f64::from(offset) * 0.5;
-                    let close = open + 0.25;
-                    market::MarketCandle {
-                        open_time_millis: timestamp + u64::from(offset) * 300_000,
-                        open,
-                        high: close + 0.25,
-                        low: open - 0.25,
-                        close,
-                    }
-                })
-                .collect::<Vec<_>>();
+            let chart_candles_24h = if subscription.needs_candles {
+                (0_u32..4)
+                    .map(|offset| {
+                        let open = price + f64::from(offset) * 0.5;
+                        let close = open + 0.25;
+                        market::MarketCandle {
+                            open_time_millis: timestamp + u64::from(offset) * 300_000,
+                            open,
+                            high: close + 0.25,
+                            low: open - 0.25,
+                            close,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             let chart_closes_24h = chart_candles_24h
                 .iter()
                 .map(|candle| candle.close)
                 .collect();
             market::MarketEvent::Snapshot(market::MarketSnapshot {
-                symbol: symbol.clone(),
+                symbol: subscription.symbol.clone(),
                 price,
                 change_percent_24h: 1.0 + index as f64 * 0.1,
                 chart_closes_24h,
                 chart_candles_24h,
-                chart_updated_at: Some(chart_updated_at),
+                chart_updated_at: subscription.needs_candles.then(Instant::now),
                 chart_error: None,
-                source: crypto_hud_core::market_pair_source(symbol).unwrap_or_default(),
+                source: crypto_hud_core::market_pair_source(&subscription.symbol)
+                    .unwrap_or_default(),
             })
         })
         .collect()
@@ -275,9 +281,9 @@ fn main() -> Result<()> {
     }
     let settings_status = Rc::new(RefCell::new(state_load_warning.unwrap_or_default()));
     let shortcut_manager = Rc::new(RefCell::new(shortcuts::ShortcutManager::new()));
-    let market_symbols = symbols_from_store(&layouts.borrow(), &plugin_catalog);
+    let market_subscriptions = market_subscriptions_from_store(&layouts.borrow(), &plugin_catalog);
     let market_feed_config = Arc::new(Mutex::new(market::MarketFeedConfig {
-        symbols: market_symbols.clone(),
+        subscriptions: market_subscriptions.clone(),
         provider: app_settings.market_provider,
         refresh_interval_seconds: app_settings.refresh_interval_seconds,
         enabled_sources: settings::enabled_market_sources(&app_settings),
@@ -389,7 +395,9 @@ fn main() -> Result<()> {
     );
 
     let market_updates = if offline_gui_smoke {
-        market::MarketFeed::from_events(deterministic_gui_smoke_market_events(&market_symbols))
+        market::MarketFeed::from_events(deterministic_gui_smoke_market_events(
+            &market_subscriptions,
+        ))
     } else {
         market::spawn_market_feed(market_feed_config)
     };
@@ -482,24 +490,34 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_gui_smoke_events_cover_every_symbol_with_valid_charts() {
-        let symbols = vec![
-            "binance:spot:BTC/USDT".to_string(),
-            "coinbase:spot:ETH/USD".to_string(),
+    fn deterministic_gui_smoke_events_respect_candle_requirements() {
+        let subscriptions = vec![
+            market::MarketSubscription {
+                symbol: "binance:spot:BTC/USDT".to_string(),
+                needs_candles: false,
+            },
+            market::MarketSubscription {
+                symbol: "coinbase:spot:ETH/USD".to_string(),
+                needs_candles: true,
+            },
         ];
-        let events = deterministic_gui_smoke_market_events(&symbols);
+        let events = deterministic_gui_smoke_market_events(&subscriptions);
 
-        assert_eq!(events.len(), symbols.len());
-        for (event, expected_symbol) in events.iter().zip(&symbols) {
+        assert_eq!(events.len(), subscriptions.len());
+        for (event, subscription) in events.iter().zip(&subscriptions) {
             let market::MarketEvent::Snapshot(snapshot) = event else {
                 panic!("offline GUI smoke should only emit snapshots");
             };
-            assert_eq!(&snapshot.symbol, expected_symbol);
+            assert_eq!(snapshot.symbol, subscription.symbol);
             assert!(snapshot.price.is_finite() && snapshot.price > 0.0);
             assert!(snapshot.change_percent_24h.is_finite());
-            assert_eq!(snapshot.chart_closes_24h.len(), 4);
-            assert_eq!(snapshot.chart_candles_24h.len(), 4);
-            assert!(snapshot.chart_updated_at.is_some());
+            let expected_candles = if subscription.needs_candles { 4 } else { 0 };
+            assert_eq!(snapshot.chart_closes_24h.len(), expected_candles);
+            assert_eq!(snapshot.chart_candles_24h.len(), expected_candles);
+            assert_eq!(
+                snapshot.chart_updated_at.is_some(),
+                subscription.needs_candles
+            );
             assert!(snapshot.chart_error.is_none());
             assert!(snapshot.chart_candles_24h.iter().all(|candle| {
                 [candle.open, candle.high, candle.low, candle.close]
@@ -956,8 +974,17 @@ mod tests {
             vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
         );
         assert_eq!(
-            symbols_from_store(&store, &catalog),
-            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+            market_subscriptions_from_store(&store, &catalog),
+            vec![
+                market::MarketSubscription {
+                    symbol: "binance:spot:BTC/USDT".to_string(),
+                    needs_candles: false,
+                },
+                market::MarketSubscription {
+                    symbol: "binance:spot:ETH/USDT".to_string(),
+                    needs_candles: false,
+                },
+            ]
         );
         assert_eq!(
             settings_window::symbols_help_text(
@@ -966,6 +993,97 @@ mod tests {
                 i18n::Locale::En
             ),
             "Up to 2 pairs"
+        );
+    }
+
+    #[test]
+    fn market_subscriptions_merge_candle_requirements_for_shared_pairs() {
+        let price_plugin = local_test_plugin_definition();
+        let mut candle_plugin = local_test_plugin_definition();
+        candle_plugin.id = "com.example.stage3-chart-card".to_string();
+        candle_plugin.name = "Stage 3 Chart Card".to_string();
+        candle_plugin
+            .data_requirements
+            .push(plugin::PluginDataRequirement {
+                capability: "market.candles".to_string(),
+            });
+        let catalog = plugin::PluginCatalog::from_plugins_for_tests(vec![
+            price_plugin.clone(),
+            candle_plugin.clone(),
+        ]);
+        let store = LayoutStore {
+            widgets: vec![
+                WidgetInstance {
+                    id: "price-card-1".to_string(),
+                    plugin_id: price_plugin.id,
+                    legacy_widget_type: None,
+                    name: "Price Card 1".to_string(),
+                    visible: true,
+                    layout: WidgetLayout::default(),
+                    symbols: vec!["BTC".to_string(), "ETH".to_string()],
+                    config: default_widget_config(),
+                },
+                WidgetInstance {
+                    id: "chart-card-2".to_string(),
+                    plugin_id: candle_plugin.id,
+                    legacy_widget_type: None,
+                    name: "Chart Card 2".to_string(),
+                    visible: true,
+                    layout: WidgetLayout::default(),
+                    symbols: vec!["binance:spot:BTC/USDT".to_string()],
+                    config: default_widget_config(),
+                },
+            ],
+            ..LayoutStore::default()
+        };
+
+        assert_eq!(
+            market_subscriptions_from_store(&store, &catalog),
+            vec![
+                market::MarketSubscription {
+                    symbol: "binance:spot:BTC/USDT".to_string(),
+                    needs_candles: true,
+                },
+                market::MarketSubscription {
+                    symbol: "binance:spot:ETH/USDT".to_string(),
+                    needs_candles: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn unavailable_plugins_cannot_enable_candle_requests() {
+        let mut unavailable_plugin = local_test_plugin_definition();
+        unavailable_plugin
+            .data_requirements
+            .push(plugin::PluginDataRequirement {
+                capability: "market.candles".to_string(),
+            });
+        unavailable_plugin.status =
+            plugin::PluginStatus::Unavailable("renderer unavailable".to_string());
+        let plugin_id = unavailable_plugin.id.clone();
+        let catalog = plugin::PluginCatalog::from_plugins_for_tests(vec![unavailable_plugin]);
+        let store = LayoutStore {
+            widgets: vec![WidgetInstance {
+                id: "unavailable-chart-card-1".to_string(),
+                plugin_id,
+                legacy_widget_type: None,
+                name: "Unavailable Chart Card 1".to_string(),
+                visible: true,
+                layout: WidgetLayout::default(),
+                symbols: vec!["binance:spot:BTC/USDT".to_string()],
+                config: default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+
+        assert_eq!(
+            market_subscriptions_from_store(&store, &catalog),
+            vec![market::MarketSubscription {
+                symbol: "binance:spot:BTC/USDT".to_string(),
+                needs_candles: false,
+            }]
         );
     }
 
@@ -1137,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    fn market_symbols_ignore_alert_rules_while_disabled() {
+    fn market_subscriptions_ignore_alert_rules_while_disabled() {
         let store = LayoutStore {
             widgets: vec![
                 WidgetInstance {
@@ -1185,8 +1303,17 @@ mod tests {
 
         let catalog = plugin::PluginCatalog::builtins();
         assert_eq!(
-            symbols_from_store(&store, &catalog),
-            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+            market_subscriptions_from_store(&store, &catalog),
+            vec![
+                market::MarketSubscription {
+                    symbol: "binance:spot:BTC/USDT".to_string(),
+                    needs_candles: false,
+                },
+                market::MarketSubscription {
+                    symbol: "binance:spot:ETH/USDT".to_string(),
+                    needs_candles: false,
+                },
+            ]
         );
     }
 }

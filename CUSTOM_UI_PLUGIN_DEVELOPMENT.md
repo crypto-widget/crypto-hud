@@ -82,6 +82,9 @@ Manifest requirements:
   Each entry follows the same strict relative-path rule as `renderer.entry` and must resolve inside
   the plugin directory.
 - `dataRequirements` currently supports `market.price` and `market.candles`.
+  `market.candles` is opt-in: the host requests candles for a pair only when at least one
+  configured, available widget for that pair declares the capability. Requirements from widgets
+  that share a pair are merged into one market subscription.
 
 All `.slint` imports and `@image-url()` resources must resolve inside the plugin directory. Image
 resources support `png`, `jpg`, `jpeg`, and `svg`, with a 1 MiB limit per asset. File imports other

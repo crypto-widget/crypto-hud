@@ -1,3 +1,4 @@
+use crypto_hud_market as market;
 use crypto_hud_shell_state as settings;
 #[cfg(test)]
 use settings::LegacyLayoutStore;
@@ -243,17 +244,24 @@ pub(crate) fn parse_symbols_for_type(input: &str, widget_type: WidgetType) -> Ve
     settings::parse_symbols_for_type(input, widget_type)
 }
 
-pub(crate) fn symbols_from_store(
+pub(crate) fn market_subscriptions_from_store(
     store: &LayoutStore,
     plugin_catalog: &plugin::PluginCatalog,
-) -> Vec<String> {
-    let mut symbols = Vec::new();
+) -> Vec<market::MarketSubscription> {
+    let mut subscriptions = Vec::new();
     let definitions = widget_definitions_from_catalog(plugin_catalog);
     for widget in &store.widgets {
+        let needs_candles = plugin_catalog
+            .find(&widget.plugin_id)
+            .filter(|plugin| plugin.is_available())
+            .is_some_and(|plugin| {
+                plugin
+                    .data_requirements
+                    .iter()
+                    .any(|requirement| requirement.capability == "market.candles")
+            });
         for symbol in settings::normalized_symbols_for_instance(widget, &definitions) {
-            if !symbols.contains(&symbol) {
-                symbols.push(symbol);
-            }
+            merge_market_subscription(&mut subscriptions, symbol, needs_candles);
         }
     }
     if feature_flags::ALERT_RULES_ENABLED {
@@ -262,13 +270,29 @@ pub(crate) fn symbols_from_store(
                 continue;
             }
             if let Some(symbol) = settings::normalize_market_pair_key(&rule.symbol) {
-                if !symbols.contains(&symbol) {
-                    symbols.push(symbol);
-                }
+                merge_market_subscription(&mut subscriptions, symbol, false);
             }
         }
     }
-    symbols
+    subscriptions
+}
+
+fn merge_market_subscription(
+    subscriptions: &mut Vec<market::MarketSubscription>,
+    symbol: String,
+    needs_candles: bool,
+) {
+    if let Some(existing) = subscriptions
+        .iter_mut()
+        .find(|subscription| subscription.symbol == symbol)
+    {
+        existing.needs_candles |= needs_candles;
+    } else {
+        subscriptions.push(market::MarketSubscription {
+            symbol,
+            needs_candles,
+        });
+    }
 }
 
 pub(crate) fn normalized_symbols_for_instance(

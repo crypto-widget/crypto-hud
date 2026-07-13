@@ -74,6 +74,8 @@ com.example.my-widget/
   也不能少于 `minSymbolLimit`。未写数据源的输入会按 Binance 现货和 USDT
   默认报价规范化，例如 `BTC` 等价于 `binance:spot:BTC/USDT`。
 - `dataRequirements` 当前只支持 `market.price` 和 `market.candles`。
+  `market.candles` 是显式启用能力：只有至少一个已配置且可用的组件为该交易对声明此能力时，
+  宿主才会请求 K 线。共享同一交易对的多个组件会合并成一条行情订阅。
 - 允许的文件扩展名为 `json`、`slint`、`png`、`jpg`、`jpeg`、`svg`。
 - `previewImages` 与 `renderer.entry` 使用相同的严格相对路径规则，且必须解析到插件
   目录内部。

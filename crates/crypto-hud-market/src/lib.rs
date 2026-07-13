@@ -62,11 +62,17 @@ pub enum MarketEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketFeedConfig {
-    pub symbols: Vec<String>,
+    pub subscriptions: Vec<MarketSubscription>,
     pub provider: MarketProviderPreference,
     pub refresh_interval_seconds: i32,
     pub enabled_sources: Vec<MarketDataSource>,
     pub proxy_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketSubscription {
+    pub symbol: String,
+    pub needs_candles: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,10 +238,10 @@ fn run_market_feed(
         let refresh_interval =
             Duration::from_secs(clamp_refresh_interval(config.refresh_interval_seconds) as u64);
         let proxy_url = normalized_proxy_url(config.proxy_url.clone());
-        let symbols = unique_market_pair_keys(config.symbols.clone())
+        let subscriptions = merged_market_subscriptions(config.subscriptions.clone())
             .into_iter()
-            .filter(|symbol| {
-                market_pair_source(symbol).is_some_and(|source| {
+            .filter(|subscription| {
+                market_pair_source(&subscription.symbol).is_some_and(|source| {
                     config.enabled_sources.is_empty() || config.enabled_sources.contains(&source)
                 })
             })
@@ -262,8 +268,12 @@ fn run_market_feed(
                 cancelled.load(Ordering::Acquire)
                     || market_feed_config_snapshot(&shared_config) != config
             };
-            let fetch =
-                fetch_symbols_interruptible(&agent, &symbols, &mut candle_cache, &interrupted);
+            let fetch = fetch_subscriptions_interruptible(
+                &agent,
+                &subscriptions,
+                &mut candle_cache,
+                &interrupted,
+            );
             if cancelled.load(Ordering::Acquire) {
                 return;
             }
@@ -542,30 +552,44 @@ fn non_empty_trimmed(value: &str) -> Option<&str> {
     }
 }
 
-fn unique_market_pair_keys(symbols: Vec<String>) -> Vec<String> {
-    symbols
-        .iter()
-        .filter_map(|symbol| normalize_market_pair_key(symbol))
-        .fold(Vec::new(), |mut unique, symbol| {
-            if !unique.contains(&symbol) {
-                unique.push(symbol);
+fn merged_market_subscriptions(subscriptions: Vec<MarketSubscription>) -> Vec<MarketSubscription> {
+    subscriptions.into_iter().fold(
+        Vec::<MarketSubscription>::new(),
+        |mut merged, subscription| {
+            let Some(symbol) = normalize_market_pair_key(&subscription.symbol) else {
+                return merged;
+            };
+            if let Some(existing) = merged.iter_mut().find(|item| item.symbol == symbol) {
+                existing.needs_candles |= subscription.needs_candles;
+            } else {
+                merged.push(MarketSubscription {
+                    symbol,
+                    needs_candles: subscription.needs_candles,
+                });
             }
-            unique
-        })
+            merged
+        },
+    )
 }
 
-fn fetch_symbols_interruptible(
+fn fetch_subscriptions_interruptible(
     agent: &ureq::Agent,
-    symbols: &[String],
+    subscriptions: &[MarketSubscription],
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Option<Result<MarketBatch>> {
-    fetch_symbols_interruptible_with(agent, symbols, candle_cache, interrupted, fetch_pair)
+    fetch_subscriptions_interruptible_with(
+        agent,
+        subscriptions,
+        candle_cache,
+        interrupted,
+        fetch_pair,
+    )
 }
 
-fn fetch_symbols_interruptible_with<F>(
+fn fetch_subscriptions_interruptible_with<F>(
     agent: &ureq::Agent,
-    symbols: &[String],
+    subscriptions: &[MarketSubscription],
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
     fetch: F,
@@ -574,6 +598,7 @@ where
     F: Fn(
             &ureq::Agent,
             &MarketPair,
+            bool,
             &mut CandleCache,
             &(dyn Fn() -> bool + Sync),
         ) -> Result<MarketFetchOutcome>
@@ -582,21 +607,25 @@ where
     if interrupted() {
         return None;
     }
-    if symbols.is_empty() {
+    candle_cache.retain(|key, _| {
+        subscriptions
+            .iter()
+            .any(|subscription| subscription.needs_candles && subscription.symbol == *key)
+    });
+    if subscriptions.is_empty() {
         return Some(Err(anyhow!("no market pairs configured")));
     }
 
     let mut snapshots = Vec::new();
     let mut errors = Vec::new();
     let mut pairs = Vec::new();
-    for symbol in symbols {
-        match parse_market_pair(symbol) {
-            Some(pair) => pairs.push((symbol.clone(), pair)),
-            None => errors.push(format!("{symbol}: invalid market pair")),
+    for subscription in subscriptions {
+        match parse_market_pair(&subscription.symbol) {
+            Some(pair) => pairs.push((subscription.clone(), pair)),
+            None => errors.push(format!("{}: invalid market pair", subscription.symbol)),
         }
     }
 
-    candle_cache.retain(|key, _| symbols.contains(key));
     for chunk in pairs.chunks(MAX_CONCURRENT_PAIR_FETCHES) {
         if interrupted() {
             return None;
@@ -605,19 +634,28 @@ where
         let results = thread::scope(|scope| {
             let handles = chunk
                 .iter()
-                .map(|(symbol, pair)| {
+                .map(|(subscription, pair)| {
                     let agent = agent.clone();
-                    let symbol = symbol.clone();
+                    let subscription = subscription.clone();
                     let pair = pair.clone();
-                    let cached_entry = candle_cache.get(&pair.key()).cloned();
+                    let cached_entry = subscription
+                        .needs_candles
+                        .then(|| candle_cache.get(&pair.key()).cloned())
+                        .flatten();
                     scope.spawn(move || {
                         let key = pair.key();
                         let mut local_cache = CandleCache::new();
                         if let Some(entry) = cached_entry {
                             local_cache.insert(key.clone(), entry);
                         }
-                        let result = fetch(&agent, &pair, &mut local_cache, interrupted);
-                        (symbol, result, local_cache.remove(&key))
+                        let result = fetch(
+                            &agent,
+                            &pair,
+                            subscription.needs_candles,
+                            &mut local_cache,
+                            interrupted,
+                        );
+                        (subscription, result, local_cache.remove(&key))
                     })
                 })
                 .collect::<Vec<_>>();
@@ -629,21 +667,23 @@ where
         });
 
         for result in results {
-            let Ok((symbol, result, cached_entry)) = result else {
+            let Ok((subscription, result, cached_entry)) = result else {
                 errors.push("market pair worker panicked".to_string());
                 continue;
             };
-            if let Some(entry) = cached_entry {
-                candle_cache.insert(symbol.clone(), entry);
+            if subscription.needs_candles {
+                if let Some(entry) = cached_entry {
+                    candle_cache.insert(subscription.symbol.clone(), entry);
+                }
             }
             match result {
                 Ok(outcome) => {
                     snapshots.push(outcome.snapshot);
                     if let Some(warning) = outcome.warning {
-                        errors.push(format!("{symbol}: {warning}"));
+                        errors.push(format!("{}: {warning}", subscription.symbol));
                     }
                 }
-                Err(error) => errors.push(format!("{symbol}: {error}")),
+                Err(error) => errors.push(format!("{}: {error}", subscription.symbol)),
             }
         }
         if interrupted() {
@@ -664,20 +704,28 @@ fn market_batch(snapshots: Vec<MarketSnapshot>, errors: Vec<String>) -> Result<M
 fn fetch_pair(
     agent: &ureq::Agent,
     pair: &MarketPair,
+    needs_candles: bool,
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
     match pair.source {
-        MarketDataSource::Binance => fetch_binance(agent, pair, candle_cache, interrupted),
-        MarketDataSource::Coinbase => fetch_coinbase(agent, pair, candle_cache, interrupted),
-        MarketDataSource::Okx => fetch_okx(agent, pair, candle_cache, interrupted),
-        MarketDataSource::Hyperliquid => fetch_hyperliquid(agent, pair, candle_cache, interrupted),
+        MarketDataSource::Binance => {
+            fetch_binance(agent, pair, needs_candles, candle_cache, interrupted)
+        }
+        MarketDataSource::Coinbase => {
+            fetch_coinbase(agent, pair, needs_candles, candle_cache, interrupted)
+        }
+        MarketDataSource::Okx => fetch_okx(agent, pair, needs_candles, candle_cache, interrupted),
+        MarketDataSource::Hyperliquid => {
+            fetch_hyperliquid(agent, pair, needs_candles, candle_cache, interrupted)
+        }
     }
 }
 
 fn fetch_binance(
     agent: &ureq::Agent,
     pair: &MarketPair,
+    needs_candles: bool,
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
@@ -689,15 +737,20 @@ fn fetch_binance(
     ensure_fetch_active(interrupted)?;
     let snapshot = parse_binance_ticker(pair, &body)?;
     ensure_fetch_active(interrupted)?;
-    Ok(snapshot_with_candles(
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
         snapshot,
-        cached_or_fetch_candles(agent, pair, candle_cache, fetch_binance_candles),
+        needs_candles,
+        candle_cache,
+        fetch_binance_candles,
     ))
 }
 
 fn fetch_coinbase(
     agent: &ureq::Agent,
     pair: &MarketPair,
+    needs_candles: bool,
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
@@ -709,15 +762,20 @@ fn fetch_coinbase(
     ensure_fetch_active(interrupted)?;
     let snapshot = parse_coinbase_stats(pair, &body)?;
     ensure_fetch_active(interrupted)?;
-    Ok(snapshot_with_candles(
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
         snapshot,
-        cached_or_fetch_candles(agent, pair, candle_cache, fetch_coinbase_candles),
+        needs_candles,
+        candle_cache,
+        fetch_coinbase_candles,
     ))
 }
 
 fn fetch_okx(
     agent: &ureq::Agent,
     pair: &MarketPair,
+    needs_candles: bool,
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
@@ -729,15 +787,20 @@ fn fetch_okx(
     ensure_fetch_active(interrupted)?;
     let snapshot = parse_okx_ticker(pair, &body)?;
     ensure_fetch_active(interrupted)?;
-    Ok(snapshot_with_candles(
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
         snapshot,
-        cached_or_fetch_candles(agent, pair, candle_cache, fetch_okx_candles),
+        needs_candles,
+        candle_cache,
+        fetch_okx_candles,
     ))
 }
 
 fn fetch_hyperliquid(
     agent: &ureq::Agent,
     pair: &MarketPair,
+    needs_candles: bool,
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
 ) -> Result<MarketFetchOutcome> {
@@ -758,9 +821,13 @@ fn fetch_hyperliquid(
     ensure_fetch_active(interrupted)?;
     let snapshot = parse_hyperliquid_ticker(pair, &body)?;
     ensure_fetch_active(interrupted)?;
-    Ok(snapshot_with_candles(
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
         snapshot,
-        cached_or_fetch_candles(agent, pair, candle_cache, fetch_hyperliquid_candles),
+        needs_candles,
+        candle_cache,
+        fetch_hyperliquid_candles,
     ))
 }
 
@@ -793,6 +860,26 @@ fn snapshot_with_candles(
             None
         },
     }
+}
+
+fn snapshot_with_optional_candles(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    snapshot: MarketSnapshot,
+    needs_candles: bool,
+    candle_cache: &mut CandleCache,
+    fetch: fn(&ureq::Agent, &MarketPair) -> Result<Vec<MarketCandle>>,
+) -> MarketFetchOutcome {
+    if !needs_candles {
+        return MarketFetchOutcome {
+            snapshot,
+            warning: None,
+        };
+    }
+    snapshot_with_candles(
+        snapshot,
+        cached_or_fetch_candles(agent, pair, candle_cache, fetch),
+    )
 }
 
 fn ensure_spot_pair(pair: &MarketPair) -> Result<()> {
@@ -1675,9 +1762,23 @@ mod tests {
         panic!("candle fetch should remain suppressed during retry backoff")
     }
 
+    fn available_candles(_: &ureq::Agent, _: &MarketPair) -> Result<Vec<MarketCandle>> {
+        Ok(vec![
+            candle(1_700_000_000_000, 100.0, 102.0, 99.0, 101.0),
+            candle(1_700_000_300_000, 101.0, 103.0, 100.0, 102.0),
+        ])
+    }
+
+    fn subscription(symbol: &str, needs_candles: bool) -> MarketSubscription {
+        MarketSubscription {
+            symbol: symbol.to_string(),
+            needs_candles,
+        }
+    }
+
     fn feed_config() -> MarketFeedConfig {
         MarketFeedConfig {
-            symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            subscriptions: vec![subscription("binance:spot:BTC/USDT", false)],
             provider: MarketProviderPreference::Auto,
             refresh_interval_seconds: DEFAULT_REFRESH_INTERVAL_SECONDS,
             enabled_sources: default_enabled_market_sources(),
@@ -1788,16 +1889,16 @@ mod tests {
         });
         let interrupted = || cancelled.load(Ordering::Acquire);
         let mut candle_cache = CandleCache::new();
-        let symbols = vec!["binance:spot:BTC/USDT".to_string()];
+        let subscriptions = vec![subscription("binance:spot:BTC/USDT", false)];
         let started_at = Instant::now();
         let url = server.url.clone();
 
-        let result = fetch_symbols_interruptible_with(
+        let result = fetch_subscriptions_interruptible_with(
             &agent,
-            &symbols,
+            &subscriptions,
             &mut candle_cache,
             &interrupted,
-            |agent, pair, _, interrupted| {
+            |agent, pair, _, _, interrupted| {
                 get_json(agent, &url)?;
                 ensure_fetch_active(interrupted)?;
                 Ok(MarketFetchOutcome {
@@ -1820,7 +1921,7 @@ mod tests {
     fn market_feed_wait_detects_config_changes_without_waiting_for_refresh() {
         let config = Arc::new(Mutex::new(feed_config()));
         let observed = market_feed_config_snapshot(&config);
-        config.lock().unwrap().symbols = vec!["okx:spot:ETH/USDT".to_string()];
+        config.lock().unwrap().subscriptions = vec![subscription("okx:spot:ETH/USDT", false)];
         let (_control_sender, control_receiver) = mpsc::channel();
         let cancelled = AtomicBool::new(false);
 
@@ -1834,6 +1935,146 @@ mod tests {
             ),
             MarketFeedWait::ConfigChanged
         ));
+    }
+
+    #[test]
+    fn market_feed_wait_detects_candle_requirement_changes() {
+        let config = Arc::new(Mutex::new(feed_config()));
+        let observed = market_feed_config_snapshot(&config);
+        config.lock().unwrap().subscriptions[0].needs_candles = true;
+        let (_control_sender, control_receiver) = mpsc::channel();
+        let cancelled = AtomicBool::new(false);
+
+        assert!(matches!(
+            wait_for_market_feed(
+                &control_receiver,
+                &cancelled,
+                &config,
+                &observed,
+                Duration::from_secs(60)
+            ),
+            MarketFeedWait::ConfigChanged
+        ));
+    }
+
+    #[test]
+    fn duplicate_market_subscriptions_merge_candle_requirements() {
+        let subscriptions = merged_market_subscriptions(vec![
+            subscription("BTC", false),
+            subscription("binance:spot:BTC/USDT", true),
+            subscription("btc/usdt", false),
+        ]);
+
+        assert_eq!(
+            subscriptions,
+            vec![subscription("binance:spot:BTC/USDT", true)]
+        );
+    }
+
+    #[test]
+    fn price_only_subscription_skips_candles_and_clears_cached_chart_state() {
+        let agent = build_agent(None).unwrap();
+        let subscriptions = vec![subscription("binance:spot:BTC/USDT", false)];
+        let pair = pair("binance:spot:BTC/USDT");
+        let mut candle_cache = CandleCache::from([(
+            pair.key(),
+            CandleCacheEntry {
+                candles: available_candles(&agent, &pair).unwrap(),
+                fetched_at: Some(Instant::now()),
+                retry_at: None,
+                consecutive_failures: 0,
+                last_error: None,
+            },
+        )]);
+
+        let batch = fetch_subscriptions_interruptible_with(
+            &agent,
+            &subscriptions,
+            &mut candle_cache,
+            &|| false,
+            |agent, pair, needs_candles, cache, _| {
+                Ok(snapshot_with_optional_candles(
+                    agent,
+                    pair,
+                    snapshot(&pair.key()),
+                    needs_candles,
+                    cache,
+                    unexpected_candle_fetch,
+                ))
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(candle_cache.is_empty());
+        assert_eq!(batch.snapshots.len(), 1);
+        assert!(batch.snapshots[0].chart_candles_24h.is_empty());
+        assert!(batch.snapshots[0].chart_error.is_none());
+        assert!(batch.errors.is_empty());
+    }
+
+    #[test]
+    fn empty_subscription_set_clears_cached_chart_state() {
+        let agent = build_agent(None).unwrap();
+        let pair = pair("binance:spot:BTC/USDT");
+        let mut candle_cache = CandleCache::from([(
+            pair.key(),
+            CandleCacheEntry {
+                candles: available_candles(&agent, &pair).unwrap(),
+                fetched_at: Some(Instant::now()),
+                retry_at: None,
+                consecutive_failures: 0,
+                last_error: None,
+            },
+        )]);
+
+        let result = fetch_subscriptions_interruptible_with(
+            &agent,
+            &[],
+            &mut candle_cache,
+            &|| false,
+            |_, _, _, _, _| panic!("empty subscriptions must not start market fetches"),
+        )
+        .unwrap();
+
+        assert!(result.is_err());
+        assert!(candle_cache.is_empty());
+    }
+
+    #[test]
+    fn mixed_subscriptions_fetch_candles_only_for_requested_pairs() {
+        let agent = build_agent(None).unwrap();
+        let subscriptions = vec![
+            subscription("binance:spot:BTC/USDT", false),
+            subscription("binance:spot:ETH/USDT", true),
+        ];
+        let mut candle_cache = CandleCache::new();
+
+        let batch = fetch_subscriptions_interruptible_with(
+            &agent,
+            &subscriptions,
+            &mut candle_cache,
+            &|| false,
+            |agent, pair, needs_candles, cache, _| {
+                Ok(snapshot_with_optional_candles(
+                    agent,
+                    pair,
+                    snapshot(&pair.key()),
+                    needs_candles,
+                    cache,
+                    available_candles,
+                ))
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(batch.snapshots.len(), 2);
+        assert!(batch.snapshots[0].chart_candles_24h.is_empty());
+        assert_eq!(batch.snapshots[1].chart_candles_24h.len(), 2);
+        assert!(!candle_cache.contains_key("binance:spot:BTC/USDT"));
+        assert!(candle_cache.contains_key("binance:spot:ETH/USDT"));
+        assert!(batch.errors.is_empty());
     }
 
     #[test]

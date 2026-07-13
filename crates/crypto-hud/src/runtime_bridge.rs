@@ -26,7 +26,7 @@ use crate::{
     feature_flags, i18n, notifications, plugin,
     settings_window::{apply_available_update, widget_type_title},
     state_bridge::{
-        layout_for_instance, normalized_symbols_for_instance, symbols_from_store,
+        layout_for_instance, market_subscriptions_from_store, normalized_symbols_for_instance,
         widget_definitions_from_catalog,
     },
     theme, updater,
@@ -762,7 +762,7 @@ pub(crate) fn update_market_feed_config_from_store(
     update_market_feed_config(
         market_feed_config,
         settings,
-        symbols_from_store(store, plugin_catalog),
+        market_subscriptions_from_store(store, plugin_catalog),
     );
 }
 
@@ -958,27 +958,40 @@ fn provider_labels(locale: i18n::Locale) -> ProviderLabels<'static> {
 fn update_market_feed_config(
     market_feed_config: &Arc<Mutex<market::MarketFeedConfig>>,
     settings: AppSettings,
-    symbols: Vec<String>,
+    subscriptions: Vec<market::MarketSubscription>,
 ) {
     if let Ok(mut config) = market_feed_config.lock() {
         config.provider = settings.market_provider;
         config.refresh_interval_seconds = settings.refresh_interval_seconds;
         config.enabled_sources = settings::enabled_market_sources(&settings);
         config.proxy_url = settings::effective_network_proxy_url(&settings);
-        config.symbols = normalized_feed_symbols(symbols);
+        config.subscriptions = normalized_feed_subscriptions(subscriptions);
     }
 }
 
-fn normalized_feed_symbols(symbols: Vec<String>) -> Vec<String> {
-    symbols
-        .iter()
-        .filter_map(|symbol| settings::normalize_market_pair_key(symbol))
-        .fold(Vec::new(), |mut unique, symbol| {
-            if !unique.contains(&symbol) {
-                unique.push(symbol);
+fn normalized_feed_subscriptions(
+    subscriptions: Vec<market::MarketSubscription>,
+) -> Vec<market::MarketSubscription> {
+    subscriptions.into_iter().fold(
+        Vec::<market::MarketSubscription>::new(),
+        |mut normalized, subscription| {
+            let Some(symbol) = settings::normalize_market_pair_key(&subscription.symbol) else {
+                return normalized;
+            };
+            if let Some(existing) = normalized
+                .iter_mut()
+                .find(|existing| existing.symbol == symbol)
+            {
+                existing.needs_candles |= subscription.needs_candles;
+            } else {
+                normalized.push(market::MarketSubscription {
+                    symbol,
+                    needs_candles: subscription.needs_candles,
+                });
             }
-            unique
-        })
+            normalized
+        },
+    )
 }
 
 fn notify_alerts(
@@ -1045,15 +1058,19 @@ mod tests {
     }
 
     #[test]
-    fn feed_symbol_normalization_does_not_apply_a_single_widget_limit() {
-        let symbols = (0..25)
-            .map(|index| format!("binance:spot:ASSET{index}/USDT"))
+    fn feed_subscription_normalization_does_not_apply_a_single_widget_limit() {
+        let subscriptions = (0..25)
+            .map(|index| market::MarketSubscription {
+                symbol: format!("binance:spot:ASSET{index}/USDT"),
+                needs_candles: index == 24,
+            })
             .collect::<Vec<_>>();
 
-        let normalized = normalized_feed_symbols(symbols);
+        let normalized = normalized_feed_subscriptions(subscriptions);
 
         assert_eq!(normalized.len(), 25);
-        assert_eq!(normalized[24], "binance:spot:ASSET24/USDT");
+        assert_eq!(normalized[24].symbol, "binance:spot:ASSET24/USDT");
+        assert!(normalized[24].needs_candles);
     }
 
     #[test]
