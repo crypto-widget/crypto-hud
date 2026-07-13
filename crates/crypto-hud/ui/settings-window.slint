@@ -763,6 +763,8 @@ export component SettingsWindow inherits Window {
     in-out property <int> widget-theme-index;
     in-out property <bool> widget-show-coin-logos;
     in-out property <bool> widget-hide-quote-asset;
+    in-out property <bool> widget-show-header: true;
+    in property <bool> widget-show-header-control-visible: false;
     in property <int> widget-scale-min-percent: 30;
     in property <int> widget-scale-max-percent: 200;
     in-out property <string> widget-name-input-text;
@@ -841,8 +843,9 @@ export component SettingsWindow inherits Window {
     property <int> widget-display-section-y: root.widget-symbol-status-y + 10;
     property <bool> widget-theme-control-visible: root.has-widgets && root.widget-theme-options.length > 0;
     property <int> widget-theme-settings-offset: root.widget-theme-control-visible ? 52 : 0;
+    property <int> widget-header-settings-offset: root.widget-show-header-control-visible ? 50 : 0;
     property <int> widget-parameter-settings-offset: root.widget-parameter-labels.length > 0 ? 28 + root.widget-parameter-labels.length * 52 : 0;
-    property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset + root.widget-parameter-settings-offset) * 1px;
+    property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset + root.widget-header-settings-offset + root.widget-parameter-settings-offset) * 1px;
     in property <int> widget-symbol-min: 1;
     in property <int> widget-symbol-max: 5;
     in property <int> default-symbol-min: 1;
@@ -945,6 +948,8 @@ export component SettingsWindow inherits Window {
     in property <string> widget-show-coin-logos-help-text;
     in property <string> widget-hide-quote-asset-text;
     in property <string> widget-hide-quote-asset-help-text;
+    in property <string> widget-show-header-text;
+    in property <string> widget-show-header-help-text;
     in property <string> widget-theme-text;
     in property <string> widget-theme-help-text;
     in property <string> widget-topmost-text;
@@ -1033,7 +1038,7 @@ export component SettingsWindow inherits Window {
     callback remove-widget-symbol(int, int);
     callback select-widget(int);
     callback add-widget(int);
-    callback apply-widget-settings(int, string, bool, bool, int, int, int, bool, bool);
+    callback apply-widget-settings(int, string, bool, bool, int, int, int, bool, bool, bool);
     callback apply-widget-scale(int, int);
     callback apply-widget-integer-parameter(int, int, int);
     callback toggle-widget-visibility(int);
@@ -1098,7 +1103,8 @@ export component SettingsWindow inherits Window {
                 root.widget-scale-percent,
                 root.widget-theme-index,
                 root.widget-show-coin-logos,
-                root.widget-hide-quote-asset
+                root.widget-hide-quote-asset,
+                root.widget-show-header
             );
         }
     }
@@ -1990,6 +1996,44 @@ export component SettingsWindow inherits Window {
                     x: 17px;
                     y: (root.widget-display-section-y + root.widget-theme-settings-offset + 142) * 1px;
                     width: parent.width - 89px;
+                    label: root.widget-show-header-text;
+                    help: root.widget-show-header-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                    visible: root.widget-show-header-control-visible;
+                }
+
+                SettingSwitch {
+                    x: parent.width - 54px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 148) * 1px;
+                    checked <=> root.widget-show-header;
+                    accessible-label-text: root.widget-show-header-text;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    visible: root.widget-show-header-control-visible;
+                    enabled: root.widget-show-header-control-visible;
+                    toggled => { root.apply-current-widget-settings(); }
+                }
+
+                TouchArea {
+                    x: 17px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 130) * 1px;
+                    width: parent.width - 89px;
+                    height: 47px;
+                    visible: root.widget-show-header-control-visible;
+                    enabled: root.widget-show-header-control-visible;
+                    clicked => {
+                        root.widget-show-header = !root.widget-show-header;
+                        root.apply-current-widget-settings();
+                    }
+                }
+
+                SettingLabel {
+                    rtl-layout: root.rtl-layout;
+                    x: 17px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 142) * 1px;
+                    width: parent.width - 89px;
                     label: root.widget-show-coin-logos-text;
                     help: root.widget-show-coin-logos-help-text;
                     label-color: root.settings-label-color;
@@ -1998,7 +2042,7 @@ export component SettingsWindow inherits Window {
 
                 SettingSwitch {
                     x: parent.width - 54px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 148) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 148) * 1px;
                     checked <=> root.widget-show-coin-logos;
                     accessible-label-text: root.widget-show-coin-logos-text;
                     accent-color: root.settings-accent-color;
@@ -2009,7 +2053,7 @@ export component SettingsWindow inherits Window {
 
                 TouchArea {
                     x: 17px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 130) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 130) * 1px;
                     width: parent.width - 89px;
                     height: 47px;
                     clicked => {
@@ -2021,7 +2065,7 @@ export component SettingsWindow inherits Window {
                 SettingLabel {
                     rtl-layout: root.rtl-layout;
                     x: 17px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 192) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 192) * 1px;
                     width: parent.width - 89px;
                     label: root.widget-hide-quote-asset-text;
                     help: root.widget-hide-quote-asset-help-text;
@@ -2031,7 +2075,7 @@ export component SettingsWindow inherits Window {
 
                 SettingSwitch {
                     x: parent.width - 54px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 198) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 198) * 1px;
                     checked <=> root.widget-hide-quote-asset;
                     accessible-label-text: root.widget-hide-quote-asset-text;
                     accent-color: root.settings-accent-color;
@@ -2042,7 +2086,7 @@ export component SettingsWindow inherits Window {
 
                 TouchArea {
                     x: 17px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 180) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 180) * 1px;
                     width: parent.width - 89px;
                     height: 47px;
                     clicked => {
@@ -2185,7 +2229,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 239) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 239) * 1px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -2193,7 +2237,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: 17px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 255) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 255) * 1px;
                     width: parent.width - 52px;
                     height: 16px;
                     text: root.advanced-options-text;
@@ -2207,7 +2251,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 34px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 253) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 253) * 1px;
                     width: 17px;
                     height: 17px;
                     text: ">";
@@ -2220,7 +2264,7 @@ export component SettingsWindow inherits Window {
 
                 for parameter-label[index] in root.widget-parameter-labels : Rectangle {
                     x: 0px;
-                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + 281 + index * 52) * 1px;
+                    y: (root.widget-display-section-y + root.widget-theme-settings-offset + root.widget-header-settings-offset + 281 + index * 52) * 1px;
                     width: parent.width;
                     height: 46px;
                     background: transparent;

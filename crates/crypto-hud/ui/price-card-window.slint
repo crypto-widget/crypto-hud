@@ -88,17 +88,21 @@ export component PriceCardWindow inherits Window {
     in property <bool> compact-mode;
     in property <bool> show-coin-logos: true;
     in property <bool> hide-quote-asset;
+    in property <bool> show-header: true;
     in-out property <bool> card-left-drag-active: false;
 
     property <length> quote-board-base-width: root.hide-quote-asset
         ? (root.show-coin-logos ? 246px : 224px)
         : (root.show-coin-logos ? 286px : 274px);
     property <int> quote-board-row-count: root.quote-rows.length < 1 ? 1 : (root.quote-rows.length > 20 ? 20 : root.quote-rows.length);
-    property <length> quote-board-base-height: root.quote-board-row-count <= 1
-        ? 80px
-        : (root.quote-board-row-count <= 5
-            ? 70px + (root.quote-board-row-count - 1) * 31px
-            : 194px + (root.quote-board-row-count - 5) * 26px);
+    property <length> quote-board-rows-height: 25px + (root.quote-board-row-count - 1) * 26px;
+    property <length> quote-board-base-height: !root.show-header
+        ? root.quote-board-rows-height + 24px
+        : (root.quote-board-row-count <= 1
+            ? 80px
+            : (root.quote-board-row-count <= 5
+                ? 70px + (root.quote-board-row-count - 1) * 31px
+                : 194px + (root.quote-board-row-count - 5) * 26px));
     property <length> shell-width: root.compact-mode ? 236px : root.quote-board-base-width;
     property <length> shell-height: root.compact-mode ? 112px : root.quote-board-base-height;
     property <length> window-padding: 6px;
@@ -117,7 +121,9 @@ export component PriceCardWindow inherits Window {
     property <color> card-edge-shadow-color: root.light-theme ? #0f172a18 : #7dd3fc24;
     property <bool> quote-icon-space-visible: root.show-coin-logos;
     property <length> quote-board-row-width: root.s(root.content-width - root.card-edge-inset * 2 - 24px);
-    property <length> quote-board-row-start-y: root.s(root.quote-board-row-count <= 1 ? 35px : 41px);
+    property <length> quote-board-row-start-y: root.s(
+        root.show-header ? (root.quote-board-row-count <= 1 ? 35px : 41px) : 6px
+    );
     property <length> quote-board-symbol-x: root.s(root.quote-icon-space-visible ? 25px : 4px);
     property <length> quote-board-symbol-width: root.s(root.hide-quote-asset ? 46px : (root.quote-icon-space-visible ? 80px : 92px));
     property <length> quote-board-price-x: root.quote-board-symbol-x + root.quote-board-symbol-width + root.s(6px);
@@ -235,7 +241,7 @@ export component PriceCardWindow inherits Window {
             width: parent.width - root.s(2px);
             height: root.s(1px);
             background: root.row-divider-color;
-            visible: !root.compact-mode;
+            visible: !root.compact-mode && root.show-header;
         }
 
         Text {
@@ -248,7 +254,7 @@ export component PriceCardWindow inherits Window {
             font-size: root.s(13px);
             font-weight: 800;
             horizontal-alignment: root.rtl-layout ? right : left;
-            visible: !root.compact-mode;
+            visible: !root.compact-mode && root.show-header;
             overflow: elide;
         }
 
@@ -262,7 +268,7 @@ export component PriceCardWindow inherits Window {
             font-size: root.s(11px);
             font-weight: 700;
             horizontal-alignment: root.rtl-layout ? left : right;
-            visible: !root.compact-mode;
+            visible: !root.compact-mode && root.show-header;
             overflow: elide;
         }
 
@@ -352,7 +358,7 @@ export component PriceCardWindow inherits Window {
 
         Text {
             x: root.s(14px);
-            y: root.s(root.compact-mode ? 48px : 42px);
+            y: root.s(root.compact-mode ? 48px : (root.show-header ? 42px : 10px));
             width: parent.width - root.s(28px);
             text: root.empty-text;
             color: root.card-updated-text-color;

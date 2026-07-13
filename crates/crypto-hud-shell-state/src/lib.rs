@@ -37,6 +37,7 @@ pub const DEFAULT_LAYOUT_MARGIN_Y: i32 = 96;
 pub const DEFAULT_LAYOUT_GAP: i32 = 24;
 pub const WIDGET_CONFIG_SHOW_COIN_LOGOS: &str = "show_coin_logos";
 pub const WIDGET_CONFIG_HIDE_QUOTE_ASSET: &str = "hide_quote_asset";
+pub const WIDGET_CONFIG_SHOW_HEADER: &str = "show_header";
 pub const WIDGET_CONFIG_THEME: &str = "theme";
 pub const WIDGET_CONFIG_PLUGIN_PARAMETERS: &str = "plugin_parameters";
 pub const WIDGET_THEME_SYSTEM: &str = "system";
@@ -52,6 +53,7 @@ const QUOTE_BOARD_MULTI_ROW_BASE_HEIGHT: i32 = 70;
 const QUOTE_BOARD_ROW_HEIGHT_STEP: i32 = 31;
 const QUOTE_BOARD_LEGACY_ROW_HEIGHT_LIMIT: i32 = 5;
 const QUOTE_BOARD_EXTENDED_ROW_HEIGHT_STEP: i32 = 26;
+const QUOTE_BOARD_HEADERLESS_ONE_ROW_HEIGHT: i32 = 49;
 const LEGACY_QUOTE_BOARD_HEIGHT_WITH_FOOTER: i32 = 232;
 pub const DEFAULT_LAYOUT_SCAN_SLOTS: usize = 80;
 pub const DEFAULT_MONITOR_DPI: u32 = 96;
@@ -1058,6 +1060,10 @@ pub fn widget_hide_quote_asset(instance: &WidgetInstance) -> bool {
     widget_config_hide_quote_asset(&instance.config)
 }
 
+pub fn widget_show_header(instance: &WidgetInstance) -> bool {
+    widget_config_show_header(&instance.config)
+}
+
 pub fn widget_theme_preference(instance: &WidgetInstance) -> String {
     widget_config_string(&instance.config, WIDGET_CONFIG_THEME, WIDGET_THEME_SYSTEM)
 }
@@ -1072,6 +1078,7 @@ pub fn set_widget_display_config(
     instance: &mut WidgetInstance,
     show_coin_logos: bool,
     hide_quote_asset: bool,
+    show_header: bool,
 ) {
     let config = widget_config_object_mut(instance);
     config.insert(
@@ -1081,6 +1088,10 @@ pub fn set_widget_display_config(
     config.insert(
         WIDGET_CONFIG_HIDE_QUOTE_ASSET.to_string(),
         Value::Bool(hide_quote_asset),
+    );
+    config.insert(
+        WIDGET_CONFIG_SHOW_HEADER.to_string(),
+        Value::Bool(show_header),
     );
 }
 
@@ -1132,6 +1143,10 @@ fn widget_config_show_coin_logos(config: &serde_json::Value) -> bool {
 
 fn widget_config_hide_quote_asset(config: &serde_json::Value) -> bool {
     widget_config_bool(config, WIDGET_CONFIG_HIDE_QUOTE_ASSET, false)
+}
+
+fn widget_config_show_header(config: &serde_json::Value) -> bool {
+    widget_config_bool(config, WIDGET_CONFIG_SHOW_HEADER, true)
 }
 
 fn widget_config_bool(config: &serde_json::Value, key: &str, default: bool) -> bool {
@@ -2837,6 +2852,7 @@ fn default_widget_size_for_parts(
             default_size,
             widget_config_show_coin_logos(config),
             widget_config_hide_quote_asset(config),
+            widget_config_show_header(config),
             quote_board_row_count_for_symbols(symbols),
         )
     } else {
@@ -3053,6 +3069,7 @@ fn migrate_quote_board_display_size(instance: &mut WidgetInstance) {
             full_default_size,
             widget_show_coin_logos(instance),
             widget_hide_quote_asset(instance),
+            widget_show_header(instance),
             quote_board_row_count_for_symbols(&instance.symbols),
         ),
         scale_percent,
@@ -3088,11 +3105,12 @@ fn quote_board_display_size(
     default_size: WidgetSize,
     show_coin_logos: bool,
     hide_quote_asset: bool,
+    show_header: bool,
     row_count: usize,
 ) -> WidgetSize {
     WidgetSize {
         width: quote_board_display_width(default_size, show_coin_logos, hide_quote_asset),
-        height: quote_board_height_for_row_count(row_count),
+        height: quote_board_height_for_row_count(row_count, show_header),
     }
 }
 
@@ -3115,8 +3133,12 @@ fn quote_board_row_count_for_symbols(symbols: &[String]) -> usize {
         .clamp(MIN_SYMBOLS_PER_WIDGET, MAX_SYMBOLS_PER_WIDGET)
 }
 
-fn quote_board_height_for_row_count(row_count: usize) -> i32 {
+fn quote_board_height_for_row_count(row_count: usize, show_header: bool) -> i32 {
     let row_count = row_count.clamp(MIN_SYMBOLS_PER_WIDGET, MAX_SYMBOLS_PER_WIDGET) as i32;
+    if !show_header {
+        return QUOTE_BOARD_HEADERLESS_ONE_ROW_HEIGHT
+            + (row_count - 1) * QUOTE_BOARD_EXTENDED_ROW_HEIGHT_STEP;
+    }
     if row_count <= 1 {
         QUOTE_BOARD_ONE_ROW_HEIGHT
     } else if row_count <= QUOTE_BOARD_LEGACY_ROW_HEIGHT_LIMIT {
@@ -3268,13 +3290,15 @@ mod tests {
 
         assert!(widget_show_coin_logos(&widget));
         assert!(!widget_hide_quote_asset(&widget));
+        assert!(widget_show_header(&widget));
         assert_eq!(widget_theme_preference(&widget), WIDGET_THEME_SYSTEM);
 
-        set_widget_display_config(&mut widget, false, true);
+        set_widget_display_config(&mut widget, false, true, false);
         set_widget_theme_preference(&mut widget, " light ");
 
         assert!(!widget_show_coin_logos(&widget));
         assert!(widget_hide_quote_asset(&widget));
+        assert!(!widget_show_header(&widget));
         assert_eq!(widget_theme_preference(&widget), "light");
         assert_eq!(
             widget.config[WIDGET_CONFIG_SHOW_COIN_LOGOS],
@@ -3284,10 +3308,15 @@ mod tests {
             widget.config[WIDGET_CONFIG_HIDE_QUOTE_ASSET],
             Value::Bool(true)
         );
+        assert_eq!(widget.config[WIDGET_CONFIG_SHOW_HEADER], Value::Bool(false));
         assert_eq!(
             widget.config[WIDGET_CONFIG_THEME],
             Value::String("light".to_string())
         );
+
+        let restored: WidgetInstance =
+            serde_json::from_str(&serde_json::to_string(&widget).unwrap()).unwrap();
+        assert!(!widget_show_header(&restored));
     }
 
     #[test]
@@ -3339,24 +3368,28 @@ mod tests {
             }
         );
 
-        set_widget_display_config(&mut widget, false, false);
+        set_widget_display_config(&mut widget, false, false, true);
         assert_eq!(default_widget_size_for_instance(&widget, &[]).width, 274);
         assert_eq!(
             default_widget_size_for_instance(&widget, &[]).height,
             QUOTE_BOARD_ONE_ROW_HEIGHT
         );
 
-        set_widget_display_config(&mut widget, true, true);
+        set_widget_display_config(&mut widget, true, true, true);
         assert_eq!(default_widget_size_for_instance(&widget, &[]).width, 246);
 
-        set_widget_display_config(&mut widget, false, true);
+        set_widget_display_config(&mut widget, false, true, false);
         assert_eq!(default_widget_size_for_instance(&widget, &[]).width, 224);
+        assert_eq!(
+            default_widget_size_for_instance(&widget, &[]).height,
+            QUOTE_BOARD_HEADERLESS_ONE_ROW_HEIGHT
+        );
 
         widget.symbols = vec![
             "binance:spot:BTC/USDT".to_string(),
             "binance:spot:ETH/USDT".to_string(),
         ];
-        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 101);
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 75);
 
         widget.symbols = vec![
             "binance:spot:BTC/USDT".to_string(),
@@ -3365,12 +3398,12 @@ mod tests {
             "binance:spot:BNB/USDT".to_string(),
             "binance:spot:DOGE/USDT".to_string(),
         ];
-        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 194);
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 153);
 
         widget.symbols = (0..10)
             .map(|index| format!("binance:spot:COIN{index}/USDT"))
             .collect();
-        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 324);
+        assert_eq!(default_widget_size_for_instance(&widget, &[]).height, 283);
     }
 
     #[test]
@@ -3418,7 +3451,7 @@ mod tests {
             config: default_widget_config(),
         };
 
-        set_widget_display_config(&mut widget, false, true);
+        set_widget_display_config(&mut widget, false, true, true);
 
         assert_eq!(
             default_widget_size_for_instance(&widget, &catalog),
@@ -3955,6 +3988,38 @@ mod tests {
 
         assert_eq!(store.widgets[0].layout.width, QUOTE_BOARD_WIDTH);
         assert_eq!(store.widgets[0].layout.height, 101);
+    }
+
+    #[test]
+    fn normalizes_quote_board_height_without_header() {
+        let mut store = serde_json::from_str::<LayoutStore>(
+            r#"{
+              "widgets": [
+                {
+                  "id": "quote-board-1",
+                  "plugin_id": "builtin.quote-board",
+                  "name": "Quote Board 1",
+                  "layout": {
+                    "x": 24,
+                    "y": 48,
+                    "always_on_top": false,
+                    "opacity_percent": 92,
+                    "width": 286,
+                    "height": 101
+                  },
+                  "symbols": ["BTC", "ETH"],
+                  "config": { "show_header": false }
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        normalize_store(&mut store, 0);
+
+        assert!(!widget_show_header(&store.widgets[0]));
+        assert_eq!(store.widgets[0].layout.width, QUOTE_BOARD_WIDTH);
+        assert_eq!(store.widgets[0].layout.height, 75);
     }
 
     #[test]

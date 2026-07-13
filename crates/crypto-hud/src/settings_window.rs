@@ -1807,7 +1807,8 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
               widget_scale_percent,
               widget_theme_index,
               show_coin_logos,
-              hide_quote_asset| {
+              hide_quote_asset,
+              show_header| {
             let settings = commit.current_settings();
             let locale = i18n::resolve_locale(settings.language);
             {
@@ -1824,6 +1825,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                         widget_theme_index,
                         show_coin_logos,
                         hide_quote_asset,
+                        show_header,
                         locale,
                         plugin_catalog: &commit.plugin_catalog,
                     },
@@ -3210,6 +3212,8 @@ pub(crate) fn refresh_settings_window(
     ui.set_widget_show_coin_logos_help_text(text.widget_show_coin_logos_help.into());
     ui.set_widget_hide_quote_asset_text(text.widget_hide_quote_asset.into());
     ui.set_widget_hide_quote_asset_help_text(text.widget_hide_quote_asset_help.into());
+    ui.set_widget_show_header_text(text.widget_show_header.into());
+    ui.set_widget_show_header_help_text(text.widget_show_header_help.into());
     ui.set_widget_theme_text(text.widget_theme.into());
     ui.set_widget_theme_help_text(text.widget_theme_help.into());
     ui.set_widget_topmost_text(text.widget_topmost.into());
@@ -3334,6 +3338,15 @@ pub(crate) fn refresh_settings_window(
         selected_widget
             .map(settings::widget_hide_quote_asset)
             .unwrap_or(false),
+    );
+    ui.set_widget_show_header(
+        selected_widget
+            .map(settings::widget_show_header)
+            .unwrap_or(true),
+    );
+    ui.set_widget_show_header_control_visible(
+        selected_widget
+            .is_some_and(|widget| widget.builtin_widget_type() == Some(WidgetType::QuoteBoard)),
     );
     let parameter_options = selected_widget
         .map(|widget| widget_integer_parameter_options(widget, plugin_catalog, locale))
@@ -4581,12 +4594,15 @@ mod tests {
         let value = block[start..].trim_start();
         let end = value.find(')').unwrap();
         let expression = value[..end].trim();
-        expression
-            .strip_prefix("root.widget-theme-settings-offset +")
-            .unwrap_or(expression)
-            .trim()
-            .parse()
-            .unwrap()
+        let header_offset = if expression.contains("root.widget-header-settings-offset") {
+            50
+        } else {
+            0
+        };
+        let value = expression
+            .replace("root.widget-theme-settings-offset +", "")
+            .replace("root.widget-header-settings-offset +", "");
+        value.trim().parse::<i32>().unwrap() + header_offset
     }
 
     fn slint_x_assignment(block: &str, parent_width: i32) -> i32 {
@@ -4617,6 +4633,11 @@ mod tests {
             "TouchArea {",
             "root.widget-show-coin-logos = !root.widget-show-coin-logos;",
         );
+        let show_header_touch = block_before_anchor(
+            &source,
+            "TouchArea {",
+            "root.widget-show-header = !root.widget-show-header;",
+        );
         let hide_quote_touch = block_before_anchor(
             &source,
             "TouchArea {",
@@ -4645,6 +4666,8 @@ mod tests {
         let opacity_value_top = slint_widget_display_y_offset(opacity_value_box);
         let opacity_value_height = slint_px_assignment(opacity_value_box, "height");
         let opacity_bottom = opacity_value_top + opacity_value_height;
+        let show_header_top = slint_widget_display_y_offset(show_header_touch);
+        let show_header_bottom = show_header_top + slint_px_assignment(show_header_touch, "height");
         let show_logos_top = slint_widget_display_y_offset(show_logos_touch);
         let show_logos_bottom = show_logos_top + slint_px_assignment(show_logos_touch, "height");
         let hide_quote_top = slint_widget_display_y_offset(hide_quote_touch);
@@ -4658,8 +4681,12 @@ mod tests {
             "opacity slider should be vertically centered against its value box"
         );
         assert!(
-            opacity_bottom <= show_logos_top,
-            "opacity controls should sit above show logos touch area"
+            opacity_bottom <= show_header_top,
+            "opacity controls should sit above show header touch area"
+        );
+        assert!(
+            show_header_bottom <= show_logos_top,
+            "show header touch area overlaps show logos touch area"
         );
         assert!(
             show_logos_bottom <= hide_quote_top,
@@ -4723,7 +4750,7 @@ mod tests {
         assert!(
             source.contains("property <int> widget-display-section-y: root.widget-symbol-status-y + 10;")
                 && source.contains(
-                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset + root.widget-parameter-settings-offset) * 1px;"
+                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset + root.widget-header-settings-offset + root.widget-parameter-settings-offset) * 1px;"
                 ),
             "removing pair limit help should tighten the spacing below the pair chips"
         );
@@ -5399,6 +5426,7 @@ mod tests {
                 widget_theme_index: 1,
                 show_coin_logos: false,
                 hide_quote_asset: true,
+                show_header: false,
                 locale: i18n::Locale::En,
                 plugin_catalog: &catalog,
             },
@@ -5417,6 +5445,7 @@ mod tests {
         assert_eq!(widget.layout.height, expected_size.height);
         assert!(!settings::widget_show_coin_logos(widget));
         assert!(settings::widget_hide_quote_asset(widget));
+        assert!(!settings::widget_show_header(widget));
         assert_eq!(settings::widget_theme_preference(widget), "light");
     }
 
@@ -5476,6 +5505,7 @@ mod tests {
                 widget_theme_index: 1,
                 show_coin_logos: false,
                 hide_quote_asset: true,
+                show_header: true,
                 locale: i18n::Locale::En,
                 plugin_catalog: &catalog,
             },
@@ -5592,6 +5622,7 @@ mod tests {
                 widget_theme_index: 0,
                 show_coin_logos: false,
                 hide_quote_asset: false,
+                show_header: true,
                 locale: i18n::Locale::En,
                 plugin_catalog: &catalog,
             },

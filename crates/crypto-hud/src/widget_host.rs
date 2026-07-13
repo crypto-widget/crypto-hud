@@ -168,6 +168,15 @@ impl WidgetUi {
         }
     }
 
+    fn set_show_header(&self, value: bool) {
+        match self {
+            Self::BuiltinPriceCard(ui) => ui.set_show_header(value),
+            Self::DynamicSlint(ui) => {
+                ui.set_optional_property("show-header", Value::Bool(value));
+            }
+        }
+    }
+
     fn set_quote_assets(&self, values: &[String]) {
         if let Self::DynamicSlint(ui) = self {
             ui.set_optional_property("quote-assets", string_model_value(values));
@@ -562,6 +571,7 @@ pub(crate) fn apply_runtime_view_to_widget(
     ui.set_quote_icon_ready(quote_icon_ready);
     ui.set_show_coin_logos(show_coin_logos);
     ui.set_hide_quote_asset(display_options.hide_quote_asset);
+    ui.set_show_header(display_options.show_header);
     ui.set_quote_assets(&view.quote_assets);
     ui.set_quote_chart_line_paths(&view.quote_chart_line_paths);
     ui.set_quote_chart_fill_paths(&view.quote_chart_fill_paths);
@@ -712,6 +722,15 @@ mod tests {
         assert!(
             source.contains("in property <bool> show-coin-logos: true;"),
             "quote board layout should receive the coin-logo display option"
+        );
+        assert!(
+            source.contains("in property <bool> show-header: true;")
+                && source.contains("visible: !root.compact-mode && root.show-header;")
+                && source.contains("property <length> quote-board-rows-height:")
+                && source.contains(
+                    "root.show-header ? (root.quote-board-row-count <= 1 ? 35px : 41px) : 6px"
+                ),
+            "quote board layout should hide and reclaim its optional header"
         );
         assert!(
             source.contains("(root.show-coin-logos ? 246px : 224px)"),

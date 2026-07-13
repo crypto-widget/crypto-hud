@@ -151,6 +151,7 @@ fn install_gui_smoke_settings_interaction_timer(
                     theme_index,
                     false,
                     true,
+                    true,
                 );
                 ui.invoke_remove_widget_symbol(0, 1);
                 ui.invoke_open_widget_symbol_picker();
