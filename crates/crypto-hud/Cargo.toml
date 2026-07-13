@@ -19,17 +19,19 @@ crypto-hud-market = { path = "../crypto-hud-market" }
 crypto-hud-runtime = { path = "../crypto-hud-runtime" }
 crypto-hud-shell-state = { path = "../crypto-hud-shell-state" }
 global-hotkey = "0.8"
+i-slint-compiler = { version = "1.17.1", default-features = false }
+i-slint-core = { version = "1.17.1", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 semver = "1.0"
 single-instance = "0.3.3"
-slint = { version = "1.17.0", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "system-tray"] }
-slint-interpreter = { version = "1.17.0", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "system-tray"] }
+slint = { version = "1.17.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "system-tray"] }
+slint-interpreter = { version = "1.17.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "system-tray", "internal"] }
 spin_on = "0.1"
 sys-locale = "0.3"
-ureq = { version = "2.12", features = ["socks-proxy"] }
+ureq = { version = "3.3.0", features = ["socks-proxy"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
-slint-build = "1.17.0"
+slint-build = "1.17.1"
 winresource = "0.1.31"

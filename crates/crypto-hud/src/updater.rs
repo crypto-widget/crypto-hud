@@ -1,8 +1,9 @@
 use std::{
     env,
+    io::Read,
     sync::mpsc::{self, Receiver},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
@@ -14,6 +15,7 @@ const DEFAULT_RELEASE_API_URL: &str =
 const TRUSTED_RELEASE_TAG_URL_PREFIX: &str =
     "https://github.com/crypto-widget/crypto-hud/releases/tag/";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_UPDATE_RESPONSE_BYTES: u64 = 10 * 1024 * 1024;
 const USER_AGENT: &str = concat!("crypto-hud/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,27 +121,91 @@ pub fn spawn_update_check(config: UpdateCheckConfig) -> Receiver<UpdateEvent> {
 
 pub fn check_latest_release(config: &UpdateCheckConfig) -> Result<Option<UpdateInfo>> {
     let agent = build_agent(config.proxy_url.as_deref())?;
-    let body = agent
+    let deadline = request_deadline(&agent);
+    let mut response = agent
         .get(&config.release_api_url)
-        .set("Accept", "application/vnd.github+json")
-        .set("User-Agent", USER_AGENT)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", USER_AGENT)
         .call()
-        .with_context(|| format!("failed to check {}", config.release_api_url))?
-        .into_string()
-        .context("failed to read update response")?;
+        .with_context(|| format!("failed to check {}", config.release_api_url))?;
+    let reader = response
+        .body_mut()
+        .with_config()
+        .limit(MAX_UPDATE_RESPONSE_BYTES)
+        .reader();
+    let body = read_update_response(reader, deadline)?;
 
     update_from_release_json(&config.current_version, &body, config.include_prereleases)
 }
 
-fn build_agent(proxy_url: Option<&str>) -> Result<ureq::Agent> {
-    let mut builder = ureq::AgentBuilder::new()
-        .timeout_connect(REQUEST_TIMEOUT)
-        .timeout_read(REQUEST_TIMEOUT);
-    if let Some(proxy_url) = proxy_url.and_then(non_empty_trimmed) {
-        let proxy = ureq::Proxy::new(proxy_url).context("invalid proxy URL")?;
-        builder = builder.proxy(proxy);
+fn request_deadline(agent: &ureq::Agent) -> Option<Instant> {
+    agent
+        .config()
+        .timeouts()
+        .global
+        .and_then(|timeout| Instant::now().checked_add(timeout))
+}
+
+fn read_update_response(mut reader: impl Read, deadline: Option<Instant>) -> Result<String> {
+    let mut body = Vec::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        ensure_response_deadline(deadline)?;
+        let read = reader
+            .read(&mut buffer)
+            .context("failed to read update response")?;
+        ensure_response_deadline(deadline)?;
+        if read == 0 {
+            break;
+        }
+        body.extend_from_slice(&buffer[..read]);
     }
-    Ok(builder.build())
+    String::from_utf8(body).context("update response was not valid UTF-8")
+}
+
+fn ensure_response_deadline(deadline: Option<Instant>) -> Result<()> {
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        anyhow::bail!("failed to read update response: response body deadline exceeded");
+    }
+    Ok(())
+}
+
+fn build_agent(proxy_url: Option<&str>) -> Result<ureq::Agent> {
+    let proxy = proxy_url
+        .and_then(non_empty_trimmed)
+        .map(configured_proxy)
+        .transpose()
+        .context("invalid proxy URL")?;
+    let config = ureq::Agent::config_builder()
+        // Keep proxying controlled by the application instead of ureq's environment defaults.
+        .proxy(proxy)
+        .timeout_global(Some(REQUEST_TIMEOUT))
+        .timeout_resolve(Some(REQUEST_TIMEOUT))
+        .timeout_connect(Some(REQUEST_TIMEOUT))
+        .timeout_send_request(Some(REQUEST_TIMEOUT))
+        .timeout_recv_response(Some(REQUEST_TIMEOUT))
+        .timeout_recv_body(Some(REQUEST_TIMEOUT))
+        .build();
+    Ok(config.into())
+}
+
+fn configured_proxy(proxy_url: &str) -> std::result::Result<ureq::Proxy, ureq::Error> {
+    let proxy = ureq::Proxy::new(proxy_url)?;
+    if proxy.protocol() != ureq::ProxyProtocol::Socks5 {
+        return Ok(proxy);
+    }
+
+    let mut builder = ureq::Proxy::builder(proxy.protocol())
+        .host(proxy.host())
+        .port(proxy.port())
+        .resolve_target(false);
+    if let Some(username) = proxy.username() {
+        builder = builder.username(username);
+    }
+    if let Some(password) = proxy.password() {
+        builder = builder.password(password);
+    }
+    builder.build()
 }
 
 fn non_empty_trimmed(value: &str) -> Option<&str> {
@@ -239,6 +305,7 @@ fn env_value_with_legacy(primary: &str, legacy: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     fn release_json(tag: &str, prerelease: bool) -> String {
         format!(
@@ -337,10 +404,39 @@ mod tests {
 
     #[test]
     fn update_agent_accepts_http_and_socks_proxy_urls() {
-        assert!(build_agent(None).is_ok());
+        let direct_agent = build_agent(None).unwrap();
+        assert!(direct_agent.config().proxy().is_none());
         assert!(build_agent(Some("http://127.0.0.1:7890")).is_ok());
         assert!(build_agent(Some("socks5://127.0.0.1:1080")).is_ok());
+        assert!(build_agent(Some("socks5h://127.0.0.1:1080")).is_ok());
         assert!(build_agent(Some("ftp://127.0.0.1:21")).is_err());
+    }
+
+    #[test]
+    fn update_response_reader_enforces_the_global_deadline() {
+        assert_eq!(
+            read_update_response(Cursor::new(b"{}"), None).unwrap(),
+            "{}"
+        );
+        assert!(
+            read_update_response(Cursor::new(b"{}"), Some(Instant::now()))
+                .unwrap_err()
+                .to_string()
+                .contains("response body deadline exceeded")
+        );
+    }
+
+    #[test]
+    fn update_agent_preserves_proxy_side_dns_for_legacy_socks_schemes() {
+        assert!(!configured_proxy("socks5://127.0.0.1:1080")
+            .unwrap()
+            .resolve_target());
+        assert!(!configured_proxy("socks://127.0.0.1:1080")
+            .unwrap()
+            .resolve_target());
+        assert!(!configured_proxy("socks5h://127.0.0.1:1080")
+            .unwrap()
+            .resolve_target());
     }
 
     #[test]

@@ -422,16 +422,42 @@ fn download_icon(
 }
 
 fn http_agent(proxy_url: Option<&str>) -> Result<ureq::Agent, String> {
-    let mut builder = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(8))
-        .timeout_read(Duration::from_secs(12));
+    let proxy = proxy_url
+        .filter(|value| !value.trim().is_empty())
+        .map(configured_proxy)
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let config = ureq::Agent::config_builder()
+        // Keep proxying controlled by the application instead of ureq's environment defaults.
+        .proxy(proxy)
+        .timeout_global(Some(Duration::from_secs(12)))
+        .timeout_resolve(Some(Duration::from_secs(8)))
+        .timeout_connect(Some(Duration::from_secs(8)))
+        .timeout_send_request(Some(Duration::from_secs(12)))
+        .timeout_recv_response(Some(Duration::from_secs(12)))
+        .timeout_recv_body(Some(Duration::from_secs(12)))
+        .build();
 
-    if let Some(proxy_url) = proxy_url.filter(|value| !value.trim().is_empty()) {
-        let proxy = ureq::Proxy::new(proxy_url).map_err(|error| error.to_string())?;
-        builder = builder.proxy(proxy);
+    Ok(config.into())
+}
+
+fn configured_proxy(proxy_url: &str) -> Result<ureq::Proxy, ureq::Error> {
+    let proxy = ureq::Proxy::new(proxy_url)?;
+    if proxy.protocol() != ureq::ProxyProtocol::Socks5 {
+        return Ok(proxy);
     }
 
-    Ok(builder.build())
+    let mut builder = ureq::Proxy::builder(proxy.protocol())
+        .host(proxy.host())
+        .port(proxy.port())
+        .resolve_target(false);
+    if let Some(username) = proxy.username() {
+        builder = builder.username(username);
+    }
+    if let Some(password) = proxy.password() {
+        builder = builder.password(password);
+    }
+    builder.build()
 }
 
 fn fetch_icon_bytes(agent: &ureq::Agent, url: &str, extension: &str) -> Result<Vec<u8>, String> {
@@ -450,25 +476,60 @@ fn fetch_bytes(
     accept: &str,
     max_bytes: usize,
 ) -> Result<Vec<u8>, String> {
-    let response = agent
+    let deadline = request_deadline(agent);
+    let mut response = agent
         .get(url)
-        .set("Accept", accept)
-        .set("User-Agent", USER_AGENT)
+        .header("Accept", accept)
+        .header("User-Agent", USER_AGENT)
         .call()
         .map_err(|error| error.to_string())?;
 
+    read_bytes_with_deadline(response.body_mut().as_reader(), max_bytes, deadline)
+}
+
+fn request_deadline(agent: &ureq::Agent) -> Option<Instant> {
+    agent
+        .config()
+        .timeouts()
+        .global
+        .and_then(|timeout| Instant::now().checked_add(timeout))
+}
+
+fn read_bytes_with_deadline(
+    mut reader: impl Read,
+    max_bytes: usize,
+    deadline: Option<Instant>,
+) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
-    response
-        .into_reader()
-        .take((max_bytes + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
+    let mut buffer = [0_u8; 8 * 1024];
+    let read_limit = max_bytes.saturating_add(1);
 
-    if bytes.len() > max_bytes {
-        return Err("response is too large".to_string());
+    loop {
+        ensure_response_deadline(deadline)?;
+        let remaining = read_limit.saturating_sub(bytes.len());
+        if remaining == 0 {
+            return Err("response is too large".to_string());
+        }
+        let chunk_len = remaining.min(buffer.len());
+        let read = reader
+            .read(&mut buffer[..chunk_len])
+            .map_err(|error| error.to_string())?;
+        ensure_response_deadline(deadline)?;
+        if read == 0 {
+            return Ok(bytes);
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if bytes.len() > max_bytes {
+            return Err("response is too large".to_string());
+        }
     }
+}
 
-    Ok(bytes)
+fn ensure_response_deadline(deadline: Option<Instant>) -> Result<(), String> {
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err("response body deadline exceeded".to_string());
+    }
+    Ok(())
 }
 
 fn accept_header(extension: &str) -> &'static str {
@@ -695,6 +756,30 @@ fn trusted_trustwallet_logo_url(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn icon_agent_disables_environment_proxy_discovery() {
+        let agent = http_agent(None).unwrap();
+
+        assert!(agent.config().proxy().is_none());
+    }
+
+    #[test]
+    fn icon_response_reader_enforces_size_and_deadline_limits() {
+        assert_eq!(
+            read_bytes_with_deadline(Cursor::new(b"icon"), 4, None).unwrap(),
+            b"icon"
+        );
+        assert_eq!(
+            read_bytes_with_deadline(Cursor::new(b"large"), 4, None).unwrap_err(),
+            "response is too large"
+        );
+        assert_eq!(
+            read_bytes_with_deadline(Cursor::new(b"icon"), 4, Some(Instant::now())).unwrap_err(),
+            "response body deadline exceeded"
+        );
+    }
 
     #[test]
     fn icon_key_uses_market_pair_base_asset() {
