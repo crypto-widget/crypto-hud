@@ -3859,12 +3859,20 @@ fn symbol_search_placeholder(locale: i18n::Locale) -> &'static str {
     i18n::symbol_search_placeholder(locale)
 }
 
+fn windows_app_version() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    let release_version = version
+        .split_once('-')
+        .map_or(version, |(release, _)| release);
+    format!("{release_version}.0")
+}
+
 fn app_version_value_text(locale: i18n::Locale) -> String {
-    i18n::ltr_isolate_for_locale(locale, env!("CARGO_PKG_VERSION"))
+    i18n::ltr_isolate_for_locale(locale, &windows_app_version())
 }
 
 fn app_version_signature_text(locale: i18n::Locale) -> String {
-    i18n::ltr_isolate_for_locale(locale, &format!("v{}", env!("CARGO_PKG_VERSION")))
+    i18n::ltr_isolate_for_locale(locale, &format!("v{}", windows_app_version()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5052,6 +5060,7 @@ mod tests {
     fn app_signature_version_keeps_prefix_inside_ltr_isolate() {
         let source = settings_window_ui_source();
         let signature = block_after_anchor(&source, "GithubProjectSignature {", "");
+        let expected_version = windows_app_version();
 
         assert!(source.contains("in property <string> app-version-signature-text;"));
         assert!(signature.contains("version-text: root.app-version-signature-text;"));
@@ -5061,12 +5070,23 @@ mod tests {
         );
         assert_eq!(
             app_version_value_text(i18n::Locale::Ar),
-            format!("\u{2066}{}\u{2069}", env!("CARGO_PKG_VERSION"))
+            format!("\u{2066}{expected_version}\u{2069}")
         );
         assert_eq!(
             app_version_signature_text(i18n::Locale::Ar),
-            format!("\u{2066}v{}\u{2069}", env!("CARGO_PKG_VERSION"))
+            format!("\u{2066}v{expected_version}\u{2069}")
         );
+    }
+
+    #[test]
+    fn app_info_uses_four_part_windows_version() {
+        let release_version = env!("CARGO_PKG_VERSION")
+            .split_once('-')
+            .map_or(env!("CARGO_PKG_VERSION"), |(release, _)| release);
+        let expected_version = format!("{release_version}.0");
+
+        assert_eq!(windows_app_version(), expected_version);
+        assert_eq!(windows_app_version().split('.').count(), 4);
     }
 
     #[test]

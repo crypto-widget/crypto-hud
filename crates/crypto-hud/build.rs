@@ -4,7 +4,10 @@ fn main() {
     #[cfg(windows)]
     {
         let version = env!("CARGO_PKG_VERSION");
-        let file_version = format!("{version}.0");
+        let release_version = version
+            .split_once('-')
+            .map_or(version, |(release, _)| release);
+        let file_version = format!("{release_version}.0");
         let mut resource = winresource::WindowsResource::new();
         resource
             .set_icon("ui/icon.ico")
