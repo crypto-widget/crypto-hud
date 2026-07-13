@@ -343,7 +343,6 @@ fn main() -> Result<()> {
         &widgets,
         &layouts,
         &widgets_hidden,
-        &settings_mode_active,
         &tray_hover_state,
         notifications::tray_icon_hovered(),
     );
@@ -369,14 +368,12 @@ fn main() -> Result<()> {
         widgets.clone(),
         layouts.clone(),
         widgets_hidden.clone(),
-        settings_mode_active.clone(),
         tray.as_weak(),
     );
     let tray_hover_timer = install_tray_hover_display_timer(
         widgets.clone(),
         layouts.clone(),
         widgets_hidden.clone(),
-        settings_mode_active.clone(),
         tray_hover_state.clone(),
     );
     let widget_shell_window_maintenance_timer = install_widget_shell_window_maintenance_timer();
@@ -735,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_mode_temporarily_suspends_pinned_widgets_topmost() {
+    fn settings_mode_preserves_pinned_widgets_topmost() {
         let instance = WidgetInstance {
             id: "quote-board-1".to_string(),
             plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
@@ -750,8 +747,7 @@ mod tests {
             config: default_widget_config(),
         };
 
-        assert!(widget_pin_to_top(&instance, false));
-        assert!(!widget_pin_to_top(&instance, true));
+        assert!(widget_pin_to_top(&instance));
     }
 
     #[test]

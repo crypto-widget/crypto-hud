@@ -41,8 +41,8 @@ use crate::{
     },
     widget_host::WidgetRuntime,
     window_manager::{
-        apply_tray_hover_display, apply_widget_pinning_for_settings_mode, desktop_size,
-        desktop_work_areas, leave_settings_mode, schedule_settings_window_configuration,
+        apply_tray_hover_display, apply_widget_pinning, desktop_size, desktop_work_areas,
+        leave_settings_mode, schedule_settings_window_configuration,
         schedule_widget_shell_window_configuration, TrayHoverDisplayState,
     },
 };
@@ -694,7 +694,6 @@ struct SettingsCommitContext {
     market_feed_config: Arc<Mutex<market::MarketFeedConfig>>,
     quote_cache: Rc<RefCell<QuoteCache>>,
     coin_icons: Rc<CoinIconRegistry>,
-    settings_mode_active: Rc<RefCell<bool>>,
     plugin_catalog: Rc<plugin::PluginCatalog>,
 }
 
@@ -727,12 +726,8 @@ impl SettingsCommitContext {
         );
     }
 
-    fn apply_widget_pinning_for_settings_mode(&self) {
-        apply_widget_pinning_for_settings_mode(
-            &self.widgets,
-            &self.layouts,
-            *self.settings_mode_active.borrow(),
-        );
+    fn apply_widget_pinning(&self) {
+        apply_widget_pinning(&self.widgets, &self.layouts);
     }
 
     fn update_market_feed_config_from_store(&self) {
@@ -778,7 +773,7 @@ impl SettingsCommitContext {
         sync_error_context: &str,
     ) {
         self.sync_widget_runtimes(set_positions, sync_error_context);
-        self.apply_widget_pinning_for_settings_mode();
+        self.apply_widget_pinning();
         if update_market_feed {
             self.update_market_feed_config_from_store();
         }
@@ -1074,7 +1069,6 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         market_feed_config: market_feed_config.clone(),
         quote_cache: quote_cache.clone(),
         coin_icons: coin_icons.clone(),
-        settings_mode_active: settings_mode_active.clone(),
         plugin_catalog: plugin_catalog.clone(),
     };
 
@@ -1174,7 +1168,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             let settings = commit.current_settings();
             *commit.settings_status.borrow_mut() = status_saved(settings.clone());
             commit.apply_settings_to_widgets();
-            commit.apply_widget_pinning_for_settings_mode();
+            commit.apply_widget_pinning();
             commit.update_market_feed_config_from_store();
             if let Some(tray) = tray_handle
                 .borrow()
@@ -1187,7 +1181,6 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 &commit.widgets,
                 &commit.layouts,
                 &widgets_hidden,
-                &commit.settings_mode_active,
                 &tray_hover_state,
                 notifications::tray_icon_hovered(),
             );
@@ -1706,7 +1699,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             }
 
             commit.sync_widget_runtimes(false, "failed to reorder widget windows");
-            commit.apply_widget_pinning_for_settings_mode();
+            commit.apply_widget_pinning();
             commit.set_saved_status(commit.current_settings());
             commit.refresh_settings_window(&weak);
             if let Some(ui) = weak.upgrade() {
@@ -1753,7 +1746,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             };
 
             commit.sync_widget_runtimes(false, "failed to reorder widget windows");
-            commit.apply_widget_pinning_for_settings_mode();
+            commit.apply_widget_pinning();
             commit.set_saved_status(commit.current_settings());
             commit.refresh_settings_window(&weak);
             if let Some(ui) = weak.upgrade() {
@@ -1840,7 +1833,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 }
             }
             commit.sync_widget_runtimes(false, "failed to apply widget settings");
-            commit.apply_widget_pinning_for_settings_mode();
+            commit.apply_widget_pinning();
             commit.update_market_feed_config_from_store();
             commit.set_saved_status(settings.clone());
             if let Some(ui) = weak.upgrade() {
@@ -1893,7 +1886,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 }
             }
             commit.sync_widget_runtimes(false, "failed to apply widget scale");
-            commit.apply_widget_pinning_for_settings_mode();
+            commit.apply_widget_pinning();
             commit.set_saved_status(settings.clone());
             if let Some(ui) = weak.upgrade() {
                 ui.set_widget_scale_percent(widget_scale_percent);
@@ -1941,7 +1934,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 return;
             }
             commit.sync_widget_runtimes(false, "failed to apply widget parameter");
-            commit.apply_widget_pinning_for_settings_mode();
+            commit.apply_widget_pinning();
             commit.set_saved_status(settings.clone());
             if let Some(ui) = weak.upgrade() {
                 let locale = i18n::resolve_locale(settings.language);
