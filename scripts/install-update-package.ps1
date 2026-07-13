@@ -635,7 +635,7 @@ try {
         $installArgs += "-AllowUnsignedPackage"
     }
 
-    & $PowerShellExe @installArgs
+    & $PowerShellExe -NoProfile @installArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Update package install failed with code $LASTEXITCODE"
     }

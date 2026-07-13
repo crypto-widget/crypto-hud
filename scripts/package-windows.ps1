@@ -494,7 +494,7 @@ try {
             } else {
                 Remove-Item "Env:\CRYPTO_HUD_SIGN_CERT_PASSWORD_PROCESS" -ErrorAction SilentlyContinue
             }
-            & $PowerShellExe @signArgs | Out-Host
+            & $PowerShellExe -NoProfile @signArgs | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 throw "Signing $relativePath failed with code $LASTEXITCODE"
             }
@@ -573,7 +573,7 @@ try {
                 "-CertificatePath", $signingConfig.certificatePath,
                 "-TimestampUrl", $signingConfig.timestampUrl
             )
-            & $PowerShellExe @integritySignArgs | Out-Host
+            & $PowerShellExe -NoProfile @integritySignArgs | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 throw "Signing release-integrity.ps1 failed with code $LASTEXITCODE"
             }

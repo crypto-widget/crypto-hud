@@ -253,8 +253,67 @@ function Invoke-IsolatedPluginRuntimeSmoke {
     }
 }
 
+function Assert-PowerShellChildProcessesDisableProfiles {
+    $scriptRoots = @(
+        (Join-Path $RepoRoot "scripts"),
+        (Join-Path $RepoRoot "packaging\windows")
+    )
+    foreach ($scriptPath in @(
+        Get-ChildItem -LiteralPath $scriptRoots -Filter "*.ps1" -File -Recurse |
+            Select-Object -ExpandProperty FullName
+    )) {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $scriptPath,
+            [ref]$tokens,
+            [ref]$parseErrors
+        )
+        if ($parseErrors.Count -gt 0) {
+            throw "PowerShell syntax validation failed for ${scriptPath}: $($parseErrors[0].Message)"
+        }
+
+        $childPowerShellCommands = $ast.FindAll({
+            param($node)
+
+            if ($node -isnot [System.Management.Automation.Language.CommandAst] -or
+                $node.CommandElements.Count -eq 0) {
+                return $false
+            }
+            $command = $node.CommandElements[0]
+            if ($command -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                return $command.VariablePath.UserPath -match '(?i)powershell'
+            }
+            if ($command -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                return (Split-Path -Leaf $command.Value) -match '^(?i:powershell|pwsh)(?:\.exe)?$'
+            }
+            return $false
+        }, $true)
+
+        foreach ($command in $childPowerShellCommands) {
+            $profileIsDisabledFirst = $command.CommandElements.Count -gt 1 -and
+                $command.CommandElements[1].Extent.Text -ieq '-NoProfile'
+            if (-not $profileIsDisabledFirst) {
+                throw "Child PowerShell invocation must use -NoProfile: ${scriptPath}:$($command.Extent.StartLineNumber)"
+            }
+        }
+    }
+
+    $installerPath = Join-Path $RepoRoot "packaging\windows\install.ps1"
+    $installerSource = Get-Content -LiteralPath $installerPath -Raw
+    $uninstallCommand = [regex]::Match(
+        $installerSource,
+        '(?m)^.*-Name\s+"UninstallString".*$'
+    )
+    if (-not $uninstallCommand.Success -or
+        $uninstallCommand.Value -notmatch '(?i)\s-NoProfile\s') {
+        throw "Registered uninstall PowerShell command must use -NoProfile: $installerPath"
+    }
+}
+
 Assert-UnderRepo -Path $PackageRoot
 Assert-UnderTemp -Path $IsolatedRoot
+Assert-PowerShellChildProcessesDisableProfiles
 
 if (Test-Path -LiteralPath $IsolatedRoot) {
     Assert-UnderTemp -Path $IsolatedRoot
@@ -269,7 +328,7 @@ try {
     New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:APPDATA | Out-Null
 
     foreach ($unsafeVersion in @('..\escape', 'x/escape', 'C:\escape', 'x..y')) {
-        & $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
+        & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
             -Version $unsafeVersion `
             -SkipBuild `
             -AllowDirty `
@@ -280,14 +339,14 @@ try {
         }
     }
 
-    & $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
         -SkipBuild `
         -Sign `
         -CertificatePath (Join-Path $IsolatedRoot "missing-signing-cert.pfx")
     if ($LASTEXITCODE -eq 0) {
         throw "Package script allowed -SkipBuild for a formally signed package"
     }
-    & $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
         -SkipBuild `
         -CertificatePassword "smoke-placeholder"
     if ($LASTEXITCODE -eq 0) {
@@ -309,7 +368,7 @@ try {
     }
     New-Item -ItemType Junction -Path $reparsePackageRoot -Target $reparseTarget | Out-Null
     try {
-        & $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
+        & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
             -Version $reparseVersion `
             -SkipBuild `
             -AllowDirty `
@@ -342,7 +401,7 @@ try {
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"
     }
-    & $PowerShellExe @packageArgs
+    & $PowerShellExe -NoProfile @packageArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Package script failed with code $LASTEXITCODE"
     }
@@ -440,7 +499,7 @@ try {
     New-Item -ItemType Directory -Force -Path $protectedDir | Out-Null
     $sentinel = Join-Path $protectedDir "keep.txt"
     Set-Content -LiteralPath $sentinel -Value "keep"
-    & $PowerShellExe -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "uninstall.ps1") -InstallDir $protectedDir -SkipShellIntegration
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "uninstall.ps1") -InstallDir $protectedDir -SkipShellIntegration
     if ($LASTEXITCODE -eq 0) {
         throw "Uninstall safety check accepted a non-install directory"
     }
@@ -449,7 +508,7 @@ try {
     }
     Remove-Item -LiteralPath $protectedDir -Recurse -Force
 
-    & $PowerShellExe -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "install.ps1") `
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "install.ps1") `
         -InstallDir $InstallDir `
         -SkipShellIntegration `
         -AllowUnsignedPackage
@@ -499,7 +558,7 @@ try {
         )
         Set-Content -LiteralPath $installedIntegrityPath -Value $higherIntegrity -Encoding UTF8 -NoNewline
 
-        & $PowerShellExe -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "install.ps1") `
+        & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "install.ps1") `
             -InstallDir $InstallDir `
             -SkipShellIntegration `
             -AllowUnsignedPackage
@@ -517,7 +576,7 @@ try {
     $legacySentinel = Join-Path $sandboxLegacyDir "keep.txt"
     Set-Content -LiteralPath $legacySentinel -Value "keep"
 
-    & $PowerShellExe -ExecutionPolicy Bypass -File (Join-Path $InstallDir "uninstall.ps1") -InstallDir $InstallDir -SkipShellIntegration
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "uninstall.ps1") -InstallDir $InstallDir -SkipShellIntegration
     if ($LASTEXITCODE -ne 0) {
         throw "Uninstall smoke failed with code $LASTEXITCODE"
     }

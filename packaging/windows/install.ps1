@@ -530,7 +530,7 @@ if (-not $SkipShellIntegration) {
     if (-not (Test-Path -LiteralPath $systemPowerShell -PathType Leaf)) {
         throw "System Windows PowerShell executable was not found: $systemPowerShell"
     }
-    New-ItemProperty -Path $UninstallKey -Name "UninstallString" -Value "`"$systemPowerShell`" -ExecutionPolicy AllSigned -File `"$UninstallScript`"" -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $UninstallKey -Name "UninstallString" -Value "`"$systemPowerShell`" -NoProfile -ExecutionPolicy AllSigned -File `"$UninstallScript`"" -PropertyType String -Force | Out-Null
 }
 
 Write-Host "Installed Crypto HUD to $InstallDir"

@@ -26,7 +26,7 @@ mise run ci
 mise run run-app
 mise run format
 mise run clippy
-powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
 ```
 
 Use `CRYPTO_HUD_STATE_DIR` when you need isolated local state:

@@ -194,9 +194,9 @@ mise run run-app
   ```
 
   ```powershell
-  powershell -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
-  powershell -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
-  powershell -ExecutionPolicy Bypass -File .\scripts\single-instance-smoke.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gui-smoke.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gui-settings-interaction-smoke.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\single-instance-smoke.ps1
   ```
 </details>
 
@@ -220,7 +220,7 @@ mise run run-app
   可以发现下载内容被改动，但不能证明发布者身份。本地可用同一入口生成便携包：
 
   ```powershell
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v0.9.8
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v0.9.8
   ```
 
   现有可安装包流程保持独立：它会在 `dist/` 中创建 zip、校验和与已签名的
@@ -232,12 +232,12 @@ mise run run-app
   ```powershell
   cargo test --locked --workspace
   cargo audit
-  powershell -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
-  powershell -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-process-check.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-smoke.ps1 -SkipBuild
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
   # 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）以及
   # CRYPTO_HUD_SIGN_CERT_PASSWORD。正式签名时始终重新构建。
-  powershell -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.8 -Sign
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.8 -Sign
   ```
 
   首次安装生产包时，应在执行安装脚本中的任何代码前先验证其签名。确认 `Status`
@@ -246,7 +246,7 @@ mise run run-app
 
   ```powershell
   Get-AuthenticodeSignature -LiteralPath .\install.ps1 | Format-List Status,SignerCertificate
-  powershell -ExecutionPolicy AllSigned -File .\install.ps1
+  powershell -NoProfile -ExecutionPolicy AllSigned -File .\install.ps1
   ```
 
   `-ExecutionPolicy Bypass` 和 `CRYPTO_HUD_ALLOW_UNSIGNED_SMOKE=1` 仅用于仓库中

@@ -138,7 +138,7 @@ function Assert-UnsafeZipRejected {
     $savedErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = "Continue"
-        $output = (& $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
+        $output = (& $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
             -PackageZip $zipPath `
             -ChecksumPath $checksumPath `
             -InstallDir $InstallDir `
@@ -180,7 +180,7 @@ function Assert-OversizedSourceZipRejected {
     $savedErrorActionPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = "Continue"
-        $output = (& $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
+        $output = (& $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
             -PackageZip $zipPath `
             -ChecksumPath $checksumPath `
             -InstallDir $InstallDir `
@@ -254,12 +254,12 @@ try {
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"
     }
-    & $PowerShellExe @packageArgs
+    & $PowerShellExe -NoProfile @packageArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Package script failed with code $LASTEXITCODE"
     }
 
-    & $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
         -PackageZip $ZipPath `
         -ChecksumPath $ChecksumPath `
         -InstallDir $InstallDir `
@@ -273,7 +273,7 @@ try {
         Remove-Item -LiteralPath $RejectedExtractRoot -Recurse -Force
     }
 
-    & $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
         -PackageZip $ZipPath `
         -ChecksumPath $ChecksumPath `
         -InstallDir $InstallDir `
@@ -308,7 +308,7 @@ try {
 
     if ($Version -match '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$' -and
         $DowngradeVersion -match '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
-        & $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
+        & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\package-windows.ps1" `
             -Version $DowngradeVersion `
             -SkipBuild `
             -AllowDirty `
@@ -317,7 +317,7 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "Downgrade fixture package failed with code $LASTEXITCODE"
         }
-        & $PowerShellExe -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
+        & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-update-package.ps1" `
             -PackageZip $DowngradeZipPath `
             -ChecksumPath $DowngradeChecksumPath `
             -InstallDir $InstallDir `
@@ -339,7 +339,7 @@ try {
     Set-Content -LiteralPath $legacySentinel -Value "keep"
 
     $uninstallScript = Join-Path $InstallDir "uninstall.ps1"
-    & $PowerShellExe -ExecutionPolicy Bypass -File $uninstallScript -InstallDir $InstallDir -SkipShellIntegration
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $uninstallScript -InstallDir $InstallDir -SkipShellIntegration
     if ($LASTEXITCODE -ne 0) {
         throw "Update uninstall smoke failed with code $LASTEXITCODE"
     }
