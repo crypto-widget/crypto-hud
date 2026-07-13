@@ -64,6 +64,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($StateFile, $seedJson, $utf8NoBom)
 
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
@@ -83,6 +84,7 @@ public static class CryptoHudGuiScaleSmokeWin32 {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
@@ -102,6 +104,11 @@ public static class CryptoHudGuiScaleSmokeWin32 {
     }
 
     public const int SW_RESTORE = 9;
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOACTIVATE = 0x0010;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
 }
@@ -250,6 +257,20 @@ function Invoke-AutomationButton([IntPtr]$WindowHandle, [string]$Name) {
     Start-Sleep -Milliseconds 350
 }
 
+function Move-AutomationFocus([IntPtr]$WindowHandle, [string]$AnchorName, [string]$Keys) {
+    $anchor = Get-AutomationControl `
+        -WindowHandle $WindowHandle `
+        -Name $AnchorName `
+        -ControlType ([System.Windows.Automation.ControlType]::Button)
+    try {
+        $anchor.SetFocus()
+    } catch {
+        throw "Could not focus accessible control '$AnchorName': $($_.Exception.Message)"
+    }
+    [System.Windows.Forms.SendKeys]::SendWait($Keys)
+    Start-Sleep -Milliseconds 350
+}
+
 function Set-AutomationRangeValue([IntPtr]$WindowHandle, [string]$Name, [double]$Value) {
     $element = Get-AutomationControl `
         -WindowHandle $WindowHandle `
@@ -267,6 +288,19 @@ function Set-AutomationRangeValue([IntPtr]$WindowHandle, [string]$Name, [double]
 }
 
 function Assert-ScaledQuoteBoardContentVisible([object]$Window) {
+    $positionFlags =
+        [CryptoHudGuiScaleSmokeWin32]::SWP_NOSIZE -bor
+        [CryptoHudGuiScaleSmokeWin32]::SWP_NOMOVE -bor
+        [CryptoHudGuiScaleSmokeWin32]::SWP_NOACTIVATE
+    [void][CryptoHudGuiScaleSmokeWin32]::SetWindowPos(
+        [IntPtr]$Window.Handle,
+        [CryptoHudGuiScaleSmokeWin32]::HWND_TOPMOST,
+        0,
+        0,
+        0,
+        0,
+        $positionFlags
+    )
     Start-Sleep -Milliseconds 500
     $bitmap = [System.Drawing.Bitmap]::new(
         [Math]::Max(1, [int]$Window.Width),
@@ -275,6 +309,15 @@ function Assert-ScaledQuoteBoardContentVisible([object]$Window) {
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     $graphics.CopyFromScreen([int]$Window.Left, [int]$Window.Top, 0, 0, $bitmap.Size)
     $graphics.Dispose()
+    [void][CryptoHudGuiScaleSmokeWin32]::SetWindowPos(
+        [IntPtr]$Window.Handle,
+        [CryptoHudGuiScaleSmokeWin32]::HWND_NOTOPMOST,
+        0,
+        0,
+        0,
+        0,
+        $positionFlags
+    )
 
     $capturePath = Join-Path $StateDir "quote-board-30-scale.png"
     $bitmap.Save($capturePath, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -357,8 +400,10 @@ try {
         Start-Sleep -Milliseconds 300
 
         Invoke-AutomationButton ([IntPtr]$settingsWindow.Handle) "Show coin logos"
-        Invoke-AutomationButton ([IntPtr]$settingsWindow.Handle) "Hide quote asset"
+        Move-AutomationFocus ([IntPtr]$settingsWindow.Handle) "Show coin logos" "{TAB}"
+        Move-AutomationFocus ([IntPtr]$settingsWindow.Handle) "Hide quote asset" " "
         [void](Wait-ForWidgetState 224 101 100)
+        Move-AutomationFocus ([IntPtr]$settingsWindow.Handle) "Hide quote asset" "{TAB}"
         Set-AutomationRangeValue ([IntPtr]$settingsWindow.Handle) "Scale" 105
 
         $widgetState = Wait-ForWidgetState 235 106 105
