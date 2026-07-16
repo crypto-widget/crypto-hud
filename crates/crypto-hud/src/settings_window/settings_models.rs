@@ -100,6 +100,27 @@ fn widget_plugin_status_suffix(
     }
 }
 
+pub(super) fn widget_plugin_needs_relink(
+    widget: &WidgetInstance,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> bool {
+    plugin_catalog
+        .find(&widget.plugin_id)
+        .is_none_or(|definition| !definition.is_available())
+}
+
+pub(super) fn widget_plugin_relink_options(
+    widget: &WidgetInstance,
+    plugin_catalog: &plugin::PluginCatalog,
+    locale: i18n::Locale,
+) -> Vec<String> {
+    plugin_catalog
+        .available_replacements(&widget.plugin_id)
+        .iter()
+        .map(|definition| plugin_market_title(definition, locale))
+        .collect()
+}
+
 pub(super) fn widget_visibility_options(store: &LayoutStore) -> Vec<bool> {
     store.widgets.iter().map(|widget| widget.visible).collect()
 }
@@ -131,7 +152,7 @@ pub(super) fn widget_preview_image_options(
         .map(|widget| {
             plugin_catalog
                 .find(&widget.plugin_id)
-                .map(plugin_preview_images)
+                .map(|definition| plugin_preview_images(&definition))
                 .unwrap_or_else(empty_preview_images)
         })
         .collect::<Vec<_>>();
@@ -262,57 +283,119 @@ pub(super) fn widget_theme_preference_for_index(
         .unwrap_or_else(|| settings::WIDGET_THEME_SYSTEM.to_string())
 }
 
+pub(super) const PARAMETER_KIND_INTEGER: i32 = 0;
+pub(super) const PARAMETER_KIND_BOOLEAN: i32 = 1;
+pub(super) const PARAMETER_KIND_CHOICE: i32 = 2;
+pub(super) const PARAMETER_KIND_DECIMAL: i32 = 3;
+pub(super) const PARAMETER_KIND_COLOR: i32 = 4;
+pub(super) const PARAMETER_KIND_STRING: i32 = 5;
+
 #[derive(Default)]
-pub(super) struct WidgetIntegerParameterOptions {
+pub(super) struct WidgetParameterOptions {
+    pub kinds: Vec<i32>,
     pub labels: Vec<String>,
     pub helps: Vec<String>,
     pub units: Vec<String>,
-    pub values: Vec<i32>,
+    pub integer_values: Vec<i32>,
     pub minimums: Vec<i32>,
     pub maximums: Vec<i32>,
     pub steps: Vec<i32>,
+    pub boolean_values: Vec<bool>,
+    pub text_values: Vec<String>,
 }
 
-pub(super) fn widget_integer_parameter_options(
+pub(super) fn widget_parameter_options(
     widget: &WidgetInstance,
     plugin_catalog: &plugin::PluginCatalog,
     locale: i18n::Locale,
-) -> WidgetIntegerParameterOptions {
+) -> WidgetParameterOptions {
     let Some(definition) = plugin_catalog.find(&widget.plugin_id) else {
-        return WidgetIntegerParameterOptions::default();
+        return WidgetParameterOptions::default();
     };
-    let mut options = WidgetIntegerParameterOptions::default();
+    let mut options = WidgetParameterOptions::default();
     for parameter in &definition.parameters {
-        let plugin::PluginParameter::Integer {
-            key,
-            name,
-            name_zh_hans,
-            description,
-            description_zh_hans,
-            default,
-            minimum,
-            maximum,
-            step,
-            unit,
-            unit_zh_hans,
-        } = parameter;
-        options
-            .labels
-            .push(localized_parameter_text(name, name_zh_hans, locale));
-        options.helps.push(localized_parameter_text(
-            description,
-            description_zh_hans,
+        options.labels.push(localized_parameter_text(
+            parameter.name(),
+            parameter.name_zh_hans(),
             locale,
         ));
-        options
-            .units
-            .push(localized_parameter_text(unit, unit_zh_hans, locale));
-        options.values.push(settings::widget_integer_parameter(
-            widget, key, *default, *minimum, *maximum,
+        options.helps.push(localized_parameter_text(
+            parameter.description(),
+            parameter.description_zh_hans(),
+            locale,
         ));
-        options.minimums.push(*minimum);
-        options.maximums.push(*maximum);
-        options.steps.push(*step);
+        let value =
+            parameter.normalized_value(settings::widget_plugin_parameter(widget, parameter.key()));
+        let mut kind = PARAMETER_KIND_INTEGER;
+        let mut unit = String::new();
+        let mut integer_value = 0;
+        let mut minimum = 0;
+        let mut maximum = 0;
+        let mut step = 1;
+        let mut boolean_value = false;
+        let mut text_value = String::new();
+        match parameter {
+            plugin::PluginParameter::Integer {
+                minimum: parameter_minimum,
+                maximum: parameter_maximum,
+                step: parameter_step,
+                unit: parameter_unit,
+                unit_zh_hans,
+                ..
+            } => {
+                integer_value = value.as_i64().unwrap_or_default() as i32;
+                minimum = *parameter_minimum;
+                maximum = *parameter_maximum;
+                step = *parameter_step;
+                unit = localized_parameter_text(parameter_unit, unit_zh_hans, locale);
+            }
+            plugin::PluginParameter::Boolean { .. } => {
+                kind = PARAMETER_KIND_BOOLEAN;
+                boolean_value = value.as_bool().unwrap_or_default();
+            }
+            plugin::PluginParameter::Choice {
+                options: choices, ..
+            } => {
+                kind = PARAMETER_KIND_CHOICE;
+                text_value = value
+                    .as_str()
+                    .and_then(|value| choices.iter().find(|choice| choice.value == value))
+                    .map(|choice| {
+                        localized_parameter_text(&choice.name, &choice.name_zh_hans, locale)
+                    })
+                    .unwrap_or_default();
+            }
+            plugin::PluginParameter::Decimal {
+                precision,
+                unit: parameter_unit,
+                unit_zh_hans,
+                ..
+            } => {
+                kind = PARAMETER_KIND_DECIMAL;
+                text_value = format!(
+                    "{:.precision$}",
+                    value.as_f64().unwrap_or_default(),
+                    precision = usize::from(*precision)
+                );
+                unit = localized_parameter_text(parameter_unit, unit_zh_hans, locale);
+            }
+            plugin::PluginParameter::Color { .. } => {
+                kind = PARAMETER_KIND_COLOR;
+                text_value = value.as_str().unwrap_or_default().to_string();
+            }
+            plugin::PluginParameter::String { .. } => {
+                kind = PARAMETER_KIND_STRING;
+                text_value = value.as_str().unwrap_or_default().to_string();
+            }
+        }
+        options.kinds.push(kind);
+        options.units.push(unit);
+        options.integer_values.push(integer_value);
+        options.minimums.push(minimum);
+        options.maximums.push(maximum);
+        options.steps.push(step);
+        options.boolean_values.push(boolean_value);
+        options.text_values.push(text_value);
     }
     options
 }
@@ -360,7 +443,7 @@ pub(super) fn plugin_market_items_model(
     ModelRc::new(VecModel::from(
         catalog
             .market_plugins()
-            .map(|definition| plugin_market_item(definition, store, locale))
+            .map(|definition| plugin_market_item(&definition, store, locale))
             .collect::<Vec<_>>(),
     ))
 }
@@ -477,14 +560,20 @@ fn plugin_market_description(
         definition.min_symbol_limit,
         definition.symbol_limit,
     );
-    i18n::local_slint_plugin_description(
+    let description = i18n::local_slint_plugin_description(
         locale,
         &definition.version,
         definition.default_size.width,
         definition.default_size.height,
         &symbol_bounds,
         &capabilities,
-    )
+    );
+    let compatibility = i18n::plugin_compatibility_summary(
+        locale,
+        definition.schema_version,
+        &definition.host_api_version.to_string(),
+    );
+    format!("{description} · {compatibility}")
 }
 
 fn plugin_market_status(definition: &plugin::PluginDefinition, locale: i18n::Locale) -> String {
@@ -538,6 +627,8 @@ mod tests {
             id: "com.example.portfolio-alpha".to_string(),
             name: "Portfolio Alpha".to_string(),
             version: semver::Version::new(1, 0, 0),
+            schema_version: plugin::PLUGIN_MANIFEST_SCHEMA_VERSION,
+            host_api_version: semver::VersionReq::STAR,
             source: plugin::PluginSource::LocalUnsigned,
             renderer: plugin::PluginRendererDefinition::Builtin(
                 plugin::BuiltinRenderer::QuoteBoard,

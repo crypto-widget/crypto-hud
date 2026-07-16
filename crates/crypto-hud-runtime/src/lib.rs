@@ -13,12 +13,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const HOST_PLUGIN_API_VERSION: &str = "0.1.0";
+pub const HOST_PLUGIN_API_VERSION: &str = "0.2.0";
 pub const MIN_SYMBOL_LIMIT: usize = 1;
 pub const MAX_SYMBOL_LIMIT: usize = 8;
 pub const MAX_PREVIEW_IMAGES: usize = 5;
 pub const MAX_PLUGIN_THEMES: usize = 8;
 pub const MAX_PLUGIN_PARAMETERS: usize = 8;
+pub const MAX_PLUGIN_CHOICE_OPTIONS: usize = 32;
+pub const MAX_PLUGIN_STRING_LENGTH: usize = 256;
 pub const MAX_QUOTE_CACHE_ENTRIES: usize = 128;
 
 const MIN_PLUGIN_WIDTH: i32 = 120;
@@ -34,7 +36,7 @@ const CHART_MAX_CANDLES: usize = 34;
 const STALE_DATA_SECONDS: u64 = 180;
 const CHART_STALE_DATA_SECONDS: u64 = 10 * 60;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginManifest {
     pub schema_version: u32,
@@ -108,7 +110,7 @@ pub struct PluginDataRequirement {
     pub capability: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PluginParameter {
     Integer {
@@ -130,6 +132,232 @@ pub enum PluginParameter {
         #[serde(default, rename = "unitZhHans")]
         unit_zh_hans: String,
     },
+    Boolean {
+        key: String,
+        name: String,
+        #[serde(default, rename = "nameZhHans")]
+        name_zh_hans: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default, rename = "descriptionZhHans")]
+        description_zh_hans: String,
+        default: bool,
+    },
+    Choice {
+        key: String,
+        name: String,
+        #[serde(default, rename = "nameZhHans")]
+        name_zh_hans: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default, rename = "descriptionZhHans")]
+        description_zh_hans: String,
+        default: String,
+        options: Vec<PluginChoiceOption>,
+    },
+    Decimal {
+        key: String,
+        name: String,
+        #[serde(default, rename = "nameZhHans")]
+        name_zh_hans: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default, rename = "descriptionZhHans")]
+        description_zh_hans: String,
+        default: f64,
+        minimum: f64,
+        maximum: f64,
+        step: f64,
+        #[serde(default = "default_decimal_parameter_precision")]
+        precision: u8,
+        #[serde(default)]
+        unit: String,
+        #[serde(default, rename = "unitZhHans")]
+        unit_zh_hans: String,
+    },
+    Color {
+        key: String,
+        name: String,
+        #[serde(default, rename = "nameZhHans")]
+        name_zh_hans: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default, rename = "descriptionZhHans")]
+        description_zh_hans: String,
+        default: String,
+    },
+    String {
+        key: String,
+        name: String,
+        #[serde(default, rename = "nameZhHans")]
+        name_zh_hans: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default, rename = "descriptionZhHans")]
+        description_zh_hans: String,
+        default: String,
+        #[serde(default, rename = "minLength")]
+        min_length: usize,
+        #[serde(rename = "maxLength")]
+        max_length: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginChoiceOption {
+    pub value: String,
+    pub name: String,
+    #[serde(default, rename = "nameZhHans")]
+    pub name_zh_hans: String,
+}
+
+impl PluginParameter {
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Integer { key, .. }
+            | Self::Boolean { key, .. }
+            | Self::Choice { key, .. }
+            | Self::Decimal { key, .. }
+            | Self::Color { key, .. }
+            | Self::String { key, .. } => key,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Integer { name, .. }
+            | Self::Boolean { name, .. }
+            | Self::Choice { name, .. }
+            | Self::Decimal { name, .. }
+            | Self::Color { name, .. }
+            | Self::String { name, .. } => name,
+        }
+    }
+
+    pub fn name_zh_hans(&self) -> &str {
+        match self {
+            Self::Integer { name_zh_hans, .. }
+            | Self::Boolean { name_zh_hans, .. }
+            | Self::Choice { name_zh_hans, .. }
+            | Self::Decimal { name_zh_hans, .. }
+            | Self::Color { name_zh_hans, .. }
+            | Self::String { name_zh_hans, .. } => name_zh_hans,
+        }
+    }
+
+    pub fn description(&self) -> &str {
+        match self {
+            Self::Integer { description, .. }
+            | Self::Boolean { description, .. }
+            | Self::Choice { description, .. }
+            | Self::Decimal { description, .. }
+            | Self::Color { description, .. }
+            | Self::String { description, .. } => description,
+        }
+    }
+
+    pub fn description_zh_hans(&self) -> &str {
+        match self {
+            Self::Integer {
+                description_zh_hans,
+                ..
+            }
+            | Self::Boolean {
+                description_zh_hans,
+                ..
+            }
+            | Self::Choice {
+                description_zh_hans,
+                ..
+            }
+            | Self::Decimal {
+                description_zh_hans,
+                ..
+            }
+            | Self::Color {
+                description_zh_hans,
+                ..
+            }
+            | Self::String {
+                description_zh_hans,
+                ..
+            } => description_zh_hans,
+        }
+    }
+
+    pub fn normalized_value(&self, candidate: Option<&serde_json::Value>) -> serde_json::Value {
+        match self {
+            Self::Integer {
+                default,
+                minimum,
+                maximum,
+                ..
+            } => {
+                let value = candidate
+                    .and_then(serde_json::Value::as_i64)
+                    .and_then(|value| i32::try_from(value).ok())
+                    .unwrap_or(*default)
+                    .clamp(*minimum, *maximum);
+                serde_json::Value::Number(value.into())
+            }
+            Self::Boolean { default, .. } => serde_json::Value::Bool(
+                candidate
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(*default),
+            ),
+            Self::Choice {
+                default, options, ..
+            } => {
+                let value = candidate
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|candidate| options.iter().any(|option| option.value == *candidate))
+                    .unwrap_or(default);
+                serde_json::Value::String(value.to_string())
+            }
+            Self::Decimal {
+                default,
+                minimum,
+                maximum,
+                precision,
+                ..
+            } => {
+                let value = candidate
+                    .and_then(serde_json::Value::as_f64)
+                    .filter(|value| value.is_finite())
+                    .unwrap_or(*default)
+                    .clamp(*minimum, *maximum);
+                let scale = 10_f64.powi(i32::from(*precision));
+                let value = ((value * scale).round() / scale).clamp(*minimum, *maximum);
+                serde_json::Number::from_f64(value)
+                    .map_or(serde_json::Value::Null, serde_json::Value::Number)
+            }
+            Self::Color { default, .. } => {
+                let value = candidate
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(normalize_plugin_color)
+                    .or_else(|| normalize_plugin_color(default))
+                    .unwrap_or_else(|| "#000000".to_string());
+                serde_json::Value::String(value)
+            }
+            Self::String {
+                default,
+                min_length,
+                max_length,
+                ..
+            } => {
+                let value = candidate
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| valid_bounded_plugin_string(value, *min_length, *max_length))
+                    .unwrap_or(default);
+                serde_json::Value::String(value.to_string())
+            }
+        }
+    }
+
+    pub fn uses_host_api_0_2(&self) -> bool {
+        !matches!(self, Self::Integer { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -158,6 +386,10 @@ fn default_min_symbol_limit() -> usize {
 
 fn default_integer_parameter_step() -> i32 {
     1
+}
+
+fn default_decimal_parameter_precision() -> u8 {
+    2
 }
 
 fn default_plugin_themes() -> Vec<PluginTheme> {
@@ -214,6 +446,7 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<()> {
     validate_preview_images(&manifest.preview_images)?;
     validate_themes(&manifest.themes)?;
     validate_parameters(&manifest.parameters)?;
+    validate_parameter_host_api_version(&manifest.parameters, &manifest.host_api_version)?;
     validate_size_policy(
         manifest.size_policy,
         manifest.default_size,
@@ -237,33 +470,31 @@ fn validate_parameters(parameters: &[PluginParameter]) -> Result<()> {
 
     let mut keys = HashSet::new();
     for parameter in parameters {
+        let key = parameter.key();
+        validate_parameter_key(key)?;
+        if !keys.insert(key) {
+            bail!("parameters contains duplicate key {key}");
+        }
+        validate_parameter_text(parameter.name(), "parameter name", 80, false)?;
+        validate_parameter_text(parameter.name_zh_hans(), "parameter nameZhHans", 80, true)?;
+        validate_parameter_text(parameter.description(), "parameter description", 240, true)?;
+        validate_parameter_text(
+            parameter.description_zh_hans(),
+            "parameter descriptionZhHans",
+            240,
+            true,
+        )?;
+
         match parameter {
             PluginParameter::Integer {
-                key,
-                name,
-                name_zh_hans,
-                description,
-                description_zh_hans,
                 default,
                 minimum,
                 maximum,
                 step,
                 unit,
                 unit_zh_hans,
+                ..
             } => {
-                validate_parameter_key(key)?;
-                if !keys.insert(key.as_str()) {
-                    bail!("parameters contains duplicate key {key}");
-                }
-                validate_parameter_text(name, "parameter name", 80, false)?;
-                validate_parameter_text(name_zh_hans, "parameter nameZhHans", 80, true)?;
-                validate_parameter_text(description, "parameter description", 240, true)?;
-                validate_parameter_text(
-                    description_zh_hans,
-                    "parameter descriptionZhHans",
-                    240,
-                    true,
-                )?;
                 validate_parameter_text(unit, "parameter unit", 16, true)?;
                 validate_parameter_text(unit_zh_hans, "parameter unitZhHans", 16, true)?;
                 if minimum >= maximum {
@@ -276,9 +507,165 @@ fn validate_parameters(parameters: &[PluginParameter]) -> Result<()> {
                     bail!("integer parameter {key} step must be positive and fit its range");
                 }
             }
+            PluginParameter::Boolean { .. } => {}
+            PluginParameter::Choice {
+                default, options, ..
+            } => {
+                if !(2..=MAX_PLUGIN_CHOICE_OPTIONS).contains(&options.len()) {
+                    bail!(
+                        "choice parameter {key} options must contain between 2 and {MAX_PLUGIN_CHOICE_OPTIONS} entries"
+                    );
+                }
+                let mut values = HashSet::new();
+                for option in options {
+                    validate_parameter_choice_value(&option.value)?;
+                    if !values.insert(option.value.as_str()) {
+                        bail!(
+                            "choice parameter {key} contains duplicate option {}",
+                            option.value
+                        );
+                    }
+                    validate_parameter_text(&option.name, "choice option name", 80, false)?;
+                    validate_parameter_text(
+                        &option.name_zh_hans,
+                        "choice option nameZhHans",
+                        80,
+                        true,
+                    )?;
+                }
+                if !values.contains(default.as_str()) {
+                    bail!("choice parameter {key} default must match an option value");
+                }
+            }
+            PluginParameter::Decimal {
+                default,
+                minimum,
+                maximum,
+                step,
+                precision,
+                unit,
+                unit_zh_hans,
+                ..
+            } => {
+                validate_parameter_text(unit, "parameter unit", 16, true)?;
+                validate_parameter_text(unit_zh_hans, "parameter unitZhHans", 16, true)?;
+                if !default.is_finite()
+                    || !minimum.is_finite()
+                    || !maximum.is_finite()
+                    || !step.is_finite()
+                {
+                    bail!("decimal parameter {key} values must be finite");
+                }
+                if minimum >= maximum {
+                    bail!("decimal parameter {key} minimum must be less than maximum");
+                }
+                if !(*minimum..=*maximum).contains(default) {
+                    bail!("decimal parameter {key} default must be within its range");
+                }
+                if *step <= 0.0 || *step > maximum - minimum {
+                    bail!("decimal parameter {key} step must be positive and fit its range");
+                }
+                if *precision > 6 {
+                    bail!("decimal parameter {key} precision must not exceed 6");
+                }
+            }
+            PluginParameter::Color { default, .. } => {
+                if normalize_plugin_color(default).is_none() {
+                    bail!("color parameter {key} default must use #RRGGBB or #RRGGBBAA");
+                }
+            }
+            PluginParameter::String {
+                default,
+                min_length,
+                max_length,
+                ..
+            } => {
+                if *max_length == 0 || *max_length > MAX_PLUGIN_STRING_LENGTH {
+                    bail!(
+                        "string parameter {key} maxLength must be between 1 and {MAX_PLUGIN_STRING_LENGTH}"
+                    );
+                }
+                if min_length > max_length {
+                    bail!("string parameter {key} minLength must not exceed maxLength");
+                }
+                if !valid_bounded_plugin_string(default, *min_length, *max_length) {
+                    bail!(
+                        "string parameter {key} default must satisfy its length and single-line limits"
+                    );
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn validate_parameter_host_api_version(
+    parameters: &[PluginParameter],
+    host_api_version: &str,
+) -> Result<()> {
+    if !parameters.iter().any(PluginParameter::uses_host_api_0_2) {
+        return Ok(());
+    }
+    let requirement = VersionReq::parse(host_api_version)
+        .context("hostApiVersion must be a valid SemVer requirement")?;
+    if requirement.matches(&Version::new(0, 1, 0))
+        || requirement.matches(&Version::new(0, 1, u64::MAX))
+    {
+        bail!(
+            "boolean, choice, decimal, color, and string parameters require hostApiVersion >=0.2.0 and must exclude 0.1.x"
+        );
+    }
+    Ok(())
+}
+
+fn validate_parameter_choice_value(value: &str) -> Result<()> {
+    if value.is_empty() || value.len() > 64 {
+        bail!("choice option value must contain between 1 and 64 characters");
+    }
+    if value.starts_with('-')
+        || value.ends_with('-')
+        || value.chars().any(|character| {
+            !(character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '-' | '_' | '.'))
+        })
+    {
+        bail!(
+            "choice option value must use lowercase ASCII letters, digits, dots, underscores, or internal hyphens"
+        );
+    }
+    Ok(())
+}
+
+pub fn normalize_plugin_color(value: &str) -> Option<String> {
+    let value = value.trim();
+    if !matches!(value.len(), 7 | 9)
+        || !value.starts_with('#')
+        || !value[1..]
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    Some(value.to_ascii_lowercase())
+}
+
+pub fn plugin_color_rgba(value: &str) -> Option<[u8; 4]> {
+    let value = normalize_plugin_color(value)?;
+    let red = u8::from_str_radix(&value[1..3], 16).ok()?;
+    let green = u8::from_str_radix(&value[3..5], 16).ok()?;
+    let blue = u8::from_str_radix(&value[5..7], 16).ok()?;
+    let alpha = if value.len() == 9 {
+        u8::from_str_radix(&value[7..9], 16).ok()?
+    } else {
+        u8::MAX
+    };
+    Some([red, green, blue, alpha])
+}
+
+pub fn valid_bounded_plugin_string(value: &str, minimum: usize, maximum: usize) -> bool {
+    let length = value.chars().count();
+    (minimum..=maximum).contains(&length) && !value.chars().any(char::is_control)
 }
 
 fn validate_parameter_key(key: &str) -> Result<()> {
@@ -1680,6 +2067,18 @@ mod tests {
         .to_string()
     }
 
+    fn manifest_with_parameters(parameters: &str, host_api_version: &str) -> String {
+        valid_manifest_json()
+            .replace(
+                r#""hostApiVersion": ">=0.1.0, <1.0.0""#,
+                &format!(r#""hostApiVersion": "{host_api_version}""#),
+            )
+            .replace(
+                r#""dataRequirements": ["#,
+                &format!(r#""parameters": [{parameters}], "dataRequirements": ["#),
+            )
+    }
+
     #[test]
     fn parses_valid_plugin_manifest_contract() {
         let manifest = parse_manifest(&valid_manifest_json()).unwrap();
@@ -1756,6 +2155,184 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("within its range"));
+    }
+
+    #[test]
+    fn parses_and_normalizes_extended_plugin_parameters() {
+        let json = manifest_with_parameters(
+            r##"
+                {
+                    "kind": "boolean",
+                    "key": "show-label",
+                    "name": "Show label",
+                    "default": true
+                },
+                {
+                    "kind": "choice",
+                    "key": "density",
+                    "name": "Density",
+                    "default": "compact",
+                    "options": [
+                        { "value": "compact", "name": "Compact" },
+                        { "value": "comfortable", "name": "Comfortable" }
+                    ]
+                },
+                {
+                    "kind": "decimal",
+                    "key": "line-width",
+                    "name": "Line width",
+                    "default": 1.25,
+                    "minimum": 0.5,
+                    "maximum": 4.0,
+                    "step": 0.25,
+                    "precision": 2,
+                    "unit": "px"
+                },
+                {
+                    "kind": "color",
+                    "key": "accent",
+                    "name": "Accent",
+                    "default": "#AABBCCDD"
+                },
+                {
+                    "kind": "string",
+                    "key": "caption",
+                    "name": "Caption",
+                    "default": "Market",
+                    "minLength": 1,
+                    "maxLength": 24
+                }
+            "##,
+            ">=0.2.0, <1.0.0",
+        );
+
+        let manifest = parse_manifest(&json).unwrap();
+
+        assert_eq!(manifest.parameters.len(), 5);
+        assert_eq!(
+            manifest.parameters[0].normalized_value(Some(&serde_json::json!(false))),
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            manifest.parameters[1].normalized_value(Some(&serde_json::json!("unknown"))),
+            serde_json::json!("compact")
+        );
+        assert_eq!(
+            manifest.parameters[2].normalized_value(Some(&serde_json::json!(9.0))),
+            serde_json::json!(4.0)
+        );
+        assert_eq!(
+            manifest.parameters[2].normalized_value(Some(&serde_json::json!(1.236))),
+            serde_json::json!(1.24)
+        );
+        assert_eq!(
+            manifest.parameters[3].normalized_value(Some(&serde_json::json!("#112233"))),
+            serde_json::json!("#112233")
+        );
+        assert_eq!(
+            manifest.parameters[3].normalized_value(Some(&serde_json::json!("invalid"))),
+            serde_json::json!("#aabbccdd")
+        );
+        assert_eq!(
+            manifest.parameters[4].normalized_value(Some(&serde_json::json!(""))),
+            serde_json::json!("Market")
+        );
+        assert_eq!(
+            plugin_color_rgba("#10203040"),
+            Some([0x10, 0x20, 0x30, 0x40])
+        );
+    }
+
+    #[test]
+    fn decimal_normalization_keeps_rounded_values_inside_the_declared_range() {
+        let parameter = PluginParameter::Decimal {
+            key: "threshold".to_string(),
+            name: "Threshold".to_string(),
+            name_zh_hans: String::new(),
+            description: String::new(),
+            description_zh_hans: String::new(),
+            default: 0.004,
+            minimum: 0.004,
+            maximum: 0.005,
+            step: 0.001,
+            precision: 2,
+            unit: String::new(),
+            unit_zh_hans: String::new(),
+        };
+
+        assert_eq!(
+            parameter.normalized_value(Some(&serde_json::json!(0.004))),
+            serde_json::json!(0.004)
+        );
+        assert_eq!(
+            parameter.normalized_value(Some(&serde_json::json!(0.005))),
+            serde_json::json!(0.005)
+        );
+    }
+
+    #[test]
+    fn extended_plugin_parameters_require_host_api_0_2() {
+        let parameter = r#"{
+            "kind": "boolean",
+            "key": "show-label",
+            "name": "Show label",
+            "default": true
+        }"#;
+
+        let error = parse_manifest(&manifest_with_parameters(parameter, ">=0.1.0, <1.0.0"))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("require hostApiVersion >=0.2.0"));
+        assert!(parse_manifest(&manifest_with_parameters(parameter, ">=0.2.0, <1.0.0")).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_extended_plugin_parameter_contracts() {
+        let invalid_parameters = [
+            (
+                r#"{
+                    "kind": "choice", "key": "density", "name": "Density",
+                    "default": "missing", "options": [
+                        { "value": "compact", "name": "Compact" },
+                        { "value": "comfortable", "name": "Comfortable" }
+                    ]
+                }"#,
+                "default must match",
+            ),
+            (
+                r#"{
+                    "kind": "decimal", "key": "opacity", "name": "Opacity",
+                    "default": 0.5, "minimum": 0.0, "maximum": 1.0,
+                    "step": 0.1, "precision": 7
+                }"#,
+                "precision must not exceed 6",
+            ),
+            (
+                r##"{
+                    "kind": "color", "key": "accent", "name": "Accent",
+                    "default": "#12345"
+                }"##,
+                "#RRGGBB",
+            ),
+            (
+                r#"{
+                    "kind": "string", "key": "caption", "name": "Caption",
+                    "default": "Market", "maxLength": 257
+                }"#,
+                "maxLength must be between",
+            ),
+        ];
+
+        for (parameter, expected_error) in invalid_parameters {
+            let error = parse_manifest(&manifest_with_parameters(parameter, ">=0.2.0, <1.0.0"))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains(expected_error),
+                "expected {expected_error:?} in {error:?}"
+            );
+        }
     }
 
     #[test]

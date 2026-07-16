@@ -295,6 +295,134 @@ component PercentStepper inherits Rectangle {
     }
 }
 
+component ParameterValueStepper inherits Rectangle {
+    in property <string> value-text;
+    in property <bool> enabled: true;
+    in property <string> accessible-label-text;
+    in property <color> text-color;
+    in property <color> muted-color;
+    in property <color> surface-color;
+    in property <color> hover-color;
+    in property <color> control-border-color;
+
+    callback stepped(int);
+
+    width: 150px;
+    height: 34px;
+    border-radius: 4px;
+    background: root.surface-color;
+    border-width: 1px;
+    border-color: value_stepper_focus.has-focus ? root.text-color : root.control-border-color;
+    forward-focus: value_stepper_focus;
+
+    accessible-role: spinbox;
+    accessible-label: root.accessible-label-text;
+    accessible-enabled: root.enabled;
+    accessible-action-increment => { root.apply-step(1); }
+    accessible-action-decrement => { root.apply-step(-1); }
+
+    function apply-step(direction: int) {
+        if root.enabled {
+            root.stepped(direction);
+        }
+    }
+
+    Text {
+        x: 35px;
+        y: 10px;
+        width: 80px;
+        height: 14px;
+        text: root.value-text;
+        color: root.enabled ? root.text-color : root.muted-color;
+        font-size: 10px;
+        font-weight: 500;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+
+    Rectangle {
+        x: 34px;
+        width: 1px;
+        height: parent.height;
+        background: root.control-border-color;
+    }
+
+    Rectangle {
+        x: 115px;
+        width: 1px;
+        height: parent.height;
+        background: root.control-border-color;
+    }
+
+    Rectangle {
+        width: 34px;
+        height: parent.height;
+        background: value_step_down_touch.has-hover ? root.hover-color : transparent;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "-";
+            color: root.enabled ? root.muted-color : root.control-border-color;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        value_step_down_touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => { root.apply-step(-1); }
+        }
+    }
+
+    Rectangle {
+        x: 116px;
+        width: parent.width - 116px;
+        height: parent.height;
+        background: value_step_up_touch.has-hover ? root.hover-color : transparent;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "+";
+            color: root.enabled ? root.muted-color : root.control-border-color;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        value_step_up_touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => { root.apply-step(1); }
+        }
+    }
+
+    value_stepper_focus := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        enabled: root.enabled;
+
+        key-pressed(event) => {
+            if event.text == Key.RightArrow || event.text == Key.UpArrow {
+                root.apply-step(1);
+                return accept;
+            } else if event.text == Key.LeftArrow || event.text == Key.DownArrow {
+                root.apply-step(-1);
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
 component SettingsSmallButton inherits Rectangle {
     in property <string> text;
     in property <color> text-color;
@@ -779,6 +907,8 @@ export component SettingsWindow inherits Window {
     in-out property <bool> market-hyperliquid-enabled;
     in-out property <int> refresh-interval-seconds;
     in-out property <int> selected-widget-index;
+    in property <bool> selected-widget-plugin-missing: false;
+    in-out property <int> plugin-relink-index: 0;
     in-out property <bool> auto-start-enabled;
     in-out property <bool> show-main-window-on-startup;
     in-out property <int> shortcut-index;
@@ -804,6 +934,7 @@ export component SettingsWindow inherits Window {
 
     in property <[string]> widget-list-options;
     in property <[string]> widget-list-detail-options;
+    in property <[string]> plugin-relink-options;
     in property <[bool]> widget-visible-options;
     in property <[int]> widget-preview-kinds;
     in property <[int]> widget-preview-image-counts;
@@ -817,6 +948,7 @@ export component SettingsWindow inherits Window {
     in property <[int]> widget-scale-min-options;
     in property <[int]> widget-scale-max-options;
     in property <[string]> widget-theme-options;
+    in property <[int]> widget-parameter-kinds;
     in property <[string]> widget-parameter-labels;
     in property <[string]> widget-parameter-helps;
     in property <[string]> widget-parameter-units;
@@ -824,6 +956,8 @@ export component SettingsWindow inherits Window {
     in property <[int]> widget-parameter-minimums;
     in property <[int]> widget-parameter-maximums;
     in property <[int]> widget-parameter-steps;
+    in property <[bool]> widget-parameter-boolean-values;
+    in property <[string]> widget-parameter-text-values;
     property <bool> has-widgets: root.widget-list-options.length != 0;
     property <length> widget-settings-scrollbar-gutter: 18px;
     in property <[string]> shortcut-options;
@@ -917,6 +1051,11 @@ export component SettingsWindow inherits Window {
     in property <string> custom-components-text;
     in property <string> custom-components-help-text;
     in property <string> open-custom-components-folder-text;
+    in property <string> plugin-diagnostics-title-text;
+    in property <string> plugin-compatibility-text;
+    in property <string> plugin-diagnostics-empty-text;
+    in property <string> reload-plugins-text;
+    in property <[string]> plugin-diagnostic-options;
     in property <string> theme-text;
     in property <string> language-text;
     in property <string> appearance-interface-text;
@@ -940,6 +1079,8 @@ export component SettingsWindow inherits Window {
     in property <string> my-widgets-text;
     in property <string> selected-widget-text;
     in property <string> selected-widget-description-text;
+    in property <string> replacement-plugin-text;
+    in property <string> relink-plugin-text;
     in property <string> widget-name-text;
     in property <string> lock-position-help-text;
     in property <string> widget-scale-help-text;
@@ -1041,6 +1182,10 @@ export component SettingsWindow inherits Window {
     callback apply-widget-settings(int, string, bool, bool, int, int, int, bool, bool, bool);
     callback apply-widget-scale(int, int);
     callback apply-widget-integer-parameter(int, int, int);
+    callback apply-widget-boolean-parameter(int, int, bool);
+    callback apply-widget-text-parameter(int, int, string);
+    callback step-widget-parameter(int, int, int);
+    callback relink-missing-plugin(int, int);
     callback toggle-widget-visibility(int);
     callback reset-widget-positions();
     callback hide-all-widgets();
@@ -1055,6 +1200,7 @@ export component SettingsWindow inherits Window {
     callback open-about-link();
     callback clear-icon-cache();
     callback open-custom-components-folder();
+    callback reload-custom-components();
 
     width: 1120px;
     height: 720px;
@@ -1744,6 +1890,7 @@ export component SettingsWindow inherits Window {
                     help: "";
                     label-color: root.settings-label-color;
                     muted-color: root.settings-muted-color;
+                    visible: !root.selected-widget-plugin-missing;
                 }
 
                 LineEdit {
@@ -1754,6 +1901,42 @@ export component SettingsWindow inherits Window {
                     text <=> root.widget-name-input-text;
                     horizontal-alignment: root.rtl-layout ? right : left;
                     edited(_) => { root.apply-current-widget-settings(); }
+                    visible: !root.selected-widget-plugin-missing;
+                }
+
+                SettingLabel {
+                    rtl-layout: root.rtl-layout;
+                    x: 17px;
+                    y: 95px;
+                    width: 112px;
+                    label: root.replacement-plugin-text;
+                    help: "";
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                    visible: root.selected-widget-plugin-missing;
+                }
+
+                ComboBox {
+                    x: 143px;
+                    y: 82px;
+                    width: parent.width - 271px;
+                    model: root.plugin-relink-options;
+                    current-index <=> root.plugin-relink-index;
+                    enabled: root.plugin-relink-options.length > 0;
+                    visible: root.selected-widget-plugin-missing;
+                }
+
+                Button {
+                    x: parent.width - 110px;
+                    y: 85px;
+                    width: 93px;
+                    height: 24px;
+                    text: root.relink-plugin-text;
+                    enabled: root.plugin-relink-options.length > 0;
+                    visible: root.selected-widget-plugin-missing;
+                    clicked => {
+                        root.relink-missing-plugin(root.selected-widget-index, root.plugin-relink-index);
+                    }
                 }
 
                 SettingLabel {
@@ -2296,9 +2479,64 @@ export component SettingsWindow inherits Window {
                         surface-color: root.settings-content-background;
                         hover-color: root.settings-selected-background;
                         control-border-color: root.settings-border-color;
+                        visible: root.widget-parameter-kinds[index] == 0;
                         edited(value) => {
                             if root.has-widgets && root.selected-widget-index >= 0 {
                                 root.apply-widget-integer-parameter(root.selected-widget-index, index, value);
+                            }
+                        }
+                    }
+
+                    parameter_boolean_control := SettingSwitch {
+                        x: parent.width - 54px;
+                        y: 7px;
+                        checked: root.widget-parameter-boolean-values[index];
+                        enabled: root.has-widgets;
+                        accessible-label-text: parameter-label;
+                        accent-color: root.settings-accent-color;
+                        track-color: root.settings-track-color;
+                        knob-color: root.settings-knob-color;
+                        visible: root.widget-parameter-kinds[index] == 1;
+                        toggled => {
+                            if root.has-widgets && root.selected-widget-index >= 0 {
+                                root.apply-widget-boolean-parameter(root.selected-widget-index, index, self.checked);
+                            }
+                        }
+                    }
+
+                    ParameterValueStepper {
+                        x: parent.width - 217px;
+                        y: 0px;
+                        width: 150px;
+                        height: 34px;
+                        value-text: root.widget-parameter-text-values[index];
+                        enabled: root.has-widgets;
+                        accessible-label-text: parameter-label;
+                        text-color: root.settings-label-color;
+                        muted-color: root.settings-muted-color;
+                        surface-color: root.settings-content-background;
+                        hover-color: root.settings-selected-background;
+                        control-border-color: root.settings-border-color;
+                        visible: root.widget-parameter-kinds[index] == 2 || root.widget-parameter-kinds[index] == 3;
+                        stepped(direction) => {
+                            if root.has-widgets && root.selected-widget-index >= 0 {
+                                root.step-widget-parameter(root.selected-widget-index, index, direction);
+                            }
+                        }
+                    }
+
+                    parameter_text_control := LineEdit {
+                        x: parent.width - 217px;
+                        y: 0px;
+                        width: 200px;
+                        height: 34px;
+                        text: root.widget-parameter-text-values[index];
+                        horizontal-alignment: root.rtl-layout ? right : left;
+                        accessible-label: parameter-label;
+                        visible: root.widget-parameter-kinds[index] == 4 || root.widget-parameter-kinds[index] == 5;
+                        edited(value) => {
+                            if root.has-widgets && root.selected-widget-index >= 0 {
+                                root.apply-widget-text-parameter(root.selected-widget-index, index, value);
                             }
                         }
                     }
@@ -2313,6 +2551,7 @@ export component SettingsWindow inherits Window {
                         font-size: 10px;
                         font-weight: 500;
                         overflow: elide;
+                        visible: root.widget-parameter-kinds[index] == 0 || root.widget-parameter-kinds[index] == 3;
                     }
                 }
 
@@ -3326,7 +3565,11 @@ export component SettingsWindow inherits Window {
             property <length> network-proxy-card-height: root.network-proxy-enabled ? 182px : 94px;
             property <length> tray-card-y: 196px + system_tab.network-proxy-card-height + 15px;
             property <length> maintenance-card-y: system_tab.tray-card-y + 153px;
-            property <length> app-info-card-y: system_tab.maintenance-card-y + 153px;
+            property <length> plugin-diagnostics-card-y: system_tab.maintenance-card-y + 153px;
+            property <length> plugin-diagnostics-card-height: root.plugin-diagnostic-options.length > 0
+                ? (104 + root.plugin-diagnostic-options.length * 32) * 1px
+                : 134px;
+            property <length> app-info-card-y: system_tab.plugin-diagnostics-card-y + system_tab.plugin-diagnostics-card-height + 14px;
             property <length> content-height: system_tab.app-info-card-y + 155px;
 
             PanelTitle {
@@ -3759,6 +4002,100 @@ export component SettingsWindow inherits Window {
                         height: 24px;
                         text: root.open-custom-components-folder-text;
                         clicked => { root.open-custom-components-folder(); }
+                    }
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: system_tab.plugin-diagnostics-card-y;
+                    width: system_tab.width - 34px;
+                    height: system_tab.plugin-diagnostics-card-height;
+                    border-radius: 6px;
+                    background: root.settings-surface-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+
+                    SettingSectionTitle {
+                        rtl-layout: root.rtl-layout;
+                        x: 17px;
+                        y: 13px;
+                        width: parent.width - 34px;
+                        title: root.plugin-diagnostics-title-text;
+                        title-color: root.settings-heading-color;
+                        divider-color: root.settings-divider-color;
+                    }
+
+                    Text {
+                        x: 17px;
+                        y: 52px;
+                        width: parent.width - 145px;
+                        height: 18px;
+                        text: root.plugin-compatibility-text;
+                        color: root.settings-muted-color;
+                        font-size: 10px;
+                        horizontal-alignment: root.rtl-layout ? right : left;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Button {
+                        x: parent.width - 110px;
+                        y: 48px;
+                        width: 93px;
+                        height: 24px;
+                        text: root.reload-plugins-text;
+                        clicked => { root.reload-custom-components(); }
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 82px;
+                        width: parent.width;
+                        height: 1px;
+                        background: root.settings-divider-color;
+                    }
+
+                    Text {
+                        x: 17px;
+                        y: 99px;
+                        width: parent.width - 34px;
+                        height: 18px;
+                        text: root.plugin-diagnostics-empty-text;
+                        color: root.settings-muted-color;
+                        font-size: 10px;
+                        horizontal-alignment: root.rtl-layout ? right : left;
+                        overflow: elide;
+                        visible: root.plugin-diagnostic-options.length == 0;
+                    }
+
+                    for diagnostic[index] in root.plugin-diagnostic-options : Rectangle {
+                        x: 17px;
+                        y: (91 + index * 32) * 1px;
+                        width: parent.width - 34px;
+                        height: 30px;
+                        background: transparent;
+
+                        Rectangle {
+                            x: root.rtl-layout ? parent.width - 8px : 0px;
+                            y: 11px;
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: root.settings-status-color;
+                        }
+
+                        Text {
+                            x: root.rtl-layout ? 0px : 14px;
+                            y: 1px;
+                            width: parent.width - 14px;
+                            height: 28px;
+                            text: diagnostic;
+                            color: root.settings-label-color;
+                            font-size: 9px;
+                            horizontal-alignment: root.rtl-layout ? right : left;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
                     }
                 }
 

@@ -166,6 +166,58 @@ fn install_gui_smoke_settings_interaction_timer(
     Some(timer)
 }
 
+struct PluginReloadWatcher {
+    observed: plugin::PluginTreeFingerprint,
+    applied: plugin::PluginTreeFingerprint,
+    stable_ticks: u8,
+}
+
+impl PluginReloadWatcher {
+    fn new(initial: plugin::PluginTreeFingerprint) -> Self {
+        Self {
+            observed: initial.clone(),
+            applied: initial,
+            stable_ticks: 0,
+        }
+    }
+
+    fn observe(&mut self, current: plugin::PluginTreeFingerprint) -> bool {
+        if current != self.observed {
+            self.observed = current;
+            self.stable_ticks = 0;
+            return false;
+        }
+        if current == self.applied {
+            return false;
+        }
+        self.stable_ticks = self.stable_ticks.saturating_add(1);
+        if self.stable_ticks < 2 {
+            return false;
+        }
+        self.applied = current;
+        self.stable_ticks = 0;
+        true
+    }
+}
+
+fn install_plugin_hot_reload_timer(
+    state_dir: std::path::PathBuf,
+    settings_window: slint::Weak<SettingsWindow>,
+) -> Timer {
+    let initial = plugin::plugin_tree_fingerprint(&state_dir);
+    let mut watcher = PluginReloadWatcher::new(initial);
+    let timer = Timer::default();
+    timer.start(TimerMode::Repeated, Duration::from_millis(750), move || {
+        let current = plugin::plugin_tree_fingerprint(&state_dir);
+        if watcher.observe(current) {
+            if let Some(ui) = settings_window.upgrade() {
+                ui.invoke_reload_custom_components();
+            }
+        }
+    });
+    timer
+}
+
 fn offline_gui_smoke_enabled(gui_smoke_requested: bool, flag: Option<&str>) -> bool {
     gui_smoke_requested && flag == Some("1")
 }
@@ -333,6 +385,8 @@ fn main() -> Result<()> {
         coin_icons: coin_icons.clone(),
         plugin_catalog: plugin_catalog.clone(),
     })?;
+    let plugin_hot_reload_timer =
+        install_plugin_hot_reload_timer(state_dir.clone(), settings_window.as_weak());
     let preview_carousel_timer = install_preview_carousel_timer(settings_window.as_weak());
     let tray = install_tray(
         widgets.clone(),
@@ -437,6 +491,7 @@ fn main() -> Result<()> {
     drop(instance_activation_timer);
     drop(widget_shell_window_maintenance_timer);
     drop(gui_smoke_settings_interaction_timer);
+    drop(plugin_hot_reload_timer);
     drop(preview_carousel_timer);
     drop(tray_hover_timer);
     drop(hotkey_timer);
@@ -463,7 +518,7 @@ fn seed_each_widget_on_empty_start(
         .market_plugins()
         .filter(|plugin| plugin.is_available())
     {
-        add_plugin_instance(store, plugin, &app_settings);
+        add_plugin_instance(store, &plugin, &app_settings);
         slot += 1;
     }
 
@@ -487,6 +542,31 @@ mod tests {
         assert!(!offline_gui_smoke_enabled(true, None));
         assert!(!offline_gui_smoke_enabled(true, Some("true")));
         assert!(!offline_gui_smoke_enabled(true, Some("0")));
+    }
+
+    #[test]
+    fn plugin_reload_watcher_waits_for_two_stable_observations() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let state_dir = std::env::temp_dir().join(format!(
+            "crypto-hud-plugin-reload-watcher-{}-{unique}",
+            std::process::id()
+        ));
+        let initial = plugin::plugin_tree_fingerprint(&state_dir);
+        let mut watcher = PluginReloadWatcher::new(initial);
+        let plugin_dir = plugin::user_plugin_root(&state_dir).join("com.example.changed");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join(plugin::MANIFEST_FILE_NAME), "{}").unwrap();
+        let changed = plugin::plugin_tree_fingerprint(&state_dir);
+
+        assert!(!watcher.observe(changed.clone()));
+        assert!(!watcher.observe(changed.clone()));
+        assert!(watcher.observe(changed.clone()));
+        assert!(!watcher.observe(changed));
+
+        let _ = std::fs::remove_dir_all(state_dir);
     }
 
     #[test]
@@ -536,6 +616,8 @@ mod tests {
             id: "com.example.stage3-price-card".to_string(),
             name: "Stage 3 Price Card".to_string(),
             version: semver::Version::new(1, 0, 0),
+            schema_version: plugin::PLUGIN_MANIFEST_SCHEMA_VERSION,
+            host_api_version: semver::VersionReq::STAR,
             source: plugin::PluginSource::LocalUnsigned,
             renderer: plugin::PluginRendererDefinition::Slint {
                 root_dir: PathBuf::from("plugins/com.example.stage3-price-card"),

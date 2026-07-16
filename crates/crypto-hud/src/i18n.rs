@@ -3116,6 +3116,207 @@ pub fn local_slint_plugin_description(
     }
 }
 
+pub fn plugin_compatibility_summary(
+    locale: Locale,
+    schema_version: u32,
+    host_api_version: &str,
+) -> String {
+    let schema = format!("v{schema_version}");
+    match locale {
+        Locale::En => format!("Manifest schema {schema} · Host API {host_api_version}"),
+        Locale::ZhHans => format!("清单架构 {schema} · Host API {host_api_version}"),
+        Locale::ZhHant => format!("清單架構 {schema} · Host API {host_api_version}"),
+        Locale::Es419 => {
+            format!("Esquema de manifiesto {schema} · API del host {host_api_version}")
+        }
+        Locale::PtBr => format!("Esquema do manifesto {schema} · API do host {host_api_version}"),
+        Locale::Vi => format!("Lược đồ manifest {schema} · API máy chủ {host_api_version}"),
+        Locale::Id => format!("Skema manifes {schema} · API host {host_api_version}"),
+        Locale::Tr => {
+            format!("Manifest şeması {schema} · Ana bilgisayar API'si {host_api_version}")
+        }
+        Locale::Ko => format!("매니페스트 스키마 {schema} · 호스트 API {host_api_version}"),
+        Locale::Ja => format!("マニフェストスキーマ {schema} · ホスト API {host_api_version}"),
+        Locale::Ru => format!("Схема манифеста {schema} · API хоста {host_api_version}"),
+        Locale::Ar => {
+            let schema = ltr_isolate_for_locale(locale, &schema);
+            let host_api = ltr_isolate_for_locale(locale, host_api_version);
+            format!("مخطط البيان {schema} · واجهة المضيف {host_api}")
+        }
+    }
+}
+
+pub const fn plugin_diagnostics_title(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "Plugin diagnostics",
+        Locale::ZhHans => "插件诊断",
+        Locale::ZhHant => "外掛診斷",
+        Locale::Es419 => "Diagnóstico de plugins",
+        Locale::PtBr => "Diagnóstico de plugins",
+        Locale::Vi => "Chẩn đoán plugin",
+        Locale::Id => "Diagnostik plugin",
+        Locale::Tr => "Plugin tanılaması",
+        Locale::Ko => "플러그인 진단",
+        Locale::Ja => "プラグイン診断",
+        Locale::Ru => "Диагностика плагинов",
+        Locale::Ar => "تشخيص الإضافات",
+    }
+}
+
+pub const fn reload_plugins_label(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "Reload",
+        Locale::ZhHans => "重新加载",
+        Locale::ZhHant => "重新載入",
+        Locale::Es419 => "Recargar",
+        Locale::PtBr => "Recarregar",
+        Locale::Vi => "Tải lại",
+        Locale::Id => "Muat ulang",
+        Locale::Tr => "Yeniden yükle",
+        Locale::Ko => "다시 로드",
+        Locale::Ja => "再読み込み",
+        Locale::Ru => "Перезагрузить",
+        Locale::Ar => "إعادة التحميل",
+    }
+}
+
+pub const fn plugin_diagnostics_empty(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "No plugin errors detected.",
+        Locale::ZhHans => "未检测到插件错误。",
+        Locale::ZhHant => "未偵測到外掛錯誤。",
+        Locale::Es419 => "No se detectaron errores de plugins.",
+        Locale::PtBr => "Nenhum erro de plugin detectado.",
+        Locale::Vi => "Không phát hiện lỗi plugin.",
+        Locale::Id => "Tidak ada kesalahan plugin yang terdeteksi.",
+        Locale::Tr => "Plugin hatası algılanmadı.",
+        Locale::Ko => "플러그인 오류가 없습니다.",
+        Locale::Ja => "プラグインエラーはありません。",
+        Locale::Ru => "Ошибок плагинов не обнаружено.",
+        Locale::Ar => "لم يتم اكتشاف أخطاء في الإضافات.",
+    }
+}
+
+pub fn plugin_reload_status(
+    locale: Locale,
+    plugin_count: usize,
+    diagnostic_count: usize,
+) -> String {
+    let plugins = count_text_for_locale(locale, plugin_count);
+    let diagnostics = count_text_for_locale(locale, diagnostic_count);
+    match locale {
+        Locale::En => format!("Plugins reloaded: {plugins} loaded, {diagnostics} diagnostics"),
+        Locale::ZhHans => format!("插件已重新加载：已载入 {plugins} 个，{diagnostics} 条诊断"),
+        Locale::ZhHant => format!("外掛已重新載入：已載入 {plugins} 個，{diagnostics} 條診斷"),
+        Locale::Es419 => {
+            format!("Plugins recargados: {plugins} cargados, {diagnostics} diagnósticos")
+        }
+        Locale::PtBr => {
+            format!("Plugins recarregados: {plugins} carregados, {diagnostics} diagnósticos")
+        }
+        Locale::Vi => format!("Đã tải lại plugin: {plugins} đã tải, {diagnostics} chẩn đoán"),
+        Locale::Id => format!("Plugin dimuat ulang: {plugins} dimuat, {diagnostics} diagnostik"),
+        Locale::Tr => {
+            format!("Pluginler yeniden yüklendi: {plugins} yüklendi, {diagnostics} tanılama")
+        }
+        Locale::Ko => format!("플러그인 다시 로드됨: {plugins}개 로드, 진단 {diagnostics}개"),
+        Locale::Ja => {
+            format!("プラグインを再読み込みしました：{plugins} 件、診断 {diagnostics} 件")
+        }
+        Locale::Ru => {
+            format!("Плагины перезагружены: загружено {plugins}, диагностик: {diagnostics}")
+        }
+        Locale::Ar => format!("أُعيد تحميل الإضافات: تم تحميل {plugins}، والتشخيصات {diagnostics}"),
+    }
+}
+
+pub const fn plugin_reload_failed_label(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "Could not reload plugins",
+        Locale::ZhHans => "无法重新加载插件",
+        Locale::ZhHant => "無法重新載入外掛",
+        Locale::Es419 => "No se pudieron recargar los plugins",
+        Locale::PtBr => "Não foi possível recarregar os plugins",
+        Locale::Vi => "Không thể tải lại plugin",
+        Locale::Id => "Plugin tidak dapat dimuat ulang",
+        Locale::Tr => "Pluginler yeniden yüklenemedi",
+        Locale::Ko => "플러그인을 다시 로드할 수 없습니다",
+        Locale::Ja => "プラグインを再読み込みできませんでした",
+        Locale::Ru => "Не удалось перезагрузить плагины",
+        Locale::Ar => "تعذرت إعادة تحميل الإضافات",
+    }
+}
+
+pub const fn replacement_plugin_label(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "Replacement plugin",
+        Locale::ZhHans => "替代插件",
+        Locale::ZhHant => "替代外掛",
+        Locale::Es419 => "Plugin de reemplazo",
+        Locale::PtBr => "Plugin substituto",
+        Locale::Vi => "Plugin thay thế",
+        Locale::Id => "Plugin pengganti",
+        Locale::Tr => "Yedek plugin",
+        Locale::Ko => "대체 플러그인",
+        Locale::Ja => "代替プラグイン",
+        Locale::Ru => "Плагин для замены",
+        Locale::Ar => "الإضافة البديلة",
+    }
+}
+
+pub const fn relink_plugin_label(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "Relink",
+        Locale::ZhHans => "重新定位",
+        Locale::ZhHant => "重新連結",
+        Locale::Es419 => "Revincular",
+        Locale::PtBr => "Revincular",
+        Locale::Vi => "Liên kết lại",
+        Locale::Id => "Tautkan ulang",
+        Locale::Tr => "Yeniden bağla",
+        Locale::Ko => "다시 연결",
+        Locale::Ja => "再リンク",
+        Locale::Ru => "Перепривязать",
+        Locale::Ar => "إعادة الربط",
+    }
+}
+
+pub fn missing_plugin_relink_description(locale: Locale, plugin_id: &str) -> String {
+    let plugin_id = ltr_isolate_for_locale(locale, plugin_id);
+    match locale {
+        Locale::En => format!("Plugin {plugin_id} is unavailable. Choose an installed replacement; existing widget settings are preserved."),
+        Locale::ZhHans => format!("插件 {plugin_id} 不可用。请选择已安装的替代插件；现有组件设置会保留。"),
+        Locale::ZhHant => format!("外掛 {plugin_id} 不可用。請選擇已安裝的替代外掛；現有小工具設定會保留。"),
+        Locale::Es419 => format!("El plugin {plugin_id} no está disponible. Elige un reemplazo instalado; se conservará la configuración."),
+        Locale::PtBr => format!("O plugin {plugin_id} não está disponível. Escolha um substituto instalado; as configurações serão preservadas."),
+        Locale::Vi => format!("Plugin {plugin_id} không khả dụng. Chọn plugin thay thế đã cài đặt; cài đặt hiện có sẽ được giữ lại."),
+        Locale::Id => format!("Plugin {plugin_id} tidak tersedia. Pilih pengganti yang terpasang; pengaturan widget tetap dipertahankan."),
+        Locale::Tr => format!("{plugin_id} plugini kullanılamıyor. Yüklü bir yedek seçin; mevcut widget ayarları korunur."),
+        Locale::Ko => format!("플러그인 {plugin_id}을 사용할 수 없습니다. 설치된 대체 플러그인을 선택하면 기존 위젯 설정이 유지됩니다."),
+        Locale::Ja => format!("プラグイン {plugin_id} は利用できません。インストール済みの代替を選択すると、既存の設定は保持されます。"),
+        Locale::Ru => format!("Плагин {plugin_id} недоступен. Выберите установленную замену; настройки виджета сохранятся."),
+        Locale::Ar => format!("الإضافة {plugin_id} غير متاحة. اختر بديلاً مثبتًا؛ ستُحفظ إعدادات الأداة الحالية."),
+    }
+}
+
+pub fn plugin_relinked_status(locale: Locale, plugin_name: &str) -> String {
+    let plugin_name = ltr_isolate_for_locale(locale, plugin_name);
+    match locale {
+        Locale::En => format!("Widget relinked to {plugin_name}"),
+        Locale::ZhHans => format!("组件已重新定位到 {plugin_name}"),
+        Locale::ZhHant => format!("小工具已重新連結到 {plugin_name}"),
+        Locale::Es419 => format!("Widget revinculado a {plugin_name}"),
+        Locale::PtBr => format!("Widget revinculado a {plugin_name}"),
+        Locale::Vi => format!("Đã liên kết lại widget với {plugin_name}"),
+        Locale::Id => format!("Widget ditautkan ulang ke {plugin_name}"),
+        Locale::Tr => format!("Widget {plugin_name} ile yeniden bağlandı"),
+        Locale::Ko => format!("위젯이 {plugin_name}에 다시 연결되었습니다"),
+        Locale::Ja => format!("ウィジェットを {plugin_name} に再リンクしました"),
+        Locale::Ru => format!("Виджет перепривязан к {plugin_name}"),
+        Locale::Ar => format!("أُعيد ربط الأداة بـ {plugin_name}"),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SymbolPickerCopyMode {
     DefaultAdd,
@@ -4506,6 +4707,43 @@ mod tests {
         }
 
         assert_eq!(default_theme_label(Locale::Id), "Bawaan");
+    }
+
+    #[test]
+    fn plugin_development_controls_and_compatibility_are_localized() {
+        let english = [
+            plugin_diagnostics_title(Locale::En),
+            reload_plugins_label(Locale::En),
+            plugin_diagnostics_empty(Locale::En),
+            replacement_plugin_label(Locale::En),
+            relink_plugin_label(Locale::En),
+        ];
+        for locale in Locale::NON_ENGLISH {
+            let localized = [
+                plugin_diagnostics_title(locale),
+                reload_plugins_label(locale),
+                plugin_diagnostics_empty(locale),
+                replacement_plugin_label(locale),
+                relink_plugin_label(locale),
+            ];
+            for (localized, english) in localized.iter().zip(english.iter()) {
+                assert_ne!(
+                    localized, english,
+                    "plugin development label for {locale:?}"
+                );
+            }
+            let compatibility = plugin_compatibility_summary(locale, 3, ">=0.2.0, <1.0.0");
+            assert!(compatibility.contains("0.2.0"));
+            assert!(!plugin_reload_status(locale, 4, 1).trim().is_empty());
+            assert!(
+                missing_plugin_relink_description(locale, "com.example.missing")
+                    .contains("com.example.missing")
+            );
+        }
+        assert_eq!(
+            plugin_compatibility_summary(Locale::Ar, 3, ">=0.2.0, <1.0.0"),
+            "مخطط البيان \u{2066}v3\u{2069} · واجهة المضيف \u{2066}>=0.2.0, <1.0.0\u{2069}"
+        );
     }
 
     #[test]

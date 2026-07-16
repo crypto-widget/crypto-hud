@@ -138,9 +138,9 @@ impl WidgetUi {
         }
     }
 
-    pub(crate) fn set_integer_parameter(&self, key: &str, value: i32) {
+    pub(crate) fn set_plugin_parameter(&self, key: &str, value: Value) {
         if let Self::DynamicSlint(ui) = self {
-            ui.set_optional_property(&format!("config-{key}"), Value::Number(value.into()));
+            ui.set_optional_property(&format!("config-{key}"), value);
         }
     }
 
@@ -614,6 +614,8 @@ mod tests {
             id: "local.missing-definition".to_string(),
             name: "Missing Definition".to_string(),
             version: semver::Version::new(0, 1, 0),
+            schema_version: plugin::PLUGIN_MANIFEST_SCHEMA_VERSION,
+            host_api_version: semver::VersionReq::STAR,
             source: plugin::PluginSource::LocalUnsigned,
             renderer: plugin::PluginRendererDefinition::Slint {
                 root_dir: std::path::PathBuf::from("."),

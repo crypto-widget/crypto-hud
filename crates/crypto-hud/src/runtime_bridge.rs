@@ -18,7 +18,10 @@ use settings::{
     save_layout_store, AppSettings, LayoutStore, WidgetInstance, WidgetKind as WidgetType,
     WidgetSize,
 };
-use slint::{ComponentHandle, LogicalSize, PhysicalPosition, Timer, TimerMode, WindowPosition};
+use slint::{
+    Brush, Color, ComponentHandle, LogicalSize, PhysicalPosition, SharedString, Timer, TimerMode,
+    WindowPosition,
+};
 use slint_interpreter::{ComponentInstance, Value};
 
 use crate::{
@@ -26,8 +29,8 @@ use crate::{
     feature_flags, i18n, notifications, plugin,
     settings_window::{apply_available_update, widget_type_title},
     state_bridge::{
-        layout_for_instance, market_subscriptions_from_store, normalized_symbols_for_instance,
-        widget_definitions_from_catalog,
+        layout_for_instance, market_subscriptions_from_store, normalize_store_with_catalog,
+        normalized_symbols_for_instance, widget_definitions_from_catalog,
     },
     theme, updater,
     widget_host::{
@@ -39,6 +42,70 @@ use crate::{
 
 const NOTIFICATION_COOLDOWN: Duration = Duration::from_secs(300);
 const DRAG_LAYOUT_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PluginReloadSummary {
+    pub(crate) plugin_count: usize,
+    pub(crate) diagnostic_count: usize,
+}
+
+pub(crate) struct PluginReloadDeps<'a> {
+    pub(crate) widgets: &'a Rc<RefCell<Vec<WidgetRuntime>>>,
+    pub(crate) layouts: &'a Rc<RefCell<LayoutStore>>,
+    pub(crate) state_path: &'a Path,
+    pub(crate) state_dir: &'a Path,
+    pub(crate) quote_cache: Rc<RefCell<QuoteCache>>,
+    pub(crate) coin_icons: Rc<CoinIconRegistry>,
+    pub(crate) market_feed_config: &'a Arc<Mutex<market::MarketFeedConfig>>,
+    pub(crate) plugin_catalog: Rc<plugin::PluginCatalog>,
+}
+
+pub(crate) fn reload_plugins_and_runtimes(
+    deps: PluginReloadDeps<'_>,
+) -> Result<PluginReloadSummary> {
+    let replacement = plugin::PluginCatalog::load(deps.state_dir);
+    let plugin_count = replacement.plugins().len();
+    let diagnostics = replacement.errors();
+    for error in &diagnostics {
+        eprintln!("plugin catalog warning: {error}");
+    }
+    deps.plugin_catalog.replace_with(replacement);
+
+    let save_result = {
+        let mut store = deps.layouts.borrow_mut();
+        normalize_store_with_catalog(&mut store, 0, Some(&deps.plugin_catalog));
+        save_layout_store(deps.state_path, &store)
+            .context("failed to save layouts after plugin reload")
+    };
+
+    let old_runtimes = std::mem::take(&mut *deps.widgets.borrow_mut());
+    for runtime in old_runtimes {
+        if let Err(error) = runtime.ui.hide() {
+            eprintln!("failed to hide reloaded widget {}: {error:#}", runtime.id);
+        }
+    }
+    let runtime_result = sync_widget_runtimes(
+        deps.widgets,
+        deps.layouts,
+        deps.state_path,
+        deps.quote_cache,
+        deps.coin_icons,
+        true,
+        deps.plugin_catalog.clone(),
+    );
+    update_market_feed_config_from_store(
+        deps.market_feed_config,
+        &deps.layouts.borrow(),
+        &deps.plugin_catalog,
+    );
+    save_result?;
+    runtime_result?;
+
+    Ok(PluginReloadSummary {
+        plugin_count,
+        diagnostic_count: diagnostics.len(),
+    })
+}
 
 struct WidgetMoveRequest<'a> {
     window: &'a slint::Window,
@@ -289,7 +356,7 @@ pub(crate) fn sync_widget_runtimes(
             continue;
         }
 
-        let ui = WidgetUi::from_plugin(plugin)
+        let ui = WidgetUi::from_plugin(&plugin)
             .with_context(|| format!("failed to create widget plugin {}", instance.plugin_id))?;
         apply_instance_to_widget(ApplyInstanceRequest {
             ui: &ui,
@@ -733,15 +800,40 @@ fn apply_plugin_parameters(
         return;
     };
     for parameter in &definition.parameters {
-        let plugin::PluginParameter::Integer {
-            key,
-            default,
-            minimum,
-            maximum,
-            ..
-        } = parameter;
-        let value = settings::widget_integer_parameter(instance, key, *default, *minimum, *maximum);
-        ui.set_integer_parameter(key, value);
+        let value = plugin_parameter_slint_value(
+            parameter,
+            settings::widget_plugin_parameter(instance, parameter.key()),
+        );
+        if let Some(value) = value {
+            ui.set_plugin_parameter(parameter.key(), value);
+        }
+    }
+}
+
+fn plugin_parameter_slint_value(
+    parameter: &plugin::PluginParameter,
+    candidate: Option<&serde_json::Value>,
+) -> Option<Value> {
+    let normalized = parameter.normalized_value(candidate);
+    match parameter {
+        plugin::PluginParameter::Integer { .. } => {
+            normalized.as_i64().map(|value| Value::Number(value as f64))
+        }
+        plugin::PluginParameter::Boolean { .. } => normalized.as_bool().map(Value::Bool),
+        plugin::PluginParameter::Choice { .. } | plugin::PluginParameter::String { .. } => {
+            normalized
+                .as_str()
+                .map(|value| Value::String(SharedString::from(value)))
+        }
+        plugin::PluginParameter::Decimal { .. } => normalized.as_f64().map(Value::Number),
+        plugin::PluginParameter::Color { .. } => normalized
+            .as_str()
+            .and_then(widget_runtime::plugin_color_rgba)
+            .map(|[red, green, blue, alpha]| {
+                Value::Brush(Brush::SolidColor(Color::from_argb_u8(
+                    alpha, red, green, blue,
+                )))
+            }),
     }
 }
 
@@ -778,7 +870,7 @@ fn widget_theme_name(instance: &WidgetInstance, plugin_catalog: &plugin::PluginC
         return "default".to_string();
     };
     resolve_plugin_theme_name(
-        plugin,
+        &plugin,
         &settings::widget_theme_preference(instance),
         theme::resolve_theme(settings::ThemePreference::System),
     )
@@ -1171,7 +1263,7 @@ mod tests {
 
         assert_eq!(
             resolve_plugin_theme_name(
-                plugin,
+                &plugin,
                 settings::WIDGET_THEME_SYSTEM,
                 theme::ResolvedTheme::Light
             ),
@@ -1179,7 +1271,7 @@ mod tests {
         );
         assert_eq!(
             resolve_plugin_theme_name(
-                plugin,
+                &plugin,
                 settings::WIDGET_THEME_SYSTEM,
                 theme::ResolvedTheme::Dark
             ),
@@ -1268,6 +1360,63 @@ mod tests {
             widget_scale_for_instance(&instance, &instance.layout, &catalog),
             2.0
         );
+    }
+
+    #[test]
+    fn extended_plugin_parameters_convert_to_matching_slint_values() {
+        let boolean: plugin::PluginParameter = serde_json::from_value(serde_json::json!({
+            "kind": "boolean", "key": "enabled", "name": "Enabled", "default": true
+        }))
+        .unwrap();
+        let choice: plugin::PluginParameter = serde_json::from_value(serde_json::json!({
+            "kind": "choice", "key": "density", "name": "Density", "default": "compact",
+            "options": [
+                { "value": "compact", "name": "Compact" },
+                { "value": "wide", "name": "Wide" }
+            ]
+        }))
+        .unwrap();
+        let decimal: plugin::PluginParameter = serde_json::from_value(serde_json::json!({
+            "kind": "decimal", "key": "opacity", "name": "Opacity", "default": 0.5,
+            "minimum": 0.0, "maximum": 1.0, "step": 0.1, "precision": 2
+        }))
+        .unwrap();
+        let color: plugin::PluginParameter = serde_json::from_value(serde_json::json!({
+            "kind": "color", "key": "accent", "name": "Accent", "default": "#10203040"
+        }))
+        .unwrap();
+        let string: plugin::PluginParameter = serde_json::from_value(serde_json::json!({
+            "kind": "string", "key": "caption", "name": "Caption", "default": "Market",
+            "maxLength": 24
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            plugin_parameter_slint_value(&boolean, Some(&serde_json::json!(false))),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            plugin_parameter_slint_value(&choice, Some(&serde_json::json!("wide"))),
+            Some(Value::String(value)) if value.as_str() == "wide"
+        ));
+        assert!(matches!(
+            plugin_parameter_slint_value(&decimal, Some(&serde_json::json!(0.756))),
+            Some(Value::Number(value)) if (value - 0.76).abs() < f64::EPSILON
+        ));
+        let Some(Value::Brush(Brush::SolidColor(color))) =
+            plugin_parameter_slint_value(&color, None)
+        else {
+            panic!("color parameter should inject a solid Slint brush");
+        };
+        let rgba = color.to_argb_u8();
+        assert_eq!(
+            [rgba.red, rgba.green, rgba.blue, rgba.alpha],
+            [0x10, 0x20, 0x30, 0x40]
+        );
+        assert!(matches!(
+            plugin_parameter_slint_value(&string, Some(&serde_json::json!("Pulse"))),
+            Some(Value::String(value)) if value.as_str() == "Pulse"
+        ));
     }
 
     #[test]

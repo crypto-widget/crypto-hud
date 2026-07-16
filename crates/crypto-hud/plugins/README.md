@@ -28,7 +28,7 @@ com.example.my-widget/
   "id": "com.example.my-widget",
   "name": "My Widget",
   "version": "1.0.0",
-  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "hostApiVersion": ">=0.2.0, <1.0.0",
   "renderer": {
     "kind": "slint",
     "entry": "ui/main.slint",
@@ -61,7 +61,9 @@ com.example.my-widget/
 - `schemaVersion` 必须为 `3`。
 - `name` 是作者提供的展示名，Crypto HUD 会按原样显示，不做本地化。
 - `version` 必须是合法 SemVer。
-- `hostApiVersion` 必须匹配当前宿主 API。
+- `hostApiVersion` 必须匹配当前宿主 API `0.2.0`。只使用整数参数的旧插件可继续声明
+  `>=0.1.0, <1.0.0`；使用扩展参数类型的插件必须包含 `0.2.0` 且排除 `0.1.x`，建议写成
+  `>=0.2.0, <1.0.0`。
 - `renderer.kind` 必须为 `slint`。
 - `renderer.entry` 只能包含普通相对路径组件；绝对路径、根路径、盘符相对路径以及
   `.`、`..` 组件都会被拒绝。
@@ -233,7 +235,16 @@ property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
 
 ## 插件自定义参数
 
-插件最多可以声明 8 个整数参数。宿主会校验清单、在所选小组件设置中自动渲染步进控件、按小组件实例持久化参数值，并通过 `config-<key>` 属性传给 Slint。
+插件最多可以声明 8 个参数。宿主会校验清单、在所选小组件设置中按类型渲染控件、按小组件实例持久化参数值，并通过 `config-<key>` 属性传给 Slint。参数不会给插件增加网络或文件系统权限。
+
+| 清单 `kind` | Slint 属性类型 | 设置控件 |
+| --- | --- | --- |
+| `integer` | `int` 或 `float` | 整数步进器 |
+| `boolean` | `bool` | 开关 |
+| `choice` | `string` | 前后选项器 |
+| `decimal` | `float` | 小数步进器 |
+| `color` | `color` 或 `brush` | 十六进制颜色输入 |
+| `string` | `string` | 有长度上限的单行输入 |
 
 ```json
 "parameters": [
@@ -250,21 +261,82 @@ property <color> loss-color: root.light-theme ? #dc2626 : #f87171;
     "step": 1,
     "unit": "s",
     "unitZhHans": "秒"
+  },
+  {
+    "kind": "boolean",
+    "key": "show-caption",
+    "name": "Show caption",
+    "nameZhHans": "显示标题",
+    "default": true
+  },
+  {
+    "kind": "choice",
+    "key": "density",
+    "name": "Density",
+    "nameZhHans": "密度",
+    "default": "compact",
+    "options": [
+      { "value": "compact", "name": "Compact", "nameZhHans": "紧凑" },
+      { "value": "comfortable", "name": "Comfortable", "nameZhHans": "舒适" }
+    ]
+  },
+  {
+    "kind": "decimal",
+    "key": "line-width",
+    "name": "Line width",
+    "nameZhHans": "线宽",
+    "default": 1.5,
+    "minimum": 0.5,
+    "maximum": 4.0,
+    "step": 0.25,
+    "precision": 2,
+    "unit": "px",
+    "unitZhHans": "像素"
+  },
+  {
+    "kind": "color",
+    "key": "accent-color",
+    "name": "Accent color",
+    "nameZhHans": "强调色",
+    "default": "#3366ff"
+  },
+  {
+    "kind": "string",
+    "key": "caption",
+    "name": "Caption",
+    "nameZhHans": "标题",
+    "default": "Market",
+    "minLength": 1,
+    "maxLength": 24
   }
 ]
 ```
 
-参数 key 只能使用小写 ASCII 字母、数字和内部连字符。Slint 必须暴露对应的数值属性：
+参数 key 只能使用小写 ASCII 字母、数字和内部连字符。每个参数都必须暴露类型完全匹配的 Slint 属性：
 
 ```slint
 in property <int> config-switch-interval-seconds: 5;
+in property <bool> config-show-caption: true;
+in property <string> config-density: "compact";
+in property <float> config-line-width: 1.5;
+in property <color> config-accent-color: #3366ff;
+in property <string> config-caption: "Market";
 
 Timer {
     interval: root.config-switch-interval-seconds * 1s;
 }
 ```
 
-未保存过的参数使用 `default`，已保存的值会被限制在 `minimum` 到 `maximum` 范围内。
+约束规则：
+
+- 公共的 `name`、`nameZhHans`、`description` 和 `descriptionZhHans` 用于宿主设置控件；简体中文以外的语言使用英文文案。
+- `choice` 必须包含 2–32 个选项。`value` 是稳定持久化 token，只能包含小写 ASCII 字母、数字、点、下划线或内部连字符；`default` 必须命中一个选项。
+- `decimal` 的数值必须有限，满足 `minimum < maximum` 且 `step > 0`；`precision` 默认为 2，范围为 0–6。
+- `color` 使用 `#RRGGBB` 或 `#RRGGBBAA`；宿主会把十六进制规范为小写，并向 Slint 注入 brush。
+- `string.maxLength` 必填，范围为 1–256；`minLength` 默认为 0。只接受不含控制字符的单行 Unicode 文本。
+- 参数未保存或持久化类型不兼容时使用 `default`；数值会限制在声明范围内。未知配置键继续原样保留，便于兼容迁移。
+
+扩展类型 `boolean`、`choice`、`decimal`、`color`、`string` 要求 Host API 0.2.0；清单 schema 仍保持 v3。
 
 ## 行情颜色方向
 
@@ -376,6 +448,13 @@ card := Rectangle {
    并在 `price-card.slint` 增加对应缩略绘制。
 6. 涨跌文字和 K 线颜色必须尊重 `red-up-enabled`。
 7. 本地化标签必须使用宿主下发的文本属性，并用 `rtl-layout` 检查阿拉伯语布局。
+8. 保存插件文件后等待文件树稳定，宿主会自动重扫、重编译并重建插件窗口；也可以在
+   `系统设置 / 插件诊断` 中手动点击“重新加载”。诊断面板会展示清单、兼容版本、Slint
+   编译、属性和回调错误，但不会暴露用户状态目录的绝对路径。
+
+设置页会同时显示清单 schema 与 Host API 兼容范围。若已保存的小组件引用了缺失或失效插件，
+恢复相同插件 id 后热重载即可自动找回；也可以在所选小组件中选择替代插件并“重新定位”。
+重新定位会保留不透明配置、名称和布局元数据，再按替代插件合同规范化币种、尺寸、主题和参数。
 
 ## 验证清单
 
@@ -383,6 +462,7 @@ card := Rectangle {
 
 ```powershell
 cargo test -p crypto-hud discovers_repo_local_plugins
+cargo test -p crypto-hud discovers_plugin_with_all_extended_parameter_property_types
 cargo test --workspace
 mise run check
 ```
@@ -394,4 +474,6 @@ mise run check
 - 拖拽缩放小组件，确认窗口、内容、K 线和命中区域同步缩放。
 - 切换布局锁定，确认拖拽和缩放手柄状态正确。
 - 打开设置页市场，确认插件左侧预览形态和真实插件一致。
+- 修改 `.slint` 并确认热重载；故意制造编译错误，确认诊断面板显示错误，修复后可恢复窗口。
+- 对每种参数控件修改值、重启应用并确认按小组件实例持久化。
 - 切换到阿拉伯语，确认标签对齐、空态和源信息没有混排错位。

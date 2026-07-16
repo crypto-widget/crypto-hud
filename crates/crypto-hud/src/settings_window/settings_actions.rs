@@ -1,4 +1,6 @@
+use crypto_hud_runtime::{normalize_plugin_color, valid_bounded_plugin_string};
 use crypto_hud_shell_state as settings;
+use serde_json::Value;
 use settings::{clamp_opacity, AppSettings, LayoutStore};
 
 use crate::{
@@ -68,7 +70,7 @@ pub(super) fn apply_widget_settings_to_store(
         .as_deref()
         .and_then(|id| store.widgets.iter().find(|instance| instance.id == id))
         .and_then(|instance| plugin_catalog.find(&instance.plugin_id))
-        .is_some_and(plugin::PluginDefinition::is_available);
+        .is_some_and(|definition| definition.is_available());
     if !editable {
         return false;
     }
@@ -121,7 +123,7 @@ pub(super) fn apply_widget_scale_to_store(
         .widgets
         .get(index)
         .and_then(|instance| plugin_catalog.find(&instance.plugin_id))
-        .is_some_and(plugin::PluginDefinition::is_available);
+        .is_some_and(|definition| definition.is_available());
     if !editable {
         return false;
     }
@@ -142,6 +144,22 @@ pub(super) fn apply_widget_integer_parameter_to_store(
     value: i32,
     plugin_catalog: &plugin::PluginCatalog,
 ) -> bool {
+    apply_widget_parameter_value_to_store(
+        store,
+        selected_index,
+        parameter_index,
+        Value::Number(value.into()),
+        plugin_catalog,
+    )
+}
+
+pub(super) fn apply_widget_parameter_value_to_store(
+    store: &mut LayoutStore,
+    selected_index: i32,
+    parameter_index: i32,
+    candidate: Value,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> bool {
     select_widget_by_index(store, selected_index);
     let index = selected_index.max(0) as usize;
     let Some(instance) = store.widgets.get_mut(index) else {
@@ -150,19 +168,154 @@ pub(super) fn apply_widget_integer_parameter_to_store(
     let Some(parameter) = plugin_catalog
         .find(&instance.plugin_id)
         .filter(|definition| definition.is_available())
-        .and_then(|definition| definition.parameters.get(parameter_index.max(0) as usize))
+        .and_then(|definition| {
+            definition
+                .parameters
+                .get(parameter_index.max(0) as usize)
+                .cloned()
+        })
     else {
         return false;
     };
-    let plugin::PluginParameter::Integer {
-        key,
-        minimum,
-        maximum,
-        ..
-    } = parameter;
-    settings::set_widget_integer_parameter(instance, key, value, *minimum, *maximum);
+    let value = match &parameter {
+        plugin::PluginParameter::Integer {
+            minimum, maximum, ..
+        } => candidate
+            .as_i64()
+            .and_then(|value| i32::try_from(value).ok())
+            .map(|value| Value::Number(value.clamp(*minimum, *maximum).into())),
+        plugin::PluginParameter::Boolean { .. } => candidate.as_bool().map(Value::Bool),
+        plugin::PluginParameter::Choice { options, .. } => candidate
+            .as_str()
+            .filter(|candidate| options.iter().any(|option| option.value == *candidate))
+            .map(|value| Value::String(value.to_string())),
+        plugin::PluginParameter::Decimal {
+            minimum,
+            maximum,
+            precision,
+            ..
+        } => candidate
+            .as_f64()
+            .filter(|value| value.is_finite())
+            .and_then(|value| {
+                let scale = 10_f64.powi(i32::from(*precision));
+                let value = ((value.clamp(*minimum, *maximum) * scale).round() / scale)
+                    .clamp(*minimum, *maximum);
+                serde_json::Number::from_f64(value).map(Value::Number)
+            }),
+        plugin::PluginParameter::Color { .. } => candidate
+            .as_str()
+            .and_then(normalize_plugin_color)
+            .map(Value::String),
+        plugin::PluginParameter::String {
+            min_length,
+            max_length,
+            ..
+        } => candidate
+            .as_str()
+            .filter(|value| valid_bounded_plugin_string(value, *min_length, *max_length))
+            .map(|value| Value::String(value.to_string())),
+    };
+    let Some(value) = value else {
+        return false;
+    };
+    settings::set_widget_plugin_parameter(instance, parameter.key(), value);
     normalize_store_with_catalog(store, 0, Some(plugin_catalog));
     true
+}
+
+pub(super) fn step_widget_parameter_in_store(
+    store: &mut LayoutStore,
+    selected_index: i32,
+    parameter_index: i32,
+    direction: i32,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> bool {
+    if direction == 0 {
+        return false;
+    }
+    let index = selected_index.max(0) as usize;
+    let Some(instance) = store.widgets.get(index) else {
+        return false;
+    };
+    let Some(parameter) = plugin_catalog
+        .find(&instance.plugin_id)
+        .filter(|definition| definition.is_available())
+        .and_then(|definition| {
+            definition
+                .parameters
+                .get(parameter_index.max(0) as usize)
+                .cloned()
+        })
+    else {
+        return false;
+    };
+    let current =
+        parameter.normalized_value(settings::widget_plugin_parameter(instance, parameter.key()));
+    let candidate = match &parameter {
+        plugin::PluginParameter::Choice { options, .. } => {
+            let Ok(option_count) = i32::try_from(options.len()) else {
+                return false;
+            };
+            if option_count == 0 {
+                return false;
+            }
+            let current_index = current
+                .as_str()
+                .and_then(|value| options.iter().position(|option| option.value == value))
+                .unwrap_or_default() as i32;
+            let next_index = (current_index + direction.signum()).rem_euclid(option_count);
+            Value::String(options[next_index as usize].value.clone())
+        }
+        plugin::PluginParameter::Decimal { step, .. } => {
+            let next = current.as_f64().unwrap_or_default() + step * f64::from(direction.signum());
+            let Some(number) = serde_json::Number::from_f64(next) else {
+                return false;
+            };
+            Value::Number(number)
+        }
+        _ => return false,
+    };
+    apply_widget_parameter_value_to_store(
+        store,
+        selected_index,
+        parameter_index,
+        candidate,
+        plugin_catalog,
+    )
+}
+
+pub(super) fn relink_missing_plugin_in_store(
+    store: &mut LayoutStore,
+    selected_index: i32,
+    replacement_index: i32,
+    plugin_catalog: &plugin::PluginCatalog,
+) -> Option<String> {
+    select_widget_by_index(store, selected_index);
+    let widget_index = selected_index.max(0) as usize;
+    let current_plugin_id = store.widgets.get(widget_index)?.plugin_id.clone();
+    if plugin_catalog
+        .find(&current_plugin_id)
+        .is_some_and(|definition| definition.is_available())
+    {
+        return None;
+    }
+    let replacement = plugin_catalog
+        .available_replacements(&current_plugin_id)
+        .get(replacement_index.max(0) as usize)
+        .cloned()?;
+    let definitions = widget_definitions_from_catalog(plugin_catalog);
+    let instance = store.widgets.get_mut(widget_index)?;
+    let scale_percent = if instance.layout.scale_percent > 0 {
+        instance.layout.scale_percent
+    } else {
+        settings::DEFAULT_WIDGET_SCALE_PERCENT
+    };
+    instance.plugin_id = replacement.id.clone();
+    instance.legacy_widget_type = None;
+    apply_widget_scale_to_instance(instance, &definitions, scale_percent);
+    normalize_store_with_catalog(store, 0, Some(plugin_catalog));
+    Some(replacement.name)
 }
 
 pub(super) fn delete_widget_from_store_at_index(

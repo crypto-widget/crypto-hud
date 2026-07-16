@@ -1135,16 +1135,33 @@ pub fn widget_integer_parameter(
     minimum: i32,
     maximum: i32,
 ) -> i32 {
+    widget_plugin_parameter(instance, key)
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or(default)
+        .clamp(minimum, maximum)
+}
+
+pub fn widget_plugin_parameter<'a>(instance: &'a WidgetInstance, key: &str) -> Option<&'a Value> {
     instance
         .config
         .as_object()
         .and_then(|config| config.get(WIDGET_CONFIG_PLUGIN_PARAMETERS))
         .and_then(Value::as_object)
         .and_then(|parameters| parameters.get(key))
-        .and_then(Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok())
-        .unwrap_or(default)
-        .clamp(minimum, maximum)
+}
+
+pub fn set_widget_plugin_parameter(instance: &mut WidgetInstance, key: &str, value: Value) {
+    let config = widget_config_object_mut(instance);
+    let parameters = config
+        .entry(WIDGET_CONFIG_PLUGIN_PARAMETERS.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !parameters.is_object() {
+        *parameters = Value::Object(Map::new());
+    }
+    if let Some(parameters) = parameters.as_object_mut() {
+        parameters.insert(key.to_string(), value);
+    }
 }
 
 pub fn set_widget_integer_parameter(
@@ -1154,20 +1171,11 @@ pub fn set_widget_integer_parameter(
     minimum: i32,
     maximum: i32,
 ) {
-    let config = widget_config_object_mut(instance);
-    let parameters = config
-        .entry(WIDGET_CONFIG_PLUGIN_PARAMETERS.to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !parameters.is_object() {
-        *parameters = Value::Object(Map::new());
-    }
-    parameters
-        .as_object_mut()
-        .expect("plugin parameters should be an object")
-        .insert(
-            key.to_string(),
-            Value::Number(value.clamp(minimum, maximum).into()),
-        );
+    set_widget_plugin_parameter(
+        instance,
+        key,
+        Value::Number(value.clamp(minimum, maximum).into()),
+    );
 }
 
 fn widget_config_show_coin_logos(config: &serde_json::Value) -> bool {
@@ -3476,6 +3484,43 @@ mod tests {
         assert_eq!(
             widget.config[WIDGET_CONFIG_PLUGIN_PARAMETERS]["switch-interval-seconds"],
             Value::Number(60.into())
+        );
+    }
+
+    #[test]
+    fn typed_plugin_parameters_round_trip_without_coercion() {
+        let mut widget = WidgetInstance {
+            id: "typed-plugin-1".to_string(),
+            plugin_id: "com.example.typed-plugin".to_string(),
+            legacy_widget_type: None,
+            name: "Typed plugin".to_string(),
+            visible: true,
+            layout: WidgetLayout::default(),
+            symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            config: default_widget_config(),
+        };
+
+        set_widget_plugin_parameter(&mut widget, "enabled", Value::Bool(true));
+        set_widget_plugin_parameter(&mut widget, "caption", Value::String("Market".to_string()));
+        set_widget_plugin_parameter(
+            &mut widget,
+            "opacity",
+            Value::Number(serde_json::Number::from_f64(0.75).unwrap()),
+        );
+
+        let restored: WidgetInstance =
+            serde_json::from_str(&serde_json::to_string(&widget).unwrap()).unwrap();
+        assert_eq!(
+            widget_plugin_parameter(&restored, "enabled"),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(
+            widget_plugin_parameter(&restored, "caption"),
+            Some(&Value::String("Market".to_string()))
+        );
+        assert_eq!(
+            widget_plugin_parameter(&restored, "opacity").and_then(Value::as_f64),
+            Some(0.75)
         );
     }
 

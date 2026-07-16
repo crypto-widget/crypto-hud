@@ -1,15 +1,17 @@
 use std::{
+    cell::RefCell,
     collections::HashSet,
     fmt, fs, io,
     path::{Path, PathBuf},
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
 use crypto_hud_core::{default_market_symbols, normalize_market_pair_key};
 pub use crypto_hud_runtime::{
     parse_manifest, validate_manifest, PluginDataRequirement, PluginManifest, PluginParameter,
-    PluginSize, PluginSizePolicy, PluginTheme, PluginThemeRole, MAX_PREVIEW_IMAGES,
-    MIN_SYMBOL_LIMIT,
+    PluginSize, PluginSizePolicy, PluginTheme, PluginThemeRole, HOST_PLUGIN_API_VERSION,
+    MAX_PREVIEW_IMAGES, MIN_SYMBOL_LIMIT,
 };
 use i_slint_compiler::{
     diagnostics::BuildDiagnostics,
@@ -17,7 +19,7 @@ use i_slint_compiler::{
     EmbedResourcesKind,
 };
 use i_slint_core::InternalToken;
-use semver::Version;
+use semver::{Version, VersionReq};
 use slint_interpreter::{Compiler, ComponentDefinition, ValueType};
 
 pub use crypto_hud_shell_state::{BUILTIN_MINI_TICKER_PLUGIN_ID, BUILTIN_QUOTE_BOARD_PLUGIN_ID};
@@ -28,6 +30,7 @@ pub const MANIFEST_MAX_BYTES: u64 = 64 * 1024;
 pub const SLINT_FILE_MAX_BYTES: u64 = 256 * 1024;
 pub const ASSET_MAX_BYTES: u64 = 1024 * 1024;
 pub const PLUGIN_DIR_MAX_BYTES: u64 = 5 * 1024 * 1024;
+pub const PLUGIN_MANIFEST_SCHEMA_VERSION: u32 = 3;
 pub(crate) const SLINT_RENDERER_UNCOMPILED_REASON: &str = "Slint renderer has not been compiled";
 const USER_PLUGIN_DEVELOPMENT_GUIDE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -88,15 +91,15 @@ const REQUIRED_CALLBACKS: &[&str] = &["drag-move", "toggle-layout-lock"];
 
 #[derive(Debug, Clone)]
 pub struct PluginCatalog {
-    plugins: Vec<PluginDefinition>,
-    errors: Vec<PluginCatalogError>,
+    plugins: RefCell<Vec<PluginDefinition>>,
+    errors: RefCell<Vec<PluginCatalogError>>,
 }
 
 impl PluginCatalog {
     pub fn builtins() -> Self {
         Self {
-            plugins: builtin_plugins(),
-            errors: Vec::new(),
+            plugins: RefCell::new(builtin_plugins()),
+            errors: RefCell::new(Vec::new()),
         }
     }
 
@@ -115,7 +118,7 @@ impl PluginCatalog {
             }
         }
         for plugin_id in BUNDLED_BUILTIN_SLINT_PLUGIN_IDS {
-            let bundled_plugin_loaded = catalog.plugins.iter().any(|plugin| {
+            let bundled_plugin_loaded = catalog.plugins.get_mut().iter().any(|plugin| {
                 plugin.id == *plugin_id
                     && matches!(
                         &plugin.renderer,
@@ -138,6 +141,7 @@ impl PluginCatalog {
         let mut catalog = Self::builtins();
         let mut seen_ids = catalog
             .plugins
+            .get_mut()
             .iter()
             .map(|plugin| plugin.id.clone())
             .collect::<HashSet<_>>();
@@ -149,38 +153,104 @@ impl PluginCatalog {
         catalog
     }
 
-    pub fn plugins(&self) -> &[PluginDefinition] {
-        &self.plugins
+    pub fn plugins(&self) -> Vec<PluginDefinition> {
+        self.plugins.borrow().clone()
     }
 
-    pub fn market_plugins(&self) -> impl Iterator<Item = &PluginDefinition> {
+    pub fn market_plugins(&self) -> impl Iterator<Item = PluginDefinition> {
         self.plugins
-            .iter()
+            .borrow()
+            .clone()
+            .into_iter()
             .filter(|plugin| is_market_plugin_visible(&plugin.id))
     }
 
-    pub fn errors(&self) -> &[PluginCatalogError] {
-        &self.errors
+    pub fn available_replacements(&self, current_plugin_id: &str) -> Vec<PluginDefinition> {
+        self.plugins()
+            .into_iter()
+            .filter(|plugin| plugin.id != current_plugin_id && plugin.is_available())
+            .collect()
     }
 
-    pub fn find(&self, plugin_id: &str) -> Option<&PluginDefinition> {
-        self.plugins.iter().find(|plugin| plugin.id == plugin_id)
+    pub fn errors(&self) -> Vec<PluginCatalogError> {
+        self.errors.borrow().clone()
+    }
+
+    pub fn diagnostic_messages(&self, state_dir: &Path) -> Vec<String> {
+        self.errors
+            .borrow()
+            .iter()
+            .map(|error| {
+                let path = redacted_plugin_path(&error.path, state_dir);
+                let message = redact_plugin_roots(&error.message, state_dir);
+                format!("{path}: {message}")
+            })
+            .collect()
+    }
+
+    pub fn find(&self, plugin_id: &str) -> Option<PluginDefinition> {
+        self.plugins
+            .borrow()
+            .iter()
+            .find(|plugin| plugin.id == plugin_id)
+            .cloned()
+    }
+
+    pub fn replace_with(&self, replacement: Self) {
+        self.plugins.replace(replacement.plugins.into_inner());
+        self.errors.replace(replacement.errors.into_inner());
     }
 
     #[cfg(test)]
     pub fn from_plugins_for_tests(plugins: Vec<PluginDefinition>) -> Self {
         Self {
-            plugins,
-            errors: Vec::new(),
+            plugins: RefCell::new(plugins),
+            errors: RefCell::new(Vec::new()),
         }
     }
 
     fn push_error(&mut self, path: PathBuf, error: impl fmt::Display) {
-        self.errors.push(PluginCatalogError {
+        self.errors.get_mut().push(PluginCatalogError {
             path,
             message: error.to_string(),
         });
     }
+}
+
+fn redacted_plugin_path(path: &Path, state_dir: &Path) -> String {
+    for root in plugin_roots(state_dir) {
+        if let Ok(relative) = path.strip_prefix(&root) {
+            let label = if root == user_plugin_root(state_dir) {
+                "<user-plugins>"
+            } else {
+                "<bundled-plugins>"
+            };
+            return if relative.as_os_str().is_empty() {
+                label.to_string()
+            } else {
+                format!("{label}/{}", relative.display())
+            };
+        }
+    }
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<plugin>".to_string())
+}
+
+fn redact_plugin_roots(message: &str, state_dir: &Path) -> String {
+    let mut message = message.to_string();
+    for root in plugin_roots(state_dir) {
+        let label = if root == user_plugin_root(state_dir) {
+            "<user-plugins>"
+        } else {
+            "<bundled-plugins>"
+        };
+        message = message.replace(&root.to_string_lossy().to_string(), label);
+        if let Ok(canonical) = root.canonicalize() {
+            message = message.replace(&canonical.to_string_lossy().to_string(), label);
+        }
+    }
+    message
 }
 
 pub fn is_market_plugin_visible(plugin_id: &str) -> bool {
@@ -196,6 +266,8 @@ pub struct PluginDefinition {
     pub id: String,
     pub name: String,
     pub version: Version,
+    pub schema_version: u32,
+    pub host_api_version: VersionReq,
     pub source: PluginSource,
     pub renderer: PluginRendererDefinition,
     pub default_size: PluginSize,
@@ -274,6 +346,78 @@ pub struct PluginCatalogError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginTreeFingerprint {
+    entries: Vec<PluginTreeFingerprintEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PluginTreeFingerprintEntry {
+    path: PathBuf,
+    kind: u8,
+    length: u64,
+    modified_nanos: u128,
+}
+
+pub fn plugin_tree_fingerprint(state_dir: &Path) -> PluginTreeFingerprint {
+    const MAX_ENTRIES: usize = 4_096;
+
+    let mut entries = Vec::new();
+    for root in plugin_roots(state_dir) {
+        collect_plugin_tree_fingerprint(&root, &mut entries, MAX_ENTRIES);
+        if entries.len() >= MAX_ENTRIES {
+            break;
+        }
+    }
+    entries.sort_unstable();
+    PluginTreeFingerprint { entries }
+}
+
+fn collect_plugin_tree_fingerprint(
+    path: &Path,
+    entries: &mut Vec<PluginTreeFingerprintEntry>,
+    max_entries: usize,
+) {
+    if entries.len() >= max_entries {
+        return;
+    }
+    let metadata = fs::symlink_metadata(path).ok();
+    let kind = metadata.as_ref().map_or(0, |metadata| {
+        if metadata.is_dir() {
+            1
+        } else if metadata.is_file() {
+            2
+        } else {
+            3
+        }
+    });
+    let length = metadata.as_ref().map_or(0, fs::Metadata::len);
+    let modified_nanos = metadata
+        .as_ref()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |duration| duration.as_nanos());
+    entries.push(PluginTreeFingerprintEntry {
+        path: path.to_path_buf(),
+        kind,
+        length,
+        modified_nanos,
+    });
+
+    if kind != 1 {
+        return;
+    }
+    let Ok(children) = fs::read_dir(path) else {
+        return;
+    };
+    for child in children.flatten() {
+        collect_plugin_tree_fingerprint(&child.path(), entries, max_entries);
+        if entries.len() >= max_entries {
+            break;
+        }
+    }
+}
+
 impl fmt::Display for PluginCatalogError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.path.display(), self.message)
@@ -288,6 +432,8 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             id: BUILTIN_QUOTE_BOARD_PLUGIN_ID.to_string(),
             name: "Quote Board".to_string(),
             version: Version::new(0, 1, 0),
+            schema_version: PLUGIN_MANIFEST_SCHEMA_VERSION,
+            host_api_version: builtin_host_api_requirement(),
             source: PluginSource::Builtin,
             renderer: PluginRendererDefinition::Builtin(BuiltinRenderer::QuoteBoard),
             default_size: PluginSize {
@@ -310,6 +456,8 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             id: BUILTIN_MINI_TICKER_PLUGIN_ID.to_string(),
             name: "Mini Ticker".to_string(),
             version: Version::new(0, 1, 0),
+            schema_version: PLUGIN_MANIFEST_SCHEMA_VERSION,
+            host_api_version: builtin_host_api_requirement(),
             source: PluginSource::Builtin,
             renderer: PluginRendererDefinition::Builtin(BuiltinRenderer::MiniTicker),
             default_size: PluginSize {
@@ -329,6 +477,10 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
             status: PluginStatus::Available,
         },
     ]
+}
+
+fn builtin_host_api_requirement() -> VersionReq {
+    VersionReq::parse(&format!("={HOST_PLUGIN_API_VERSION}")).unwrap_or(VersionReq::STAR)
 }
 
 pub fn default_theme_id(plugin: &PluginDefinition) -> &str {
@@ -500,7 +652,7 @@ fn discover_root(root: &Path, catalog: &mut PluginCatalog, seen_ids: &mut HashSe
                     catalog.push_error(manifest_path.clone(), message);
                 }
                 seen_ids.insert(plugin.id.clone());
-                catalog.plugins.push(plugin);
+                catalog.plugins.get_mut().push(plugin);
             }
             Err(error) => catalog.push_error(manifest_path, error),
         }
@@ -570,6 +722,8 @@ pub fn manifest_to_definition(
 ) -> Result<PluginDefinition> {
     validate_manifest(&manifest)?;
     let version = Version::parse(&manifest.version).context("version must be valid SemVer")?;
+    let host_api_version = VersionReq::parse(&manifest.host_api_version)
+        .context("hostApiVersion must be a valid SemVer requirement")?;
     let root_dir = root_dir
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", root_dir.display()))?;
@@ -596,6 +750,8 @@ pub fn manifest_to_definition(
         id: manifest.id,
         name: manifest.name,
         version,
+        schema_version: manifest.schema_version,
+        host_api_version,
         source: PluginSource::LocalUnsigned,
         renderer: PluginRendererDefinition::Slint {
             root_dir: root_dir.clone(),
@@ -803,14 +959,24 @@ fn validate_slint_contract(
     }
 
     for parameter in parameters {
-        let PluginParameter::Integer { key, .. } = parameter;
+        let key = parameter.key();
         let name = format!("config-{key}");
         let Some((_, actual_type)) = properties.iter().find(|(property, _)| property == &name)
         else {
             bail!("Slint component is missing parameter property {name}");
         };
-        if actual_type != &ValueType::Number {
-            bail!("Slint parameter property {name} must be an integer or float");
+        let expected_type = match parameter {
+            PluginParameter::Integer { .. } | PluginParameter::Decimal { .. } => ValueType::Number,
+            PluginParameter::Boolean { .. } => ValueType::Bool,
+            PluginParameter::Choice { .. } | PluginParameter::String { .. } => ValueType::String,
+            PluginParameter::Color { .. } => ValueType::Brush,
+        };
+        if actual_type != &expected_type {
+            bail!(
+                "Slint parameter property {name} has type {:?}, expected {:?}",
+                actual_type,
+                expected_type
+            );
         }
     }
 
@@ -1072,6 +1238,16 @@ export component ExamplePriceCard inherits Window {
                 .contains("Do not compare against localized strings such as `Connecting`"),
             "plugin guide should steer plugins away from localized string comparisons"
         );
+        for kind in ["boolean", "choice", "decimal", "color", "string"] {
+            assert!(
+                USER_PLUGIN_DEVELOPMENT_GUIDE.contains(&format!("`{kind}`")),
+                "plugin guide should document the {kind} parameter"
+            );
+        }
+        assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("Host API 0.2.0"));
+        assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("Plugin diagnostics / Reload"));
+        assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("permissions.network"));
+        assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("permissions.filesystem"));
     }
 
     #[test]
@@ -1096,6 +1272,16 @@ export component ExamplePriceCard inherits Window {
             REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("不要比较 `Connecting`"),
             "repo plugin guide should steer plugins away from localized string comparisons"
         );
+        for kind in ["boolean", "choice", "decimal", "color", "string"] {
+            assert!(
+                REPO_PLUGIN_DEVELOPMENT_GUIDE.contains(&format!("`{kind}`")),
+                "repo plugin guide should document the {kind} parameter"
+            );
+        }
+        assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("Host API 0.2.0"));
+        assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("插件诊断"));
+        assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("permissions.network"));
+        assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("permissions.filesystem"));
     }
 
     #[test]
@@ -1237,14 +1423,24 @@ export component ExamplePriceCard inherits Window {
 
         let market_ids = catalog
             .market_plugins()
-            .map(|plugin| plugin.id.as_str())
+            .map(|plugin| plugin.id)
             .collect::<Vec<_>>();
 
-        assert!(market_ids.contains(&BUILTIN_QUOTE_BOARD_PLUGIN_ID));
-        assert!(!market_ids.contains(&BUILTIN_MINI_TICKER_PLUGIN_ID));
-        assert!(!market_ids.contains(&"com.cryptohud.market-board"));
-        assert!(market_ids.contains(&"com.cryptohud.market-compass"));
-        assert!(!market_ids.contains(&"com.example.stage3-price-card"));
+        assert!(market_ids
+            .iter()
+            .any(|id| id == BUILTIN_QUOTE_BOARD_PLUGIN_ID));
+        assert!(!market_ids
+            .iter()
+            .any(|id| id == BUILTIN_MINI_TICKER_PLUGIN_ID));
+        assert!(!market_ids
+            .iter()
+            .any(|id| id == "com.cryptohud.market-board"));
+        assert!(market_ids
+            .iter()
+            .any(|id| id == "com.cryptohud.market-compass"));
+        assert!(!market_ids
+            .iter()
+            .any(|id| id == "com.example.stage3-price-card"));
     }
 
     #[test]
@@ -1336,6 +1532,95 @@ export component ExamplePriceCard inherits Window {
         assert!(plugin.is_available());
         assert!(catalog.errors().is_empty(), "{:?}", catalog.errors());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn discovers_plugin_with_all_extended_parameter_property_types() {
+        let root = temp_plugin_root("discovers-extended-parameter-types");
+        let plugin_dir = root.join("com.example.price-card");
+        fs::create_dir_all(plugin_dir.join("ui")).unwrap();
+        let manifest = valid_manifest_json()
+            .replace(
+                r#""hostApiVersion": ">=0.1.0, <1.0.0""#,
+                r#""hostApiVersion": ">=0.2.0, <1.0.0""#,
+            )
+            .replace(
+                r#""dataRequirements": ["#,
+                r##""parameters": [
+                    { "kind": "boolean", "key": "show-label", "name": "Show label", "default": true },
+                    { "kind": "choice", "key": "density", "name": "Density", "default": "compact", "options": [
+                        { "value": "compact", "name": "Compact" },
+                        { "value": "comfortable", "name": "Comfortable" }
+                    ] },
+                    { "kind": "decimal", "key": "line-width", "name": "Line width", "default": 1.5, "minimum": 0.5, "maximum": 4.0, "step": 0.25 },
+                    { "kind": "color", "key": "accent", "name": "Accent", "default": "#3366ff" },
+                    { "kind": "string", "key": "caption", "name": "Caption", "default": "Market", "maxLength": 24 }
+                ],
+                "dataRequirements": ["##,
+            );
+        let source = valid_slint_source().replace(
+            "    in property <int> content-opacity;",
+            r#"    in property <int> content-opacity;
+    in property <bool> config-show-label;
+    in property <string> config-density;
+    in property <float> config-line-width;
+    in property <color> config-accent;
+    in property <string> config-caption;"#,
+        );
+        fs::write(plugin_dir.join(MANIFEST_FILE_NAME), manifest).unwrap();
+        fs::write(plugin_dir.join("ui").join("main.slint"), source).unwrap();
+
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+
+        let definition = catalog.find("com.example.price-card").unwrap();
+        assert!(definition.is_available(), "{:?}", definition.status);
+        assert_eq!(definition.parameters.len(), 5);
+        assert!(catalog.errors().is_empty(), "{:?}", catalog.errors());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_tree_fingerprint_tracks_user_plugin_changes() {
+        let state_dir = temp_plugin_root("plugin-tree-fingerprint");
+        let before = plugin_tree_fingerprint(&state_dir);
+        let plugin_dir = user_plugin_root(&state_dir).join("com.example.changed");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(plugin_dir.join(MANIFEST_FILE_NAME), "{}").unwrap();
+
+        let after = plugin_tree_fingerprint(&state_dir);
+
+        assert_ne!(before, after);
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn plugin_diagnostics_redact_local_absolute_roots() {
+        let state_dir = temp_plugin_root("redacted-plugin-diagnostics");
+        let plugin_dir = user_plugin_root(&state_dir).join("com.example.invalid");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        fs::write(plugin_dir.join(MANIFEST_FILE_NAME), "{}").unwrap();
+        let catalog = PluginCatalog::load(&state_dir);
+
+        let diagnostics = catalog.diagnostic_messages(&state_dir);
+
+        assert!(diagnostics
+            .iter()
+            .any(|message| message.contains("<user-plugins>")));
+        assert!(diagnostics
+            .iter()
+            .all(|message| !message.contains(&state_dir.to_string_lossy().to_string())));
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn catalog_snapshot_can_be_replaced_in_place() {
+        let catalog = PluginCatalog::builtins();
+        assert!(!catalog.plugins().is_empty());
+
+        catalog.replace_with(PluginCatalog::from_plugins_for_tests(Vec::new()));
+
+        assert!(catalog.plugins().is_empty());
+        assert!(catalog.find(BUILTIN_QUOTE_BOARD_PLUGIN_ID).is_none());
     }
 
     #[test]

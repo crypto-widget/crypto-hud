@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use crypto_hud_market as market;
 use crypto_hud_runtime::QuoteCache;
 use crypto_hud_shell_state as settings;
+use serde_json::Value;
 use settings::{
     clamp_opacity, save_layout_store, AlertCondition, AlertRule, AppSettings, LanguagePreference,
     LayoutStore, ShortcutPreference, ThemePreference, WidgetDefinition, WidgetInstance,
@@ -33,7 +34,8 @@ use crate::{
 };
 use crate::{
     runtime_bridge::{
-        apply_settings_to_widgets, sync_widget_runtimes, update_market_feed_config_from_store,
+        apply_settings_to_widgets, reload_plugins_and_runtimes, sync_widget_runtimes,
+        update_market_feed_config_from_store, PluginReloadDeps,
     },
     state_bridge::{
         move_widget_in_store, normalize_store_with_catalog, select_widget_by_index,
@@ -52,16 +54,18 @@ mod settings_models;
 mod settings_theme;
 use settings_actions::{
     add_plugin_widget_to_store, apply_widget_integer_parameter_to_store,
-    apply_widget_scale_to_store, apply_widget_settings_to_store, delete_widget_from_store_at_index,
-    WidgetSettingsUpdate,
+    apply_widget_parameter_value_to_store, apply_widget_scale_to_store,
+    apply_widget_settings_to_store, delete_widget_from_store_at_index,
+    relink_missing_plugin_in_store, step_widget_parameter_in_store, WidgetSettingsUpdate,
 };
 pub(crate) use settings_models::widget_type_usage_text;
 use settings_models::{
     bool_model, image_model, int_model, owned_string_model, plugin_market_items_model,
     string_model, widget_instance_detail_options, widget_instance_options,
-    widget_integer_parameter_options, widget_preview_image_options, widget_preview_kind_options,
-    widget_scale_max_options, widget_scale_min_options, widget_scale_options, widget_theme_index,
-    widget_theme_options, widget_visibility_options,
+    widget_parameter_options, widget_plugin_needs_relink, widget_plugin_relink_options,
+    widget_preview_image_options, widget_preview_kind_options, widget_scale_max_options,
+    widget_scale_min_options, widget_scale_options, widget_theme_index, widget_theme_options,
+    widget_visibility_options,
 };
 use settings_theme::apply_theme_to_settings_window;
 
@@ -778,6 +782,44 @@ impl SettingsCommitContext {
             self.update_market_feed_config_from_store();
         }
         self.set_saved_status(status_settings);
+        self.refresh_settings_window(weak);
+        schedule_widget_shell_window_configuration();
+    }
+
+    fn finish_parameter_change(&self, weak: &slint::Weak<SettingsWindow>, settings: AppSettings) {
+        self.finish_runtime_change(
+            weak,
+            settings,
+            false,
+            false,
+            "failed to apply widget parameter",
+        );
+    }
+
+    fn reload_plugins(&self, weak: &slint::Weak<SettingsWindow>) {
+        let settings = self.current_settings();
+        let locale = i18n::resolve_locale(settings.language);
+        let state_dir = settings::state_dir_for_path(&self.state_path);
+        let status = match reload_plugins_and_runtimes(PluginReloadDeps {
+            widgets: &self.widgets,
+            layouts: &self.layouts,
+            state_path: &self.state_path,
+            state_dir: &state_dir,
+            quote_cache: self.quote_cache.clone(),
+            coin_icons: self.coin_icons.clone(),
+            market_feed_config: &self.market_feed_config,
+            plugin_catalog: self.plugin_catalog.clone(),
+        }) {
+            Ok(summary) => {
+                i18n::plugin_reload_status(locale, summary.plugin_count, summary.diagnostic_count)
+            }
+            Err(error) => i18n::status_failure_message(
+                locale,
+                i18n::plugin_reload_failed_label(locale),
+                error,
+            ),
+        };
+        *self.settings_status.borrow_mut() = status;
         self.refresh_settings_window(weak);
         schedule_widget_shell_window_configuration();
     }
@@ -1777,7 +1819,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                     return;
                 }
                 let mut store = commit.layouts.borrow_mut();
-                if add_plugin_widget_to_store(&mut store, plugin, &settings).is_none() {
+                if add_plugin_widget_to_store(&mut store, &plugin, &settings).is_none() {
                     eprintln!("plugin {} is unavailable and cannot be added", plugin.id);
                     return;
                 }
@@ -1918,41 +1960,98 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             let settings = commit.current_settings();
             let changed = {
                 let mut store = commit.layouts.borrow_mut();
-                let changed = apply_widget_integer_parameter_to_store(
+                apply_widget_integer_parameter_to_store(
                     &mut store,
                     selected_index,
                     parameter_index,
                     value,
                     &commit.plugin_catalog,
-                );
-                if changed {
-                    if let Err(error) = save_layout_store(&commit.state_path, &store) {
-                        eprintln!("failed to save widget parameter: {error:#}");
-                    }
-                }
-                changed
+                )
             };
-            if !changed {
+            if changed {
+                commit.finish_parameter_change(&weak, settings);
+            }
+        }
+    });
+
+    ui.on_apply_widget_boolean_parameter({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |selected_index, parameter_index, value| {
+            let settings = commit.current_settings();
+            let changed = apply_widget_parameter_value_to_store(
+                &mut commit.layouts.borrow_mut(),
+                selected_index,
+                parameter_index,
+                Value::Bool(value),
+                &commit.plugin_catalog,
+            );
+            if changed {
+                commit.finish_parameter_change(&weak, settings);
+            }
+        }
+    });
+
+    ui.on_apply_widget_text_parameter({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |selected_index, parameter_index, value| {
+            let settings = commit.current_settings();
+            let changed = apply_widget_parameter_value_to_store(
+                &mut commit.layouts.borrow_mut(),
+                selected_index,
+                parameter_index,
+                Value::String(value.to_string()),
+                &commit.plugin_catalog,
+            );
+            if changed {
+                commit.finish_parameter_change(&weak, settings);
+            }
+        }
+    });
+
+    ui.on_step_widget_parameter({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |selected_index, parameter_index, direction| {
+            let settings = commit.current_settings();
+            let changed = step_widget_parameter_in_store(
+                &mut commit.layouts.borrow_mut(),
+                selected_index,
+                parameter_index,
+                direction,
+                &commit.plugin_catalog,
+            );
+            if changed {
+                commit.finish_parameter_change(&weak, settings);
+            }
+        }
+    });
+
+    ui.on_relink_missing_plugin({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |selected_index, replacement_index| {
+            let settings = commit.current_settings();
+            let replacement_name = relink_missing_plugin_in_store(
+                &mut commit.layouts.borrow_mut(),
+                selected_index,
+                replacement_index,
+                &commit.plugin_catalog,
+            );
+            let Some(replacement_name) = replacement_name else {
                 return;
-            }
-            commit.sync_widget_runtimes(false, "failed to apply widget parameter");
+            };
+            commit.sync_widget_runtimes(false, "failed to relink missing widget plugin");
             commit.apply_widget_pinning();
-            commit.set_saved_status(settings.clone());
-            if let Some(ui) = weak.upgrade() {
-                let locale = i18n::resolve_locale(settings.language);
-                let options = commit
-                    .layouts
-                    .borrow()
-                    .widgets
-                    .get(selected_index.max(0) as usize)
-                    .map(|widget| {
-                        widget_integer_parameter_options(widget, &commit.plugin_catalog, locale)
-                    })
-                    .unwrap_or_default();
-                ui.set_widget_parameter_values(int_model(options.values));
-                let status = commit.settings_status.borrow().clone();
-                ui.set_status_text(status.as_str().into());
-            }
+            commit.update_market_feed_config_from_store();
+            let locale = i18n::resolve_locale(settings.language);
+            commit.set_persisted_status(
+                settings,
+                i18n::plugin_relinked_status(locale, &replacement_name),
+            );
+            commit.refresh_settings_window(&weak);
+            schedule_widget_shell_window_configuration();
         }
     });
 
@@ -2035,6 +2134,12 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 commit.refresh_settings_window(&weak);
             }
         }
+    });
+
+    ui.on_reload_custom_components({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move || commit.reload_plugins(&weak)
     });
 
     ui.on_minimize_settings({
@@ -2208,7 +2313,7 @@ fn apply_default_widget_scale_to_store(
         let known_plugin = instance.builtin_widget_type().is_some()
             || plugin_catalog
                 .find(&instance.plugin_id)
-                .is_some_and(plugin::PluginDefinition::is_available);
+                .is_some_and(|definition| definition.is_available());
         if !known_plugin {
             continue;
         }
@@ -2416,7 +2521,7 @@ where
     let editable = instance.builtin_widget_type().is_some()
         || plugin_catalog
             .find(&instance.plugin_id)
-            .is_some_and(plugin::PluginDefinition::is_available);
+            .is_some_and(|definition| definition.is_available());
     if !editable {
         return None;
     }
@@ -3180,6 +3285,20 @@ pub(crate) fn refresh_settings_window(
     ui.set_custom_components_text(text.custom_components.into());
     ui.set_custom_components_help_text(text.custom_components_help.into());
     ui.set_open_custom_components_folder_text(text.open_custom_components_folder.into());
+    ui.set_plugin_diagnostics_title_text(i18n::plugin_diagnostics_title(locale).into());
+    ui.set_plugin_compatibility_text(
+        i18n::plugin_compatibility_summary(
+            locale,
+            plugin::PLUGIN_MANIFEST_SCHEMA_VERSION,
+            plugin::HOST_PLUGIN_API_VERSION,
+        )
+        .into(),
+    );
+    ui.set_plugin_diagnostics_empty_text(i18n::plugin_diagnostics_empty(locale).into());
+    ui.set_reload_plugins_text(i18n::reload_plugins_label(locale).into());
+    ui.set_plugin_diagnostic_options(owned_string_model(
+        plugin_catalog.diagnostic_messages(&settings::state_dir_for_path(state_path)),
+    ));
     ui.set_theme_text(text.theme.into());
     ui.set_language_text(text.language.into());
     ui.set_appearance_interface_text(text.appearance_interface.into());
@@ -3203,7 +3322,24 @@ pub(crate) fn refresh_settings_window(
     ui.set_widget_library_text(text.widget_library.into());
     ui.set_my_widgets_text(text.my_widgets.into());
     ui.set_selected_widget_text(text.selected_widget.into());
-    ui.set_selected_widget_description_text(text.selected_widget_description.into());
+    let selected_widget_plugin_missing =
+        selected_widget.is_some_and(|widget| widget_plugin_needs_relink(widget, plugin_catalog));
+    ui.set_selected_widget_plugin_missing(selected_widget_plugin_missing);
+    ui.set_plugin_relink_index(0);
+    ui.set_plugin_relink_options(owned_string_model(
+        selected_widget
+            .map(|widget| widget_plugin_relink_options(widget, plugin_catalog, locale))
+            .unwrap_or_default(),
+    ));
+    ui.set_selected_widget_description_text(
+        selected_widget
+            .filter(|_| selected_widget_plugin_missing)
+            .map(|widget| i18n::missing_plugin_relink_description(locale, &widget.plugin_id))
+            .unwrap_or_else(|| text.selected_widget_description.to_string())
+            .into(),
+    );
+    ui.set_replacement_plugin_text(i18n::replacement_plugin_label(locale).into());
+    ui.set_relink_plugin_text(i18n::relink_plugin_label(locale).into());
     ui.set_widget_name_text(text.widget_name.into());
     ui.set_lock_position_help_text(text.lock_position_help.into());
     ui.set_widget_scale_help_text(text.widget_scale_help.into());
@@ -3349,15 +3485,18 @@ pub(crate) fn refresh_settings_window(
             .is_some_and(|widget| widget.builtin_widget_type() == Some(WidgetType::QuoteBoard)),
     );
     let parameter_options = selected_widget
-        .map(|widget| widget_integer_parameter_options(widget, plugin_catalog, locale))
+        .map(|widget| widget_parameter_options(widget, plugin_catalog, locale))
         .unwrap_or_default();
+    ui.set_widget_parameter_kinds(int_model(parameter_options.kinds));
     ui.set_widget_parameter_labels(owned_string_model(parameter_options.labels));
     ui.set_widget_parameter_helps(owned_string_model(parameter_options.helps));
     ui.set_widget_parameter_units(owned_string_model(parameter_options.units));
-    ui.set_widget_parameter_values(int_model(parameter_options.values));
+    ui.set_widget_parameter_values(int_model(parameter_options.integer_values));
     ui.set_widget_parameter_minimums(int_model(parameter_options.minimums));
     ui.set_widget_parameter_maximums(int_model(parameter_options.maximums));
     ui.set_widget_parameter_steps(int_model(parameter_options.steps));
+    ui.set_widget_parameter_boolean_values(bool_model(parameter_options.boolean_values));
+    ui.set_widget_parameter_text_values(owned_string_model(parameter_options.text_values));
     ui.set_default_widgets_always_on_top(settings.widgets_always_on_top);
     ui.set_default_opacity_percent(settings.opacity_percent);
     ui.set_default_widget_scale_percent(settings.widget_scale_percent);
@@ -5405,7 +5544,7 @@ mod tests {
             ..LayoutStore::default()
         };
 
-        let id = add_plugin_widget_to_store(&mut store, plugin, &settings).unwrap();
+        let id = add_plugin_widget_to_store(&mut store, &plugin, &settings).unwrap();
         let widget = store.widgets.first().unwrap();
         let definitions = widget_definitions_from_catalog(&catalog);
         let expected_size = settings::widget_size_from_scale_percent(
@@ -5554,6 +5693,8 @@ mod tests {
                 id: plugin_id.to_string(),
                 name: "Unavailable Private Widget".to_string(),
                 version: semver::Version::new(1, 0, 0),
+                schema_version: plugin::PLUGIN_MANIFEST_SCHEMA_VERSION,
+                host_api_version: semver::VersionReq::STAR,
                 source: plugin::PluginSource::LocalUnsigned,
                 renderer: plugin::PluginRendererDefinition::Builtin(
                     plugin::BuiltinRenderer::QuoteBoard,
@@ -6388,11 +6529,11 @@ mod tests {
             vec!["BTC", "ETH"],
         );
 
-        let options = widget_integer_parameter_options(&widget, &catalog, i18n::Locale::ZhHans);
+        let options = widget_parameter_options(&widget, &catalog, i18n::Locale::ZhHans);
         assert_eq!(options.labels, vec!["切换时间"]);
         assert_eq!(options.helps, vec!["币种自动切换的时间间隔。"]);
         assert_eq!(options.units, vec!["秒"]);
-        assert_eq!(options.values, vec![5]);
+        assert_eq!(options.integer_values, vec![5]);
         assert_eq!(options.minimums, vec![1]);
         assert_eq!(options.maximums, vec![60]);
 
@@ -6414,6 +6555,208 @@ mod tests {
             ),
             60
         );
+    }
+
+    #[test]
+    fn extended_plugin_parameters_render_and_persist_typed_values() {
+        let definition = plugin::PluginDefinition {
+            id: "com.example.typed-settings".to_string(),
+            name: "Typed Settings".to_string(),
+            version: semver::Version::new(1, 0, 0),
+            schema_version: plugin::PLUGIN_MANIFEST_SCHEMA_VERSION,
+            host_api_version: semver::VersionReq::parse(">=0.2.0, <1.0.0").unwrap(),
+            source: plugin::PluginSource::LocalUnsigned,
+            renderer: plugin::PluginRendererDefinition::Builtin(
+                plugin::BuiltinRenderer::QuoteBoard,
+            ),
+            default_size: plugin::PluginSize {
+                width: 260,
+                height: 170,
+            },
+            size_policy: plugin::PluginSizePolicy::Fixed,
+            min_symbol_limit: 1,
+            symbol_limit: 5,
+            default_symbols: vec!["binance:spot:BTC/USDT".to_string()],
+            preview_images: Vec::new(),
+            themes: plugin::single_default_theme(),
+            data_requirements: Vec::new(),
+            parameters: vec![
+                plugin::PluginParameter::Boolean {
+                    key: "show-label".to_string(),
+                    name: "Show label".to_string(),
+                    name_zh_hans: "显示标签".to_string(),
+                    description: String::new(),
+                    description_zh_hans: String::new(),
+                    default: true,
+                },
+                plugin::PluginParameter::Choice {
+                    key: "density".to_string(),
+                    name: "Density".to_string(),
+                    name_zh_hans: "密度".to_string(),
+                    description: String::new(),
+                    description_zh_hans: String::new(),
+                    default: "compact".to_string(),
+                    options: vec![
+                        crypto_hud_runtime::PluginChoiceOption {
+                            value: "compact".to_string(),
+                            name: "Compact".to_string(),
+                            name_zh_hans: "紧凑".to_string(),
+                        },
+                        crypto_hud_runtime::PluginChoiceOption {
+                            value: "wide".to_string(),
+                            name: "Wide".to_string(),
+                            name_zh_hans: "宽松".to_string(),
+                        },
+                    ],
+                },
+                plugin::PluginParameter::Decimal {
+                    key: "line-width".to_string(),
+                    name: "Line width".to_string(),
+                    name_zh_hans: "线宽".to_string(),
+                    description: String::new(),
+                    description_zh_hans: String::new(),
+                    default: 1.5,
+                    minimum: 0.5,
+                    maximum: 4.0,
+                    step: 0.25,
+                    precision: 2,
+                    unit: "px".to_string(),
+                    unit_zh_hans: "像素".to_string(),
+                },
+                plugin::PluginParameter::Color {
+                    key: "accent".to_string(),
+                    name: "Accent".to_string(),
+                    name_zh_hans: "强调色".to_string(),
+                    description: String::new(),
+                    description_zh_hans: String::new(),
+                    default: "#3366ff".to_string(),
+                },
+                plugin::PluginParameter::String {
+                    key: "caption".to_string(),
+                    name: "Caption".to_string(),
+                    name_zh_hans: "标题".to_string(),
+                    description: String::new(),
+                    description_zh_hans: String::new(),
+                    default: "Market".to_string(),
+                    min_length: 1,
+                    max_length: 12,
+                },
+            ],
+            status: plugin::PluginStatus::Available,
+        };
+        let catalog = plugin::PluginCatalog::from_plugins_for_tests(vec![definition]);
+        let widget = test_widget(
+            "typed-settings-1",
+            "com.example.typed-settings",
+            vec!["BTC"],
+        );
+        let options = widget_parameter_options(&widget, &catalog, i18n::Locale::ZhHans);
+        assert_eq!(options.kinds, vec![1, 2, 3, 4, 5]);
+        assert_eq!(
+            options.boolean_values,
+            vec![true, false, false, false, false]
+        );
+        assert_eq!(options.text_values[1], "紧凑");
+        assert_eq!(options.text_values[2], "1.50");
+        assert_eq!(options.text_values[3], "#3366ff");
+        assert_eq!(options.text_values[4], "Market");
+
+        let mut store = LayoutStore {
+            selected_widget_id: Some(widget.id.clone()),
+            widgets: vec![widget],
+            ..LayoutStore::default()
+        };
+        assert!(apply_widget_parameter_value_to_store(
+            &mut store,
+            0,
+            0,
+            serde_json::json!(false),
+            &catalog,
+        ));
+        assert!(apply_widget_parameter_value_to_store(
+            &mut store,
+            0,
+            1,
+            serde_json::json!("wide"),
+            &catalog,
+        ));
+        assert!(apply_widget_parameter_value_to_store(
+            &mut store,
+            0,
+            2,
+            serde_json::json!(2.346),
+            &catalog,
+        ));
+        assert!(apply_widget_parameter_value_to_store(
+            &mut store,
+            0,
+            3,
+            serde_json::json!("#ABCDEF80"),
+            &catalog,
+        ));
+        assert!(apply_widget_parameter_value_to_store(
+            &mut store,
+            0,
+            4,
+            serde_json::json!("Pulse"),
+            &catalog,
+        ));
+        assert!(!apply_widget_parameter_value_to_store(
+            &mut store,
+            0,
+            4,
+            serde_json::json!("this caption is too long"),
+            &catalog,
+        ));
+        let values = &store.widgets[0].config[settings::WIDGET_CONFIG_PLUGIN_PARAMETERS];
+        assert_eq!(values["show-label"], serde_json::json!(false));
+        assert_eq!(values["density"], serde_json::json!("wide"));
+        assert_eq!(values["line-width"], serde_json::json!(2.35));
+        assert_eq!(values["accent"], serde_json::json!("#abcdef80"));
+        assert_eq!(values["caption"], serde_json::json!("Pulse"));
+
+        assert!(step_widget_parameter_in_store(
+            &mut store, 0, 1, 1, &catalog
+        ));
+        assert!(step_widget_parameter_in_store(
+            &mut store, 0, 2, 1, &catalog
+        ));
+        let values = &store.widgets[0].config[settings::WIDGET_CONFIG_PLUGIN_PARAMETERS];
+        assert_eq!(values["density"], serde_json::json!("compact"));
+        assert_eq!(values["line-width"], serde_json::json!(2.6));
+    }
+
+    #[test]
+    fn missing_plugin_can_be_relinked_without_losing_opaque_state() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let mut widget = test_widget("missing-1", "com.example.missing", vec!["BTC"]);
+        widget.name = "My preserved widget".to_string();
+        widget.layout.x = 777;
+        widget.layout.y = 333;
+        widget.layout.opacity_percent = 71;
+        widget.config = serde_json::json!({
+            "private-option": "keep-me",
+            "nested": { "count": 7 }
+        });
+        let mut store = LayoutStore {
+            selected_widget_id: Some(widget.id.clone()),
+            widgets: vec![widget],
+            ..LayoutStore::default()
+        };
+
+        let replacement = relink_missing_plugin_in_store(&mut store, 0, 0, &catalog);
+
+        assert_eq!(replacement.as_deref(), Some("Quote Board"));
+        assert_eq!(
+            store.widgets[0].plugin_id,
+            settings::BUILTIN_QUOTE_BOARD_PLUGIN_ID
+        );
+        assert_eq!(store.widgets[0].name, "My preserved widget");
+        assert_eq!(store.widgets[0].layout.x, 777);
+        assert_eq!(store.widgets[0].layout.y, 333);
+        assert_eq!(store.widgets[0].layout.opacity_percent, 71);
+        assert_eq!(store.widgets[0].config["private-option"], "keep-me");
+        assert_eq!(store.widgets[0].config["nested"]["count"], 7);
     }
 
     #[test]
@@ -6655,6 +6998,8 @@ mod tests {
             id: STATUS_STRIP_PLUGIN_ID.to_string(),
             name: "Status Strip".to_string(),
             version: semver::Version::new(0, 1, 0),
+            schema_version: plugin::PLUGIN_MANIFEST_SCHEMA_VERSION,
+            host_api_version: semver::VersionReq::STAR,
             source: plugin::PluginSource::LocalUnsigned,
             renderer: plugin::PluginRendererDefinition::Builtin(
                 plugin::BuiltinRenderer::QuoteBoard,
