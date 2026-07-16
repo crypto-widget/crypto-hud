@@ -383,12 +383,17 @@ Keep market symbols, prices, and percent changes visually stable for scanning un
 6. Check whether the plugin appears in `Widget Library`.
 7. Test light theme, dark theme, scaling, dragging, locking, parameter persistence, and different pair counts.
 
-Crypto HUD displays both manifest schema and Host API compatibility in the diagnostics panel and on local plugin descriptions. A successful reload recreates affected widget runtimes and refreshes market subscriptions without granting the plugin additional permissions.
+Crypto HUD fingerprints each plugin directory independently on a bounded, cancellable background scanner. After two stable observations, it compiles only changed candidates. Rapid consecutive saves receive increasing generations; a result is discarded if the source tree changes again before it can be committed. A temporary scan or access error is reported but is not treated as a confirmed deletion, so the last-known-good candidate remains active.
+
+The last successfully compiled definition remains active when a changed manifest, resource, contract, or Slint source fails validation. Existing widget windows keep running while the new diagnostic is shown. Once the files compile again, every instance of that plugin is staged first and then replaced in one UI turn. Unchanged plugins keep their existing windows and local animation state. A replaced plugin starts with fresh private Slint state because Host API 0.2 does not expose plugin-state migration.
+
+Deleting a plugin removes only that plugin's runtime windows after the tree is stable; saved layout and configuration remain intact. Recreating the same plugin ID restores those instances from the preserved host state. Crypto HUD displays both manifest schema and Host API compatibility in the diagnostics panel and on local plugin descriptions, and refreshes market subscriptions only after a successful reload without granting additional permissions.
 
 ## Troubleshooting
 
 - Plugin does not appear: check that it is in a subdirectory under the custom component directory and contains `widget.json`.
 - Plugin is unavailable: check `renderer.component`, required properties, and required callbacks.
+- A broken edit still shows the previous design: this is the last-known-good definition. Fix the diagnostic and save again to replace it.
 - Parameter property error: check that every `config-<key>` property exists and uses the type in the table above.
 - Preview images do not render: check that `previewImages` paths are relative and use `png`, `jpg`, or `jpeg`.
 - Size is wrong: check that `defaultSize` matches the natural size implied by `sizePolicy`.
@@ -404,4 +409,5 @@ cargo test -p crypto-hud discovers_valid_local_plugin
 cargo test -p crypto-hud discovers_plugin_with_all_extended_parameter_property_types
 cargo test -p crypto-hud discovers_repo_local_plugins
 cargo check -p crypto-hud
+powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```

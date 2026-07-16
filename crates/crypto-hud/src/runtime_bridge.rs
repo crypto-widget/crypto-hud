@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, Mutex},
@@ -29,8 +29,8 @@ use crate::{
     feature_flags, i18n, notifications, plugin,
     settings_window::{apply_available_update, widget_type_title},
     state_bridge::{
-        layout_for_instance, market_subscriptions_from_store, normalize_store_with_catalog,
-        normalized_symbols_for_instance, widget_definitions_from_catalog,
+        layout_for_instance, market_subscriptions_from_store, normalized_symbols_for_instance,
+        widget_definitions_from_catalog,
     },
     theme, updater,
     widget_host::{
@@ -45,8 +45,12 @@ const DRAG_LAYOUT_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PluginReloadSummary {
+    pub(crate) applied: bool,
+    pub(crate) generation: u64,
     pub(crate) plugin_count: usize,
     pub(crate) diagnostic_count: usize,
+    pub(crate) changed_plugin_count: usize,
+    pub(crate) replaced_instance_count: usize,
 }
 
 pub(crate) struct PluginReloadDeps<'a> {
@@ -58,52 +62,153 @@ pub(crate) struct PluginReloadDeps<'a> {
     pub(crate) coin_icons: Rc<CoinIconRegistry>,
     pub(crate) market_feed_config: &'a Arc<Mutex<market::MarketFeedConfig>>,
     pub(crate) plugin_catalog: Rc<plugin::PluginCatalog>,
+    pub(crate) widgets_hidden: &'a Rc<RefCell<bool>>,
+    pub(crate) plan: plugin::PluginReloadPlan,
+}
+
+fn stage_runtime_replacements<T, E>(
+    indices: &[usize],
+    mut build: impl FnMut(usize) -> std::result::Result<Option<T>, E>,
+) -> std::result::Result<Vec<T>, E> {
+    let mut staged = Vec::new();
+    for index in indices {
+        if let Some(candidate) = build(*index)? {
+            staged.push(candidate);
+        }
+    }
+    Ok(staged)
+}
+
+fn should_show_reloaded_widget(instance_visible: bool, globally_hidden: bool) -> bool {
+    instance_visible && !globally_hidden
 }
 
 pub(crate) fn reload_plugins_and_runtimes(
     deps: PluginReloadDeps<'_>,
 ) -> Result<PluginReloadSummary> {
-    let replacement = plugin::PluginCatalog::load(deps.state_dir);
+    let reload = deps.plugin_catalog.reload_incremental(&deps.plan);
+    let replacement = reload.catalog;
     let plugin_count = replacement.plugins().len();
     let diagnostics = replacement.errors();
-    for error in &diagnostics {
-        eprintln!("plugin catalog warning: {error}");
+    for message in replacement.diagnostic_messages(deps.state_dir) {
+        eprintln!("plugin catalog warning: {message}");
     }
+    let changed_plugin_count = reload.changed_plugin_ids.len();
+    let instances = deps.layouts.borrow().widgets.clone();
+    let reload_indices = runtime_reload_instance_indices(&instances, &reload.changed_plugin_ids);
+    let settings = deps.layouts.borrow().settings.clone().normalized();
+    let quote_cache = deps.quote_cache.borrow();
+    let globally_hidden = *deps.widgets_hidden.borrow();
+    let staged = stage_runtime_replacements(
+        &reload_indices,
+        |index| -> Result<Option<(WidgetRuntime, bool)>> {
+            let instance = &instances[index];
+            let Some(definition) = replacement.find(&instance.plugin_id) else {
+                return Ok(None);
+            };
+            if !definition.is_available() {
+                return Ok(None);
+            }
+            let runtime = build_widget_runtime(WidgetRuntimeBuildRequest {
+                instance,
+                index,
+                settings: settings.clone(),
+                quote_cache: &quote_cache,
+                coin_icons: &deps.coin_icons,
+                layouts: deps.layouts.clone(),
+                state_path: deps.state_path,
+                definition_catalog: &replacement,
+                handler_catalog: deps.plugin_catalog.clone(),
+            })?;
+            Ok(Some((
+                runtime,
+                should_show_reloaded_widget(instance.visible, globally_hidden),
+            )))
+        },
+    )?;
+    drop(quote_cache);
+
+    if !deps.plan.is_current(deps.state_dir) {
+        eprintln!(
+            "discarded stale plugin reload generation {}",
+            deps.plan.generation
+        );
+        return Ok(PluginReloadSummary {
+            applied: false,
+            generation: deps.plan.generation,
+            plugin_count: deps.plugin_catalog.plugins().len(),
+            diagnostic_count: deps.plugin_catalog.errors().len(),
+            changed_plugin_count: 0,
+            replaced_instance_count: 0,
+        });
+    }
+
+    let previous_catalog = (*deps.plugin_catalog).clone();
     deps.plugin_catalog.replace_with(replacement);
-
-    let save_result = {
-        let mut store = deps.layouts.borrow_mut();
-        normalize_store_with_catalog(&mut store, 0, Some(&deps.plugin_catalog));
-        save_layout_store(deps.state_path, &store)
-            .context("failed to save layouts after plugin reload")
-    };
-
-    let old_runtimes = std::mem::take(&mut *deps.widgets.borrow_mut());
-    for runtime in old_runtimes {
-        if let Err(error) = runtime.ui.hide() {
-            eprintln!("failed to hide reloaded widget {}: {error:#}", runtime.id);
+    for (runtime, visible) in &staged {
+        if *visible {
+            if let Err(error) = runtime.ui.show() {
+                for (staged_runtime, _) in &staged {
+                    let _ = staged_runtime.ui.hide();
+                }
+                deps.plugin_catalog.replace_with(previous_catalog);
+                return Err(error)
+                    .with_context(|| format!("failed to show reloaded widget {}", runtime.id));
+            }
         }
     }
-    let runtime_result = sync_widget_runtimes(
-        deps.widgets,
-        deps.layouts,
-        deps.state_path,
-        deps.quote_cache,
-        deps.coin_icons,
-        true,
-        deps.plugin_catalog.clone(),
+
+    let replaced_instance_count = staged.len();
+    let mut old_runtimes = Vec::new();
+    {
+        let mut runtimes = deps.widgets.borrow_mut();
+        let mut retained = Vec::with_capacity(runtimes.len() + staged.len());
+        for runtime in runtimes.drain(..) {
+            if reload.changed_plugin_ids.contains(&runtime.plugin_id) {
+                old_runtimes.push(runtime);
+            } else {
+                retained.push(runtime);
+            }
+        }
+        retained.extend(staged.into_iter().map(|(runtime, _)| runtime));
+        let order = instances
+            .iter()
+            .enumerate()
+            .map(|(index, instance)| (instance.id.clone(), index))
+            .collect::<HashMap<_, _>>();
+        retained.sort_by_key(|runtime| order.get(&runtime.id).copied().unwrap_or(usize::MAX));
+        *runtimes = retained;
+    }
+    for runtime in old_runtimes {
+        if let Err(error) = runtime.ui.hide() {
+            eprintln!("failed to hide replaced widget {}: {error:#}", runtime.id);
+        }
+    }
+
+    if changed_plugin_count > 0 {
+        update_market_feed_config_from_store(
+            deps.market_feed_config,
+            &deps.layouts.borrow(),
+            &deps.plugin_catalog,
+        );
+    }
+    schedule_widget_shell_window_configuration();
+    eprintln!(
+        "applied plugin reload generation {}: {} sources compiled, {} plugins changed, {} instances replaced, {} last-known-good plugins retained",
+        deps.plan.generation,
+        reload.compiled_source_count,
+        changed_plugin_count,
+        replaced_instance_count,
+        reload.retained_plugin_ids.len()
     );
-    update_market_feed_config_from_store(
-        deps.market_feed_config,
-        &deps.layouts.borrow(),
-        &deps.plugin_catalog,
-    );
-    save_result?;
-    runtime_result?;
 
     Ok(PluginReloadSummary {
+        applied: true,
+        generation: deps.plan.generation,
         plugin_count,
         diagnostic_count: diagnostics.len(),
+        changed_plugin_count,
+        replaced_instance_count,
     })
 }
 
@@ -126,6 +231,18 @@ struct ApplyInstanceRequest<'a> {
     coin_icons: &'a CoinIconRegistry,
     set_position: bool,
     plugin_catalog: &'a plugin::PluginCatalog,
+}
+
+struct WidgetRuntimeBuildRequest<'a> {
+    instance: &'a WidgetInstance,
+    index: usize,
+    settings: AppSettings,
+    quote_cache: &'a QuoteCache,
+    coin_icons: &'a CoinIconRegistry,
+    layouts: Rc<RefCell<LayoutStore>>,
+    state_path: &'a Path,
+    definition_catalog: &'a plugin::PluginCatalog,
+    handler_catalog: Rc<plugin::PluginCatalog>,
 }
 
 struct ApplyRuntimeViewRequest<'a> {
@@ -280,6 +397,77 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
     timer
 }
 
+fn runtime_reload_instance_indices(
+    instances: &[WidgetInstance],
+    changed_plugin_ids: &BTreeSet<String>,
+) -> Vec<usize> {
+    instances
+        .iter()
+        .enumerate()
+        .filter_map(|(index, instance)| {
+            changed_plugin_ids
+                .contains(&instance.plugin_id)
+                .then_some(index)
+        })
+        .collect()
+}
+
+fn build_widget_runtime(request: WidgetRuntimeBuildRequest<'_>) -> Result<WidgetRuntime> {
+    let WidgetRuntimeBuildRequest {
+        instance,
+        index,
+        settings,
+        quote_cache,
+        coin_icons,
+        layouts,
+        state_path,
+        definition_catalog,
+        handler_catalog,
+    } = request;
+    let plugin = definition_catalog
+        .find(&instance.plugin_id)
+        .with_context(|| format!("unknown widget plugin {}", instance.plugin_id))?;
+    if !plugin.is_available() {
+        anyhow::bail!("widget plugin {} is unavailable", instance.plugin_id);
+    }
+
+    let ui = WidgetUi::from_plugin(&plugin)
+        .with_context(|| format!("failed to create widget plugin {}", instance.plugin_id))?;
+    apply_instance_to_widget(ApplyInstanceRequest {
+        ui: &ui,
+        instance,
+        index,
+        settings: settings.clone(),
+        quote_cache,
+        coin_icons,
+        set_position: true,
+        plugin_catalog: definition_catalog,
+    });
+    install_drag_handler(
+        &ui,
+        layouts.clone(),
+        state_path.to_path_buf(),
+        instance.id.clone(),
+        handler_catalog,
+    )?;
+    install_layout_lock_handler(&ui, layouts, state_path.to_path_buf(), instance.id.clone())?;
+    let symbols = normalized_symbols_for_instance(instance, Some(definition_catalog));
+    let layout = layout_for_instance(instance, index, settings.clone(), Some(definition_catalog));
+    let theme_name = widget_theme_name(instance, definition_catalog);
+    let locale = i18n::resolve_locale(settings.language);
+    Ok(WidgetRuntime {
+        id: instance.id.clone(),
+        plugin_id: instance.plugin_id.clone(),
+        ui,
+        symbols,
+        show_coin_logos: settings::widget_show_coin_logos(instance),
+        display_options: widget_display_options(instance),
+        widget_scale: widget_scale_for_instance(instance, &layout, definition_catalog),
+        theme_name,
+        locale,
+    })
+}
+
 pub(crate) fn sync_widget_runtimes(
     widgets: &Rc<RefCell<Vec<WidgetRuntime>>>,
     layouts: &Rc<RefCell<LayoutStore>>,
@@ -355,48 +543,19 @@ pub(crate) fn sync_widget_runtimes(
             );
             continue;
         }
-
-        let ui = WidgetUi::from_plugin(&plugin)
-            .with_context(|| format!("failed to create widget plugin {}", instance.plugin_id))?;
-        apply_instance_to_widget(ApplyInstanceRequest {
-            ui: &ui,
+        let runtime = build_widget_runtime(WidgetRuntimeBuildRequest {
             instance,
             index,
             settings: settings.clone(),
             quote_cache: &quote_cache_ref,
             coin_icons: &coin_icons,
-            set_position: true,
-            plugin_catalog: &plugin_catalog,
-        });
-        install_drag_handler(
-            &ui,
-            layouts.clone(),
-            state_path.to_path_buf(),
-            instance.id.clone(),
-            plugin_catalog.clone(),
-        );
-        install_layout_lock_handler(
-            &ui,
-            layouts.clone(),
-            state_path.to_path_buf(),
-            instance.id.clone(),
-        );
-        apply_widget_visibility(&ui, instance.visible)?;
-        let symbols = normalized_symbols_for_instance(instance, Some(&plugin_catalog));
-        let layout = layout_for_instance(instance, index, settings.clone(), Some(&plugin_catalog));
-        let theme_name = widget_theme_name(instance, &plugin_catalog);
-        let locale = i18n::resolve_locale(settings.language);
-        runtimes.push(WidgetRuntime {
-            id: instance.id.clone(),
-            plugin_id: instance.plugin_id.clone(),
-            ui,
-            symbols,
-            show_coin_logos: settings::widget_show_coin_logos(instance),
-            display_options: widget_display_options(instance),
-            widget_scale: widget_scale_for_instance(instance, &layout, &plugin_catalog),
-            theme_name,
-            locale,
-        });
+            layouts: layouts.clone(),
+            state_path,
+            definition_catalog: &plugin_catalog,
+            handler_catalog: plugin_catalog.clone(),
+        })?;
+        apply_widget_visibility(&runtime.ui, instance.visible)?;
+        runtimes.push(runtime);
 
         if index == instances.len().saturating_sub(1) {
             schedule_widget_shell_window_configuration();
@@ -418,7 +577,7 @@ fn install_drag_handler(
     state_path: PathBuf,
     id: String,
     plugin_catalog: Rc<plugin::PluginCatalog>,
-) {
+) -> Result<()> {
     match ui {
         WidgetUi::BuiltinPriceCard(ui) => {
             let weak = ui.as_weak();
@@ -476,11 +635,12 @@ fn install_drag_handler(
                     );
                     Value::Void
                 })
-                .unwrap_or_else(|error| {
-                    eprintln!("failed to install dynamic drag callback: {error:?}");
-                });
+                .map_err(|error| {
+                    anyhow::anyhow!("failed to install dynamic drag callback: {error:?}")
+                })?;
         }
     }
+    Ok(())
 }
 
 fn install_layout_lock_handler(
@@ -488,7 +648,7 @@ fn install_layout_lock_handler(
     layouts: Rc<RefCell<LayoutStore>>,
     state_path: PathBuf,
     id: String,
-) {
+) -> Result<()> {
     match ui {
         WidgetUi::BuiltinPriceCard(ui) => {
             let weak = ui.as_weak();
@@ -516,11 +676,12 @@ fn install_layout_lock_handler(
                     }
                     Value::Void
                 })
-                .unwrap_or_else(|error| {
-                    eprintln!("failed to install dynamic layout lock callback: {error:?}");
-                });
+                .map_err(|error| {
+                    anyhow::anyhow!("failed to install dynamic layout lock callback: {error:?}")
+                })?;
         }
     }
+    Ok(())
 }
 
 fn move_widget_window_and_schedule_save(
@@ -1147,6 +1308,64 @@ mod tests {
             symbols: symbols.into_iter().map(str::to_string).collect(),
             config: settings::default_widget_config(),
         }
+    }
+
+    #[test]
+    fn runtime_reload_plan_targets_every_changed_plugin_instance_in_layout_order() {
+        let mut first = runtime_test_widget(vec!["binance:spot:BTC/USDT"]);
+        first.id = "a-1".to_string();
+        first.plugin_id = "com.example.a".to_string();
+        let mut untouched = runtime_test_widget(vec!["binance:spot:ETH/USDT"]);
+        untouched.id = "b-1".to_string();
+        untouched.plugin_id = "com.example.b".to_string();
+        let mut second = runtime_test_widget(vec!["binance:spot:SOL/USDT"]);
+        second.id = "a-2".to_string();
+        second.plugin_id = "com.example.a".to_string();
+        let instances = vec![first, untouched, second];
+
+        let indices = runtime_reload_instance_indices(
+            &instances,
+            &BTreeSet::from(["com.example.a".to_string()]),
+        );
+
+        assert_eq!(indices, vec![0, 2]);
+        assert_eq!(instances[1].id, "b-1");
+    }
+
+    #[test]
+    fn runtime_reload_staging_drops_all_candidates_when_any_build_fails() {
+        use std::cell::Cell;
+
+        #[derive(Debug)]
+        struct StageProbe(Rc<Cell<usize>>);
+        impl Drop for StageProbe {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+
+        let dropped = Rc::new(Cell::new(0));
+        let existing_runtime_ids = vec!["a-1", "a-2"];
+        let staged: std::result::Result<Vec<StageProbe>, &str> =
+            stage_runtime_replacements(&[0, 1], |index| {
+                if index == 1 {
+                    Err("second instance failed")
+                } else {
+                    Ok(Some(StageProbe(dropped.clone())))
+                }
+            });
+
+        assert_eq!(staged.unwrap_err(), "second instance failed");
+        assert_eq!(dropped.get(), 1, "the partial staged set must be dropped");
+        assert_eq!(existing_runtime_ids, vec!["a-1", "a-2"]);
+    }
+
+    #[test]
+    fn runtime_reload_never_reshows_a_globally_hidden_widget() {
+        assert!(should_show_reloaded_widget(true, false));
+        assert!(!should_show_reloaded_widget(true, true));
+        assert!(!should_show_reloaded_widget(false, false));
+        assert!(!should_show_reloaded_widget(false, true));
     }
 
     #[test]

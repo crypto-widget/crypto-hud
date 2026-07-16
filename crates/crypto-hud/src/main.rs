@@ -24,7 +24,11 @@ use std::{
     cell::{Cell, RefCell},
     env,
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex,
+    },
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -166,56 +170,76 @@ fn install_gui_smoke_settings_interaction_timer(
     Some(timer)
 }
 
-struct PluginReloadWatcher {
-    observed: plugin::PluginTreeFingerprint,
-    applied: plugin::PluginTreeFingerprint,
-    stable_ticks: u8,
+struct PluginScanWorker {
+    cancelled: Arc<AtomicBool>,
+    wake: mpsc::Sender<()>,
+    thread: Option<JoinHandle<()>>,
 }
 
-impl PluginReloadWatcher {
-    fn new(initial: plugin::PluginTreeFingerprint) -> Self {
-        Self {
-            observed: initial.clone(),
-            applied: initial,
-            stable_ticks: 0,
+impl Drop for PluginScanWorker {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+        let _ = self.wake.send(());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
-    }
-
-    fn observe(&mut self, current: plugin::PluginTreeFingerprint) -> bool {
-        if current != self.observed {
-            self.observed = current;
-            self.stable_ticks = 0;
-            return false;
-        }
-        if current == self.applied {
-            return false;
-        }
-        self.stable_ticks = self.stable_ticks.saturating_add(1);
-        if self.stable_ticks < 2 {
-            return false;
-        }
-        self.applied = current;
-        self.stable_ticks = 0;
-        true
     }
 }
 
-fn install_plugin_hot_reload_timer(
+struct PluginHotReloadMonitor {
+    _timer: Timer,
+    _worker: PluginScanWorker,
+}
+
+fn install_plugin_hot_reload_monitor(
     state_dir: std::path::PathBuf,
     settings_window: slint::Weak<SettingsWindow>,
-) -> Timer {
-    let initial = plugin::plugin_tree_fingerprint(&state_dir);
-    let mut watcher = PluginReloadWatcher::new(initial);
+    tracker: Rc<RefCell<plugin::PluginReloadTracker>>,
+) -> Result<PluginHotReloadMonitor> {
+    let (snapshot_sender, snapshot_receiver) = mpsc::sync_channel(1);
+    let (stop_sender, stop_receiver) = mpsc::channel();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_cancelled = cancelled.clone();
+    let worker_state_dir = state_dir.clone();
+    let worker_thread = thread::Builder::new()
+        .name("crypto-hud-plugin-scan".to_string())
+        .spawn(move || loop {
+            match stop_receiver.recv_timeout(Duration::from_millis(750)) {
+                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            let Some(snapshot) =
+                plugin::plugin_tree_snapshot_cancellable(&worker_state_dir, &worker_cancelled)
+            else {
+                break;
+            };
+            match snapshot_sender.try_send(snapshot) {
+                Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
+                Err(mpsc::TrySendError::Disconnected(_)) => break,
+            }
+        })
+        .context("failed to start plugin scan worker")?;
+
     let timer = Timer::default();
-    timer.start(TimerMode::Repeated, Duration::from_millis(750), move || {
-        let current = plugin::plugin_tree_fingerprint(&state_dir);
-        if watcher.observe(current) {
+    timer.start(TimerMode::Repeated, Duration::from_millis(200), move || {
+        let mut latest = None;
+        while let Ok(snapshot) = snapshot_receiver.try_recv() {
+            latest = Some(snapshot);
+        }
+        if latest.is_some_and(|snapshot| tracker.borrow_mut().observe(snapshot)) {
             if let Some(ui) = settings_window.upgrade() {
                 ui.invoke_reload_custom_components();
             }
         }
     });
-    timer
+    Ok(PluginHotReloadMonitor {
+        _timer: timer,
+        _worker: PluginScanWorker {
+            cancelled,
+            wake: stop_sender,
+            thread: Some(worker_thread),
+        },
+    })
 }
 
 fn offline_gui_smoke_enabled(gui_smoke_requested: bool, flag: Option<&str>) -> bool {
@@ -295,8 +319,11 @@ fn main() -> Result<()> {
         eprintln!("failed to sync custom plugin development guide: {error:#}");
     }
     let plugin_catalog = Rc::new(plugin::PluginCatalog::load(&state_dir));
-    for error in plugin_catalog.errors() {
-        eprintln!("plugin catalog warning: {error}");
+    let plugin_reload_tracker = Rc::new(RefCell::new(plugin::PluginReloadTracker::new(
+        plugin_catalog.tree_snapshot(),
+    )));
+    for message in plugin_catalog.diagnostic_messages(&state_dir) {
+        eprintln!("plugin catalog warning: {message}");
     }
     let plugin_definitions = widget_definitions_from_catalog(&plugin_catalog);
     let loaded_layout_store = load_layout_store_with_diagnostics(
@@ -384,9 +411,13 @@ fn main() -> Result<()> {
         quote_cache: quote_cache.clone(),
         coin_icons: coin_icons.clone(),
         plugin_catalog: plugin_catalog.clone(),
+        plugin_reload_tracker: plugin_reload_tracker.clone(),
     })?;
-    let plugin_hot_reload_timer =
-        install_plugin_hot_reload_timer(state_dir.clone(), settings_window.as_weak());
+    let plugin_hot_reload_monitor = install_plugin_hot_reload_monitor(
+        state_dir.clone(),
+        settings_window.as_weak(),
+        plugin_reload_tracker,
+    )?;
     let preview_carousel_timer = install_preview_carousel_timer(settings_window.as_weak());
     let tray = install_tray(
         widgets.clone(),
@@ -491,7 +522,7 @@ fn main() -> Result<()> {
     drop(instance_activation_timer);
     drop(widget_shell_window_maintenance_timer);
     drop(gui_smoke_settings_interaction_timer);
-    drop(plugin_hot_reload_timer);
+    drop(plugin_hot_reload_monitor);
     drop(preview_carousel_timer);
     drop(tray_hover_timer);
     drop(hotkey_timer);
@@ -554,12 +585,12 @@ mod tests {
             "crypto-hud-plugin-reload-watcher-{}-{unique}",
             std::process::id()
         ));
-        let initial = plugin::plugin_tree_fingerprint(&state_dir);
-        let mut watcher = PluginReloadWatcher::new(initial);
+        let initial = plugin::plugin_tree_snapshot(&state_dir);
+        let mut watcher = plugin::PluginReloadTracker::new(initial);
         let plugin_dir = plugin::user_plugin_root(&state_dir).join("com.example.changed");
         std::fs::create_dir_all(&plugin_dir).unwrap();
         std::fs::write(plugin_dir.join(plugin::MANIFEST_FILE_NAME), "{}").unwrap();
-        let changed = plugin::plugin_tree_fingerprint(&state_dir);
+        let changed = plugin::plugin_tree_snapshot(&state_dir);
 
         assert!(!watcher.observe(changed.clone()));
         assert!(!watcher.observe(changed.clone()));

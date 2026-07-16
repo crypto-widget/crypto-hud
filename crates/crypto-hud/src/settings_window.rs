@@ -560,6 +560,7 @@ pub(crate) struct SettingsWindowDeps {
     pub(crate) quote_cache: Rc<RefCell<QuoteCache>>,
     pub(crate) coin_icons: Rc<CoinIconRegistry>,
     pub(crate) plugin_catalog: Rc<plugin::PluginCatalog>,
+    pub(crate) plugin_reload_tracker: Rc<RefCell<plugin::PluginReloadTracker>>,
 }
 
 pub(crate) fn install_preview_carousel_timer(
@@ -699,6 +700,8 @@ struct SettingsCommitContext {
     quote_cache: Rc<RefCell<QuoteCache>>,
     coin_icons: Rc<CoinIconRegistry>,
     plugin_catalog: Rc<plugin::PluginCatalog>,
+    plugin_reload_tracker: Rc<RefCell<plugin::PluginReloadTracker>>,
+    widgets_hidden: Rc<RefCell<bool>>,
 }
 
 impl SettingsCommitContext {
@@ -800,7 +803,13 @@ impl SettingsCommitContext {
         let settings = self.current_settings();
         let locale = i18n::resolve_locale(settings.language);
         let state_dir = settings::state_dir_for_path(&self.state_path);
-        let status = match reload_plugins_and_runtimes(PluginReloadDeps {
+        let snapshot = plugin::plugin_tree_snapshot(&state_dir);
+        let plan = self
+            .plugin_reload_tracker
+            .borrow_mut()
+            .take_pending_or_force(snapshot);
+        let generation = plan.generation;
+        let reload_result = reload_plugins_and_runtimes(PluginReloadDeps {
             widgets: &self.widgets,
             layouts: &self.layouts,
             state_path: &self.state_path,
@@ -809,17 +818,37 @@ impl SettingsCommitContext {
             coin_icons: self.coin_icons.clone(),
             market_feed_config: &self.market_feed_config,
             plugin_catalog: self.plugin_catalog.clone(),
-        }) {
-            Ok(summary) => {
-                i18n::plugin_reload_status(locale, summary.plugin_count, summary.diagnostic_count)
+            widgets_hidden: &self.widgets_hidden,
+            plan,
+        });
+        self.plugin_reload_tracker.borrow_mut().finish(
+            generation,
+            reload_result.as_ref().is_ok_and(|summary| summary.applied),
+        );
+        let status = match reload_result {
+            Ok(summary) if summary.applied => {
+                eprintln!(
+                    "plugin reload generation {} updated {} plugins and replaced {} widget instances",
+                    summary.generation,
+                    summary.changed_plugin_count,
+                    summary.replaced_instance_count
+                );
+                Some(i18n::plugin_reload_status(
+                    locale,
+                    summary.plugin_count,
+                    summary.diagnostic_count,
+                ))
             }
-            Err(error) => i18n::status_failure_message(
+            Ok(_) => None,
+            Err(error) => Some(i18n::status_failure_message(
                 locale,
                 i18n::plugin_reload_failed_label(locale),
                 error,
-            ),
+            )),
         };
-        *self.settings_status.borrow_mut() = status;
+        if let Some(status) = status {
+            *self.settings_status.borrow_mut() = status;
+        }
         self.refresh_settings_window(weak);
         schedule_widget_shell_window_configuration();
     }
@@ -1089,6 +1118,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         quote_cache,
         coin_icons,
         plugin_catalog,
+        plugin_reload_tracker,
     } = deps;
     let ui = SettingsWindow::new().context("failed to create Slint settings window")?;
     configure_settings_window_geometry(&ui);
@@ -1112,6 +1142,8 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         quote_cache: quote_cache.clone(),
         coin_icons: coin_icons.clone(),
         plugin_catalog: plugin_catalog.clone(),
+        plugin_reload_tracker,
+        widgets_hidden: widgets_hidden.clone(),
     };
 
     ui.on_apply_settings({

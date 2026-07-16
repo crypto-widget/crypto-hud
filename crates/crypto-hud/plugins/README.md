@@ -456,6 +456,17 @@ card := Rectangle {
 恢复相同插件 id 后热重载即可自动找回；也可以在所选小组件中选择替代插件并“重新定位”。
 重新定位会保留不透明配置、名称和布局元数据，再按替代插件合同规范化币种、尺寸、主题和参数。
 
+宿主会在有界、可取消的后台扫描器中为每个插件目录独立计算指纹，连续两次观察到稳定内容后只编译
+发生变化的候选。快速连续保存会产生递增 generation；若编译或实例创建完成前文件再次变化，旧结果
+会被丢弃。临时扫描或访问错误会进入诊断，但不会被当作已确认删除，因此 last-known-good 候选仍会
+继续运行。清单、资源、合同或 Slint 编译失败时，已成功运行的定义和窗口继续工作，诊断面板显示
+新错误；修复后会先完整创建该插件的全部实例，再在同一 UI turn 中切换。
+未变化插件的窗口和动画状态不会重建。被替换插件自身的私有 Slint 状态会重新开始，因为 Host
+API 0.2 尚未提供插件内部状态迁移合同。
+
+删除插件目录后，宿主只移除该插件窗口，仍保留布局和配置；恢复相同插件 id 后会从宿主状态重建。
+行情订阅只在成功提交新定义后刷新，插件的网络和文件系统权限始终保持关闭。
+
 ## 验证清单
 
 提交前至少运行：
@@ -465,6 +476,7 @@ cargo test -p crypto-hud discovers_repo_local_plugins
 cargo test -p crypto-hud discovers_plugin_with_all_extended_parameter_property_types
 cargo test --workspace
 mise run check
+powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```
 
 手动 GUI smoke：

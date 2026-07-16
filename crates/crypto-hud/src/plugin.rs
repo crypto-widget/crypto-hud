@@ -1,8 +1,12 @@
 use std::{
     cell::RefCell,
-    collections::HashSet,
-    fmt, fs, io,
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    fmt, fs,
+    hash::{Hash, Hasher},
+    io,
+    io::Read,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
     time::UNIX_EPOCH,
 };
 
@@ -31,6 +35,10 @@ pub const SLINT_FILE_MAX_BYTES: u64 = 256 * 1024;
 pub const ASSET_MAX_BYTES: u64 = 1024 * 1024;
 pub const PLUGIN_DIR_MAX_BYTES: u64 = 5 * 1024 * 1024;
 pub const PLUGIN_MANIFEST_SCHEMA_VERSION: u32 = 3;
+const PLUGIN_SCAN_MAX_CANDIDATES: usize = 256;
+const PLUGIN_SCAN_MAX_ENTRIES: usize = 8_192;
+const PLUGIN_SCAN_MAX_HASH_BYTES: u64 = 64 * 1024 * 1024;
+const PLUGIN_SCAN_MAX_ENTRIES_PER_CANDIDATE: usize = 4_096;
 pub(crate) const SLINT_RENDERER_UNCOMPILED_REASON: &str = "Slint renderer has not been compiled";
 const USER_PLUGIN_DEVELOPMENT_GUIDE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -90,67 +98,73 @@ const REQUIRED_PROPERTIES: &[(&str, ValueType)] = &[
 const REQUIRED_CALLBACKS: &[&str] = &["drag-move", "toggle-layout-lock"];
 
 #[derive(Debug, Clone)]
+struct PluginCandidateRecord {
+    active: Option<PluginDefinition>,
+    revision: u64,
+    diagnostic: Option<PluginCatalogError>,
+    blocked: Option<BlockedPluginCandidate>,
+}
+
+#[derive(Debug, Clone)]
+struct BlockedPluginCandidate {
+    plugin: PluginDefinition,
+    revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EffectivePluginRevision {
+    Static,
+    Local {
+        source: PluginSourceKey,
+        generation: u64,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PluginCatalogReload {
+    pub(crate) catalog: PluginCatalog,
+    pub(crate) changed_plugin_ids: BTreeSet<String>,
+    pub(crate) retained_plugin_ids: BTreeSet<String>,
+    pub(crate) compiled_source_count: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct PluginCatalog {
     plugins: RefCell<Vec<PluginDefinition>>,
     errors: RefCell<Vec<PluginCatalogError>>,
+    candidates: RefCell<BTreeMap<PluginSourceKey, PluginCandidateRecord>>,
+    snapshot: RefCell<PluginTreeSnapshot>,
+    effective_revisions: RefCell<HashMap<String, EffectivePluginRevision>>,
+    required_bundle_state_dir: Option<PathBuf>,
 }
 
 impl PluginCatalog {
+    #[cfg(test)]
     pub fn builtins() -> Self {
+        let plugins = builtin_plugins();
+        let effective_revisions = plugins
+            .iter()
+            .map(|plugin| (plugin.id.clone(), EffectivePluginRevision::Static))
+            .collect();
         Self {
-            plugins: RefCell::new(builtin_plugins()),
+            plugins: RefCell::new(plugins),
             errors: RefCell::new(Vec::new()),
+            candidates: RefCell::new(BTreeMap::new()),
+            snapshot: RefCell::new(PluginTreeSnapshot::default()),
+            effective_revisions: RefCell::new(effective_revisions),
+            required_bundle_state_dir: None,
         }
     }
 
     pub fn load(state_dir: &Path) -> Self {
-        let bundled_roots = bundled_plugin_roots();
-        let bundled_root_available = bundled_roots.iter().any(|root| root.is_dir());
-        let expected_bundled_root = bundled_roots
-            .iter()
-            .find(|root| root.is_dir())
-            .or_else(|| bundled_roots.first())
-            .cloned();
-        let mut catalog = Self::discover(plugin_roots(state_dir));
-        if !bundled_root_available {
-            if let Some(root) = expected_bundled_root.as_ref() {
-                catalog.push_error(root.clone(), "bundled plugin directory is missing");
-            }
-        }
-        for plugin_id in BUNDLED_BUILTIN_SLINT_PLUGIN_IDS {
-            let bundled_plugin_loaded = catalog.plugins.get_mut().iter().any(|plugin| {
-                plugin.id == *plugin_id
-                    && matches!(
-                        &plugin.renderer,
-                        PluginRendererDefinition::Slint { root_dir, .. }
-                            if is_bundled_builtin_slint_plugin(plugin_id, root_dir)
-                    )
-            });
-            if !bundled_plugin_loaded {
-                let path = expected_bundled_root
-                    .as_ref()
-                    .map(|root| root.join(plugin_id))
-                    .unwrap_or_else(|| PathBuf::from(plugin_id));
-                catalog.push_error(path, "required bundled plugin is missing or invalid");
-            }
-        }
-        catalog
+        let snapshot = plugin_tree_snapshot(state_dir);
+        Self::from_snapshot(snapshot, Some(state_dir.to_path_buf()), 0)
     }
 
+    #[cfg(test)]
     pub fn discover(plugin_roots: Vec<PathBuf>) -> Self {
-        let mut catalog = Self::builtins();
-        let mut seen_ids = catalog
-            .plugins
-            .get_mut()
-            .iter()
-            .map(|plugin| plugin.id.clone())
-            .collect::<HashSet<_>>();
-
-        for root in plugin_roots {
-            discover_root(&root, &mut catalog, &mut seen_ids);
-        }
-
-        catalog
+        let snapshot = scan_plugin_roots(&plugin_roots);
+        Self::from_snapshot(snapshot, None, 0)
     }
 
     pub fn plugins(&self) -> Vec<PluginDefinition> {
@@ -176,6 +190,10 @@ impl PluginCatalog {
         self.errors.borrow().clone()
     }
 
+    pub(crate) fn tree_snapshot(&self) -> PluginTreeSnapshot {
+        self.snapshot.borrow().clone()
+    }
+
     pub fn diagnostic_messages(&self, state_dir: &Path) -> Vec<String> {
         self.errors
             .borrow()
@@ -199,27 +217,264 @@ impl PluginCatalog {
     pub fn replace_with(&self, replacement: Self) {
         self.plugins.replace(replacement.plugins.into_inner());
         self.errors.replace(replacement.errors.into_inner());
+        self.candidates.replace(replacement.candidates.into_inner());
+        self.snapshot.replace(replacement.snapshot.into_inner());
+        self.effective_revisions
+            .replace(replacement.effective_revisions.into_inner());
+    }
+
+    pub(crate) fn reload_incremental(&self, plan: &PluginReloadPlan) -> PluginCatalogReload {
+        let previous_candidates = self.candidates.borrow();
+        let mut candidates = BTreeMap::new();
+        let mut retained_plugin_ids = BTreeSet::new();
+        let mut compiled_source_count = 0;
+        let mut higher_priority_ids = builtin_plugins()
+            .into_iter()
+            .map(|plugin| plugin.id)
+            .collect::<HashSet<_>>();
+        let mut sources = plan
+            .snapshot
+            .candidates
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        sources.extend(
+            previous_candidates
+                .keys()
+                .filter(|source| {
+                    plan.snapshot
+                        .incomplete_root_ranks
+                        .contains(&source.root_rank)
+                        || plan.snapshot.incomplete_sources.contains(*source)
+                })
+                .cloned(),
+        );
+
+        for source in sources {
+            let previous = previous_candidates.get(&source);
+            let source_is_incomplete = plan.snapshot.incomplete_sources.contains(&source)
+                || (plan
+                    .snapshot
+                    .incomplete_root_ranks
+                    .contains(&source.root_rank)
+                    && !plan.snapshot.candidates.contains_key(&source));
+            let mut record = if source_is_incomplete {
+                if let Some(plugin) = previous
+                    .and_then(|record| record.active.as_ref())
+                    .filter(|plugin| plugin.is_available())
+                {
+                    retained_plugin_ids.insert(plugin.id.clone());
+                }
+                previous.cloned().unwrap_or_else(|| PluginCandidateRecord {
+                    active: None,
+                    revision: plan.generation,
+                    diagnostic: None,
+                    blocked: None,
+                })
+            } else if plan.changed_sources.contains(&source) || previous.is_none() {
+                compiled_source_count += 1;
+                let mut fresh = load_plugin_candidate(&source, plan.generation);
+                let fresh_failed = fresh.diagnostic.is_some();
+                let fresh_id = fresh.active.as_ref().map(|plugin| plugin.id.clone());
+                let conflicts_with_higher_priority = fresh_id
+                    .as_ref()
+                    .is_some_and(|plugin_id| higher_priority_ids.contains(plugin_id));
+                let previous_is_runnable = previous
+                    .and_then(|record| record.active.as_ref())
+                    .is_some_and(PluginDefinition::is_available);
+                let fresh_is_runnable = fresh
+                    .active
+                    .as_ref()
+                    .is_some_and(PluginDefinition::is_available);
+                let changed_to_duplicate_id = fresh_is_runnable
+                    && conflicts_with_higher_priority
+                    && previous
+                        .and_then(|record| record.active.as_ref())
+                        .is_some_and(|plugin| Some(&plugin.id) != fresh_id.as_ref());
+
+                if previous_is_runnable && (fresh_failed || changed_to_duplicate_id) {
+                    if let Some(previous) = previous {
+                        if changed_to_duplicate_id {
+                            if let Some(plugin) = fresh.active.take() {
+                                fresh.blocked = Some(BlockedPluginCandidate {
+                                    plugin,
+                                    revision: fresh.revision,
+                                });
+                            }
+                        }
+                        fresh.active = previous.active.clone();
+                        fresh.revision = previous.revision;
+                        if let Some(plugin) = &fresh.active {
+                            retained_plugin_ids.insert(plugin.id.clone());
+                        }
+                    }
+                }
+                fresh
+            } else {
+                previous.cloned().unwrap_or_else(|| PluginCandidateRecord {
+                    active: None,
+                    revision: plan.generation,
+                    diagnostic: None,
+                    blocked: None,
+                })
+            };
+
+            if let Some(blocked) = record.blocked.take() {
+                if higher_priority_ids.contains(&blocked.plugin.id) {
+                    record.blocked = Some(blocked);
+                } else {
+                    record.active = Some(blocked.plugin);
+                    record.revision = blocked.revision;
+                    record.diagnostic = None;
+                }
+            }
+            if let Some(plugin) = &record.active {
+                higher_priority_ids.insert(plugin.id.clone());
+            }
+            candidates.insert(source, record);
+        }
+        drop(previous_candidates);
+
+        let catalog = Self::from_records(
+            plan.snapshot.clone(),
+            self.required_bundle_state_dir.clone(),
+            candidates,
+        );
+        let previous_revisions = self.effective_revisions.borrow();
+        let next_revisions = catalog.effective_revisions.borrow();
+        let changed_plugin_ids = previous_revisions
+            .keys()
+            .chain(next_revisions.keys())
+            .filter(|plugin_id| {
+                previous_revisions.get(*plugin_id) != next_revisions.get(*plugin_id)
+            })
+            .cloned()
+            .collect();
+        drop(next_revisions);
+        drop(previous_revisions);
+
+        PluginCatalogReload {
+            catalog,
+            changed_plugin_ids,
+            retained_plugin_ids,
+            compiled_source_count,
+        }
+    }
+
+    fn from_snapshot(
+        snapshot: PluginTreeSnapshot,
+        required_bundle_state_dir: Option<PathBuf>,
+        revision: u64,
+    ) -> Self {
+        let candidates = snapshot
+            .candidates
+            .keys()
+            .map(|source| {
+                let record = if snapshot.incomplete_sources.contains(source) {
+                    PluginCandidateRecord {
+                        active: None,
+                        revision,
+                        diagnostic: None,
+                        blocked: None,
+                    }
+                } else {
+                    load_plugin_candidate(source, revision)
+                };
+                (source.clone(), record)
+            })
+            .collect();
+        Self::from_records(snapshot, required_bundle_state_dir, candidates)
+    }
+
+    fn from_records(
+        snapshot: PluginTreeSnapshot,
+        required_bundle_state_dir: Option<PathBuf>,
+        candidates: BTreeMap<PluginSourceKey, PluginCandidateRecord>,
+    ) -> Self {
+        let mut plugins = builtin_plugins();
+        let mut errors = snapshot.scan_errors.clone();
+        let mut effective_revisions = plugins
+            .iter()
+            .map(|plugin| (plugin.id.clone(), EffectivePluginRevision::Static))
+            .collect::<HashMap<_, _>>();
+        let mut seen_ids = plugins
+            .iter()
+            .map(|plugin| plugin.id.clone())
+            .collect::<HashSet<_>>();
+
+        for (source, record) in &candidates {
+            if let Some(diagnostic) = &record.diagnostic {
+                errors.push(diagnostic.clone());
+            }
+            if let Some(blocked) = &record.blocked {
+                errors.push(PluginCatalogError {
+                    path: source.directory.join(MANIFEST_FILE_NAME),
+                    message: format!("duplicate plugin id {}", blocked.plugin.id),
+                });
+            }
+            let Some(plugin) = &record.active else {
+                continue;
+            };
+            if !seen_ids.insert(plugin.id.clone()) {
+                errors.push(PluginCatalogError {
+                    path: source.directory.join(MANIFEST_FILE_NAME),
+                    message: format!("duplicate plugin id {}", plugin.id),
+                });
+                continue;
+            }
+            effective_revisions.insert(
+                plugin.id.clone(),
+                EffectivePluginRevision::Local {
+                    source: source.clone(),
+                    generation: record.revision,
+                },
+            );
+            plugins.push(plugin.clone());
+        }
+
+        if let Some(state_dir) = required_bundle_state_dir.as_deref() {
+            append_required_bundled_diagnostics(&plugins, &mut errors, state_dir);
+        }
+
+        Self {
+            plugins: RefCell::new(plugins),
+            errors: RefCell::new(errors),
+            candidates: RefCell::new(candidates),
+            snapshot: RefCell::new(snapshot),
+            effective_revisions: RefCell::new(effective_revisions),
+            required_bundle_state_dir,
+        }
     }
 
     #[cfg(test)]
     pub fn from_plugins_for_tests(plugins: Vec<PluginDefinition>) -> Self {
+        let effective_revisions = plugins
+            .iter()
+            .map(|plugin| (plugin.id.clone(), EffectivePluginRevision::Static))
+            .collect();
         Self {
             plugins: RefCell::new(plugins),
             errors: RefCell::new(Vec::new()),
+            candidates: RefCell::new(BTreeMap::new()),
+            snapshot: RefCell::new(PluginTreeSnapshot::default()),
+            effective_revisions: RefCell::new(effective_revisions),
+            required_bundle_state_dir: None,
         }
-    }
-
-    fn push_error(&mut self, path: PathBuf, error: impl fmt::Display) {
-        self.errors.get_mut().push(PluginCatalogError {
-            path,
-            message: error.to_string(),
-        });
     }
 }
 
 fn redacted_plugin_path(path: &Path, state_dir: &Path) -> String {
     for root in plugin_roots(state_dir) {
-        if let Ok(relative) = path.strip_prefix(&root) {
+        let relative = path
+            .strip_prefix(&root)
+            .map(Path::to_path_buf)
+            .ok()
+            .or_else(|| {
+                root.canonicalize()
+                    .ok()
+                    .and_then(|canonical| path.strip_prefix(canonical).ok().map(Path::to_path_buf))
+            });
+        if let Some(relative) = relative {
             let label = if root == user_plugin_root(state_dir) {
                 "<user-plugins>"
             } else {
@@ -245,12 +500,19 @@ fn redact_plugin_roots(message: &str, state_dir: &Path) -> String {
         } else {
             "<bundled-plugins>"
         };
-        message = message.replace(&root.to_string_lossy().to_string(), label);
         if let Ok(canonical) = root.canonicalize() {
-            message = message.replace(&canonical.to_string_lossy().to_string(), label);
+            message = redact_path_text(message, &canonical, label);
         }
+        message = redact_path_text(message, &root, label);
     }
     message
+}
+
+fn redact_path_text(mut message: String, path: &Path, label: &str) -> String {
+    let raw = path.to_string_lossy();
+    message = message.replace(raw.as_ref(), label);
+    let debug_escaped = raw.escape_debug().to_string();
+    message.replace(&debug_escaped, label)
 }
 
 pub fn is_market_plugin_visible(plugin_id: &str) -> bool {
@@ -346,6 +608,12 @@ pub struct PluginCatalogError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct PluginSourceKey {
+    root_rank: usize,
+    directory: PathBuf,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginTreeFingerprint {
     entries: Vec<PluginTreeFingerprintEntry>,
@@ -357,32 +625,415 @@ struct PluginTreeFingerprintEntry {
     kind: u8,
     length: u64,
     modified_nanos: u128,
+    content_hash: u64,
 }
 
-pub fn plugin_tree_fingerprint(state_dir: &Path) -> PluginTreeFingerprint {
-    const MAX_ENTRIES: usize = 4_096;
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PluginTreeSnapshot {
+    candidates: BTreeMap<PluginSourceKey, PluginTreeFingerprint>,
+    scan_errors: Vec<PluginCatalogError>,
+    incomplete_root_ranks: BTreeSet<usize>,
+    incomplete_sources: BTreeSet<PluginSourceKey>,
+}
 
-    let mut entries = Vec::new();
-    for root in plugin_roots(state_dir) {
-        collect_plugin_tree_fingerprint(&root, &mut entries, MAX_ENTRIES);
-        if entries.len() >= MAX_ENTRIES {
-            break;
+impl PluginTreeSnapshot {
+    fn changed_sources(&self, next: &Self) -> BTreeSet<PluginSourceKey> {
+        self.candidates
+            .keys()
+            .chain(next.candidates.keys())
+            .filter(|source| {
+                self.candidates.get(*source) != next.candidates.get(*source)
+                    || self.incomplete_sources.contains(*source)
+                        != next.incomplete_sources.contains(*source)
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn all_sources_with(&self, next: &Self) -> BTreeSet<PluginSourceKey> {
+        self.candidates
+            .keys()
+            .chain(next.candidates.keys())
+            .cloned()
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PluginReloadPlan {
+    pub(crate) generation: u64,
+    snapshot: PluginTreeSnapshot,
+    changed_sources: BTreeSet<PluginSourceKey>,
+}
+
+impl PluginReloadPlan {
+    pub(crate) fn is_current(&self, state_dir: &Path) -> bool {
+        plugin_tree_snapshot(state_dir) == self.snapshot
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct PluginReloadTracker {
+    observed: PluginTreeSnapshot,
+    committed: PluginTreeSnapshot,
+    stable_ticks: u8,
+    next_generation: u64,
+    pending: Option<PluginReloadPlan>,
+    in_flight: Option<PluginReloadPlan>,
+}
+
+impl PluginReloadTracker {
+    pub(crate) fn new(initial: PluginTreeSnapshot) -> Self {
+        Self {
+            observed: initial.clone(),
+            committed: initial,
+            stable_ticks: 0,
+            next_generation: 0,
+            pending: None,
+            in_flight: None,
         }
     }
-    entries.sort_unstable();
-    PluginTreeFingerprint { entries }
+
+    pub(crate) fn observe(&mut self, current: PluginTreeSnapshot) -> bool {
+        if current != self.observed {
+            self.observed = current;
+            self.stable_ticks = 0;
+            self.pending = None;
+            return false;
+        }
+        if current == self.committed
+            || self
+                .pending
+                .as_ref()
+                .is_some_and(|plan| plan.snapshot == current)
+            || self
+                .in_flight
+                .as_ref()
+                .is_some_and(|plan| plan.snapshot == current)
+        {
+            return false;
+        }
+        self.stable_ticks = self.stable_ticks.saturating_add(1);
+        if self.stable_ticks < 2 {
+            return false;
+        }
+
+        self.next_generation = self.next_generation.wrapping_add(1).max(1);
+        let changed_sources = self.committed.changed_sources(&current);
+        self.pending = Some(PluginReloadPlan {
+            generation: self.next_generation,
+            snapshot: current,
+            changed_sources,
+        });
+        self.stable_ticks = 0;
+        true
+    }
+
+    pub(crate) fn take_pending_or_force(
+        &mut self,
+        current: PluginTreeSnapshot,
+    ) -> PluginReloadPlan {
+        let plan = self.pending.take().unwrap_or_else(|| {
+            self.next_generation = self.next_generation.wrapping_add(1).max(1);
+            let changed_sources = self.committed.all_sources_with(&current);
+            self.observed = current.clone();
+            self.stable_ticks = 0;
+            PluginReloadPlan {
+                generation: self.next_generation,
+                snapshot: current,
+                changed_sources,
+            }
+        });
+        self.in_flight = Some(plan.clone());
+        plan
+    }
+
+    pub(crate) fn finish(&mut self, generation: u64, applied: bool) {
+        let Some(plan) = self.in_flight.take() else {
+            return;
+        };
+        if plan.generation != generation {
+            self.in_flight = Some(plan);
+            return;
+        }
+        if applied {
+            self.committed = plan.snapshot;
+        }
+        self.stable_ticks = 0;
+    }
+}
+
+pub(crate) fn plugin_tree_snapshot(state_dir: &Path) -> PluginTreeSnapshot {
+    scan_plugin_roots(&plugin_roots(state_dir))
+}
+
+pub(crate) fn plugin_tree_snapshot_cancellable(
+    state_dir: &Path,
+    cancelled: &AtomicBool,
+) -> Option<PluginTreeSnapshot> {
+    scan_plugin_roots_with_cancel(&plugin_roots(state_dir), Some(cancelled))
+}
+
+fn scan_plugin_roots(roots: &[PathBuf]) -> PluginTreeSnapshot {
+    scan_plugin_roots_with_cancel(roots, None).unwrap_or_default()
+}
+
+struct PluginScanControl<'a> {
+    cancelled: Option<&'a AtomicBool>,
+    remaining_entries: usize,
+    remaining_hash_bytes: u64,
+    remaining_candidates: usize,
+}
+
+impl PluginScanControl<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+            .is_some_and(|cancelled| cancelled.load(Ordering::Relaxed))
+    }
+
+    fn take_entry(&mut self) -> bool {
+        if self.remaining_entries == 0 {
+            return false;
+        }
+        self.remaining_entries -= 1;
+        true
+    }
+
+    fn take_candidate(&mut self) -> bool {
+        if self.remaining_candidates == 0 {
+            return false;
+        }
+        self.remaining_candidates -= 1;
+        true
+    }
+}
+
+fn scan_plugin_roots_with_cancel(
+    roots: &[PathBuf],
+    cancelled: Option<&AtomicBool>,
+) -> Option<PluginTreeSnapshot> {
+    let mut snapshot = PluginTreeSnapshot::default();
+    let mut control = PluginScanControl {
+        cancelled,
+        remaining_entries: PLUGIN_SCAN_MAX_ENTRIES,
+        remaining_hash_bytes: PLUGIN_SCAN_MAX_HASH_BYTES,
+        remaining_candidates: PLUGIN_SCAN_MAX_CANDIDATES,
+    };
+
+    for (root_rank, root) in roots.iter().enumerate() {
+        if control.is_cancelled() {
+            return None;
+        }
+        match fs::symlink_metadata(root) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                mark_incomplete_root(
+                    &mut snapshot,
+                    root_rank,
+                    root,
+                    "plugin root is not a directory".to_string(),
+                );
+                continue;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                mark_incomplete_root(&mut snapshot, root_rank, root, error.to_string());
+                continue;
+            }
+        }
+        let entries = match fs::read_dir(root) {
+            Ok(entries) => entries,
+            Err(error) => {
+                mark_incomplete_root(&mut snapshot, root_rank, root, error.to_string());
+                continue;
+            }
+        };
+        let mut directories = Vec::new();
+        for entry in entries {
+            if control.is_cancelled() {
+                return None;
+            }
+            if !control.take_entry() {
+                mark_incomplete_root(
+                    &mut snapshot,
+                    root_rank,
+                    root,
+                    format!("plugin scan exceeds {PLUGIN_SCAN_MAX_ENTRIES} total entries"),
+                );
+                break;
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    mark_incomplete_root(&mut snapshot, root_rank, root, error.to_string());
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    mark_incomplete_root(&mut snapshot, root_rank, &path, error.to_string());
+                    continue;
+                }
+            };
+            if !metadata.is_dir() {
+                continue;
+            }
+            let manifest_path = path.join(MANIFEST_FILE_NAME);
+            match fs::metadata(&manifest_path) {
+                Ok(metadata) if metadata.is_file() => directories.push(path),
+                Ok(_) => {
+                    mark_incomplete_root(
+                        &mut snapshot,
+                        root_rank,
+                        &manifest_path,
+                        "plugin manifest is not a regular file".to_string(),
+                    );
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    mark_incomplete_root(
+                        &mut snapshot,
+                        root_rank,
+                        &manifest_path,
+                        error.to_string(),
+                    );
+                }
+            }
+        }
+        directories.sort_unstable();
+        for directory in directories {
+            if control.is_cancelled() {
+                return None;
+            }
+            if !control.take_candidate() {
+                mark_incomplete_root(
+                    &mut snapshot,
+                    root_rank,
+                    root,
+                    format!(
+                        "plugin scan exceeds {PLUGIN_SCAN_MAX_CANDIDATES} candidate directories"
+                    ),
+                );
+                break;
+            }
+            let directory = match directory.canonicalize() {
+                Ok(directory) => directory,
+                Err(error) => {
+                    mark_incomplete_root(&mut snapshot, root_rank, &directory, error.to_string());
+                    continue;
+                }
+            };
+            let source = PluginSourceKey {
+                root_rank,
+                directory: directory.clone(),
+            };
+            let fingerprint = fingerprint_plugin_directory(&directory, &mut control)?;
+            if !fingerprint.complete {
+                snapshot.incomplete_sources.insert(source.clone());
+            }
+            snapshot.scan_errors.extend(fingerprint.errors);
+            snapshot.candidates.insert(source, fingerprint.fingerprint);
+        }
+    }
+
+    snapshot.scan_errors.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    Some(snapshot)
+}
+
+fn mark_incomplete_root(
+    snapshot: &mut PluginTreeSnapshot,
+    root_rank: usize,
+    path: &Path,
+    message: String,
+) {
+    snapshot.incomplete_root_ranks.insert(root_rank);
+    snapshot.scan_errors.push(PluginCatalogError {
+        path: path.to_path_buf(),
+        message,
+    });
+}
+
+struct PluginFingerprintScan {
+    fingerprint: PluginTreeFingerprint,
+    errors: Vec<PluginCatalogError>,
+    complete: bool,
+}
+
+fn fingerprint_plugin_directory(
+    root: &Path,
+    control: &mut PluginScanControl<'_>,
+) -> Option<PluginFingerprintScan> {
+    let mut scan = PluginFingerprintScan {
+        fingerprint: PluginTreeFingerprint {
+            entries: Vec::new(),
+        },
+        errors: Vec::new(),
+        complete: true,
+    };
+    let mut remaining_entries = PLUGIN_SCAN_MAX_ENTRIES_PER_CANDIDATE;
+    let mut remaining_hash_bytes = PLUGIN_DIR_MAX_BYTES.saturating_add(1);
+    if !collect_plugin_tree_fingerprint(
+        root,
+        root,
+        &mut scan,
+        control,
+        &mut remaining_entries,
+        &mut remaining_hash_bytes,
+    ) {
+        return None;
+    }
+    scan.fingerprint.entries.sort_unstable();
+    Some(scan)
+}
+
+fn mark_incomplete_fingerprint(
+    scan: &mut PluginFingerprintScan,
+    path: &Path,
+    message: impl Into<String>,
+) {
+    scan.complete = false;
+    scan.errors.push(PluginCatalogError {
+        path: path.to_path_buf(),
+        message: message.into(),
+    });
 }
 
 fn collect_plugin_tree_fingerprint(
+    root: &Path,
     path: &Path,
-    entries: &mut Vec<PluginTreeFingerprintEntry>,
-    max_entries: usize,
-) {
-    if entries.len() >= max_entries {
-        return;
+    scan: &mut PluginFingerprintScan,
+    control: &mut PluginScanControl<'_>,
+    remaining_entries: &mut usize,
+    remaining_hash_bytes: &mut u64,
+) -> bool {
+    if control.is_cancelled() {
+        return false;
     }
-    let metadata = fs::symlink_metadata(path).ok();
-    let kind = metadata.as_ref().map_or(0, |metadata| {
+    if *remaining_entries == 0 || !control.take_entry() {
+        mark_incomplete_fingerprint(
+            scan,
+            root,
+            format!(
+                "plugin scan exceeds {PLUGIN_SCAN_MAX_ENTRIES_PER_CANDIDATE} entries per candidate or {PLUGIN_SCAN_MAX_ENTRIES} total entries"
+            ),
+        );
+        return true;
+    }
+    *remaining_entries -= 1;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            mark_incomplete_fingerprint(scan, path, error.to_string());
+            return true;
+        }
+    };
+    let kind = {
         if metadata.is_dir() {
             1
         } else if metadata.is_file() {
@@ -390,32 +1041,127 @@ fn collect_plugin_tree_fingerprint(
         } else {
             3
         }
-    });
-    let length = metadata.as_ref().map_or(0, fs::Metadata::len);
+    };
+    let length = metadata.len();
     let modified_nanos = metadata
-        .as_ref()
-        .and_then(|metadata| metadata.modified().ok())
+        .modified()
+        .ok()
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |duration| duration.as_nanos());
-    entries.push(PluginTreeFingerprintEntry {
-        path: path.to_path_buf(),
+    let content_hash = if kind == 2 {
+        let hash_bytes = length.min(ASSET_MAX_BYTES.saturating_add(1));
+        if hash_bytes > *remaining_hash_bytes || hash_bytes > control.remaining_hash_bytes {
+            mark_incomplete_fingerprint(
+                scan,
+                path,
+                format!(
+                    "plugin scan exceeds {PLUGIN_DIR_MAX_BYTES} bytes per candidate or {PLUGIN_SCAN_MAX_HASH_BYTES} total hash bytes"
+                ),
+            );
+            0
+        } else {
+            *remaining_hash_bytes -= hash_bytes;
+            control.remaining_hash_bytes -= hash_bytes;
+            match bounded_file_content_hash(path, hash_bytes, control.cancelled) {
+                FileHashResult::Complete(hash) => hash,
+                FileHashResult::Error(error) => {
+                    mark_incomplete_fingerprint(scan, path, error.to_string());
+                    0
+                }
+                FileHashResult::Cancelled => return false,
+            }
+        }
+    } else {
+        0
+    };
+    scan.fingerprint.entries.push(PluginTreeFingerprintEntry {
+        path: path.strip_prefix(root).unwrap_or(path).to_path_buf(),
         kind,
         length,
         modified_nanos,
+        content_hash,
     });
 
     if kind != 1 {
-        return;
+        return true;
     }
-    let Ok(children) = fs::read_dir(path) else {
-        return;
+    let children = match fs::read_dir(path) {
+        Ok(children) => children,
+        Err(error) => {
+            mark_incomplete_fingerprint(scan, path, error.to_string());
+            return true;
+        }
     };
-    for child in children.flatten() {
-        collect_plugin_tree_fingerprint(&child.path(), entries, max_entries);
-        if entries.len() >= max_entries {
+    let child_limit = (*remaining_entries).min(control.remaining_entries);
+    let mut child_paths = Vec::new();
+    for child in children {
+        if control.is_cancelled() {
+            return false;
+        }
+        if child_paths.len() >= child_limit {
+            mark_incomplete_fingerprint(
+                scan,
+                path,
+                format!(
+                    "plugin scan exceeds {PLUGIN_SCAN_MAX_ENTRIES_PER_CANDIDATE} entries per candidate or {PLUGIN_SCAN_MAX_ENTRIES} total entries"
+                ),
+            );
             break;
         }
+        match child {
+            Ok(child) => child_paths.push(child.path()),
+            Err(error) => mark_incomplete_fingerprint(scan, path, error.to_string()),
+        }
     }
+    let mut children = child_paths;
+    children.sort_unstable();
+    for child in children {
+        if !collect_plugin_tree_fingerprint(
+            root,
+            &child,
+            scan,
+            control,
+            remaining_entries,
+            remaining_hash_bytes,
+        ) {
+            return false;
+        }
+    }
+    true
+}
+
+enum FileHashResult {
+    Complete(u64),
+    Error(io::Error),
+    Cancelled,
+}
+
+fn bounded_file_content_hash(
+    path: &Path,
+    hash_bytes: u64,
+    cancelled: Option<&AtomicBool>,
+) -> FileHashResult {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => return FileHashResult::Error(error),
+    };
+    let mut reader = file.take(hash_bytes);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        if cancelled.is_some_and(|cancelled| cancelled.load(Ordering::Relaxed)) {
+            return FileHashResult::Cancelled;
+        }
+        let read = match reader.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) => return FileHashResult::Error(error),
+        };
+        if read == 0 {
+            break;
+        }
+        buffer[..read].hash(&mut hasher);
+    }
+    FileHashResult::Complete(hasher.finish())
 }
 
 impl fmt::Display for PluginCatalogError {
@@ -607,54 +1353,74 @@ pub fn sync_user_plugin_development_guide(state_dir: &Path) -> Result<PathBuf> {
     Ok(guide_path)
 }
 
-fn discover_root(root: &Path, catalog: &mut PluginCatalog, seen_ids: &mut HashSet<String>) {
-    if !root.exists() {
-        return;
+fn load_plugin_candidate(source: &PluginSourceKey, revision: u64) -> PluginCandidateRecord {
+    let manifest_path = source.directory.join(MANIFEST_FILE_NAME);
+    match load_local_plugin(&source.directory) {
+        Ok(plugin) => {
+            let diagnostic = match &plugin.status {
+                PluginStatus::Unavailable(message) => Some(PluginCatalogError {
+                    path: manifest_path,
+                    message: message.clone(),
+                }),
+                PluginStatus::Available | PluginStatus::Disabled(_) => None,
+            };
+            PluginCandidateRecord {
+                active: Some(plugin),
+                revision,
+                diagnostic,
+                blocked: None,
+            }
+        }
+        Err(error) => PluginCandidateRecord {
+            active: None,
+            revision,
+            diagnostic: Some(PluginCatalogError {
+                path: manifest_path,
+                message: error.to_string(),
+            }),
+            blocked: None,
+        },
     }
+}
 
-    let entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(error) => {
-            catalog.push_error(root.to_path_buf(), error);
-            return;
+fn append_required_bundled_diagnostics(
+    plugins: &[PluginDefinition],
+    errors: &mut Vec<PluginCatalogError>,
+    _state_dir: &Path,
+) {
+    let bundled_roots = bundled_plugin_roots();
+    let bundled_root_available = bundled_roots.iter().any(|root| root.is_dir());
+    let expected_bundled_root = bundled_roots
+        .iter()
+        .find(|root| root.is_dir())
+        .or_else(|| bundled_roots.first())
+        .cloned();
+    if !bundled_root_available {
+        if let Some(root) = expected_bundled_root.as_ref() {
+            errors.push(PluginCatalogError {
+                path: root.clone(),
+                message: "bundled plugin directory is missing".to_string(),
+            });
         }
-    };
-
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                catalog.push_error(root.to_path_buf(), error);
-                continue;
-            }
-        };
-        let path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
-            catalog.push_error(path, "failed to read plugin candidate metadata");
-            continue;
-        };
-        if !metadata.is_dir() {
-            continue;
-        }
-
-        let manifest_path = path.join(MANIFEST_FILE_NAME);
-        if !manifest_path.exists() {
-            continue;
-        }
-
-        match load_local_plugin(&path) {
-            Ok(plugin) => {
-                if seen_ids.contains(&plugin.id) {
-                    catalog.push_error(manifest_path, format!("duplicate plugin id {}", plugin.id));
-                    continue;
-                }
-                if let PluginStatus::Unavailable(message) = &plugin.status {
-                    catalog.push_error(manifest_path.clone(), message);
-                }
-                seen_ids.insert(plugin.id.clone());
-                catalog.plugins.get_mut().push(plugin);
-            }
-            Err(error) => catalog.push_error(manifest_path, error),
+    }
+    for plugin_id in BUNDLED_BUILTIN_SLINT_PLUGIN_IDS {
+        let bundled_plugin_loaded = plugins.iter().any(|plugin| {
+            plugin.id == *plugin_id
+                && matches!(
+                    &plugin.renderer,
+                    PluginRendererDefinition::Slint { root_dir, .. }
+                        if is_bundled_builtin_slint_plugin(plugin_id, root_dir)
+                )
+        });
+        if !bundled_plugin_loaded {
+            let path = expected_bundled_root
+                .as_ref()
+                .map(|root| root.join(plugin_id))
+                .unwrap_or_else(|| PathBuf::from(plugin_id));
+            errors.push(PluginCatalogError {
+                path,
+                message: "required bundled plugin is missing or invalid".to_string(),
+            });
         }
     }
 }
@@ -1196,6 +1962,41 @@ export component ExamplePriceCard inherits Window {
         )
     }
 
+    fn write_reload_test_plugin(
+        plugin_dir: &Path,
+        plugin_id: &str,
+        version: &str,
+        revision: &str,
+        valid_source: bool,
+    ) {
+        fs::create_dir_all(plugin_dir.join("ui")).unwrap();
+        let manifest = valid_manifest_json()
+            .replace("com.example.price-card", plugin_id)
+            .replace(
+                r#""version": "1.0.0""#,
+                &format!(r#""version": "{version}""#),
+            );
+        let source = if valid_source {
+            format!("{}\n// reload revision: {revision}\n", valid_slint_source())
+        } else {
+            format!(
+                "export component ExamplePriceCard inherits Window {{ invalid reload revision {revision}"
+            )
+        };
+        fs::write(plugin_dir.join(MANIFEST_FILE_NAME), manifest).unwrap();
+        fs::write(plugin_dir.join("ui").join("main.slint"), source).unwrap();
+    }
+
+    fn stable_reload_plan(
+        tracker: &mut PluginReloadTracker,
+        snapshot: PluginTreeSnapshot,
+    ) -> PluginReloadPlan {
+        assert!(!tracker.observe(snapshot.clone()));
+        assert!(!tracker.observe(snapshot.clone()));
+        assert!(tracker.observe(snapshot.clone()));
+        tracker.take_pending_or_force(snapshot)
+    }
+
     #[test]
     fn sync_user_plugin_development_guide_creates_and_overwrites_copy() {
         let state_dir = temp_plugin_root("sync-user-plugin-development-guide");
@@ -1246,6 +2047,8 @@ export component ExamplePriceCard inherits Window {
         }
         assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("Host API 0.2.0"));
         assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("Plugin diagnostics / Reload"));
+        assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("last successfully compiled definition"));
+        assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("increasing generations"));
         assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("permissions.network"));
         assert!(USER_PLUGIN_DEVELOPMENT_GUIDE.contains("permissions.filesystem"));
     }
@@ -1280,6 +2083,8 @@ export component ExamplePriceCard inherits Window {
         }
         assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("Host API 0.2.0"));
         assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("插件诊断"));
+        assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("last-known-good"));
+        assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("递增 generation"));
         assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("permissions.network"));
         assert!(REPO_PLUGIN_DEVELOPMENT_GUIDE.contains("permissions.filesystem"));
     }
@@ -1580,17 +2385,525 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
-    fn plugin_tree_fingerprint_tracks_user_plugin_changes() {
+    fn plugin_tree_snapshot_tracks_user_plugin_changes() {
         let state_dir = temp_plugin_root("plugin-tree-fingerprint");
-        let before = plugin_tree_fingerprint(&state_dir);
+        let before = plugin_tree_snapshot(&state_dir);
         let plugin_dir = user_plugin_root(&state_dir).join("com.example.changed");
         fs::create_dir_all(&plugin_dir).unwrap();
         fs::write(plugin_dir.join(MANIFEST_FILE_NAME), "{}").unwrap();
 
-        let after = plugin_tree_fingerprint(&state_dir);
+        let after = plugin_tree_snapshot(&state_dir);
 
         assert_ne!(before, after);
         let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn plugin_tree_snapshot_hashes_same_length_file_replacements() {
+        let root = temp_plugin_root("plugin-tree-content-hash");
+        let plugin_dir = root.join("com.example.changed");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        let manifest_path = plugin_dir.join(MANIFEST_FILE_NAME);
+        fs::write(&manifest_path, "{}").unwrap();
+        let before = scan_plugin_roots(std::slice::from_ref(&root));
+
+        fs::write(&manifest_path, "[]").unwrap();
+        let after = scan_plugin_roots(std::slice::from_ref(&root));
+
+        assert_ne!(before, after, "content hash must detect equal-length saves");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_reload_tracker_discards_stale_generations_after_rapid_saves() {
+        let state_dir = temp_plugin_root("plugin-reload-generations");
+        let initial = plugin_tree_snapshot(&state_dir);
+        let mut tracker = PluginReloadTracker::new(initial);
+        let plugin_dir = user_plugin_root(&state_dir).join("com.example.changed");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        let manifest_path = plugin_dir.join(MANIFEST_FILE_NAME);
+        fs::write(&manifest_path, "{}").unwrap();
+
+        let first_snapshot = plugin_tree_snapshot(&state_dir);
+        let first = stable_reload_plan(&mut tracker, first_snapshot);
+        fs::write(&manifest_path, "[]").unwrap();
+
+        assert!(!first.is_current(&state_dir));
+        tracker.finish(first.generation, false);
+        let second_snapshot = plugin_tree_snapshot(&state_dir);
+        let second = stable_reload_plan(&mut tracker, second_snapshot);
+        assert!(second.generation > first.generation);
+        assert!(second.is_current(&state_dir));
+        tracker.finish(second.generation, true);
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn pending_reload_is_not_rebased_onto_an_unstable_newer_snapshot() {
+        let state_dir = temp_plugin_root("plugin-reload-pending-generation");
+        let initial = plugin_tree_snapshot(&state_dir);
+        let mut tracker = PluginReloadTracker::new(initial);
+        let plugin_dir = user_plugin_root(&state_dir).join("com.example.changed");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        let manifest_path = plugin_dir.join(MANIFEST_FILE_NAME);
+        fs::write(&manifest_path, "{}").unwrap();
+        let first_snapshot = plugin_tree_snapshot(&state_dir);
+
+        assert!(!tracker.observe(first_snapshot.clone()));
+        assert!(!tracker.observe(first_snapshot.clone()));
+        assert!(tracker.observe(first_snapshot));
+
+        fs::write(&manifest_path, "[]").unwrap();
+        let newer_snapshot = plugin_tree_snapshot(&state_dir);
+        let pending = tracker.take_pending_or_force(newer_snapshot.clone());
+
+        assert_eq!(pending.generation, 1);
+        assert!(!pending.is_current(&state_dir));
+        tracker.finish(pending.generation, false);
+        assert!(!tracker.observe(newer_snapshot.clone()));
+        assert!(!tracker.observe(newer_snapshot.clone()));
+        assert!(tracker.observe(newer_snapshot.clone()));
+        let replacement = tracker.take_pending_or_force(newer_snapshot);
+        assert!(replacement.generation > pending.generation);
+        assert!(replacement.is_current(&state_dir));
+
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn plugin_reload_tracker_retries_an_uncommitted_snapshot() {
+        let initial = PluginTreeSnapshot::default();
+        let mut tracker = PluginReloadTracker::new(initial);
+        let mut changed = PluginTreeSnapshot::default();
+        changed.scan_errors.push(PluginCatalogError {
+            path: PathBuf::from("changed"),
+            message: "changed".to_string(),
+        });
+
+        let first = stable_reload_plan(&mut tracker, changed.clone());
+        tracker.finish(first.generation, false);
+
+        assert!(!tracker.observe(changed.clone()));
+        assert!(tracker.observe(changed.clone()));
+        let retry = tracker.take_pending_or_force(changed.clone());
+        assert!(retry.generation > first.generation);
+        tracker.finish(retry.generation, true);
+        assert!(!tracker.observe(changed));
+    }
+
+    #[test]
+    fn incremental_reload_retains_last_good_then_recovers_deletes_and_reappears() {
+        let root = temp_plugin_root("incremental-reload-lifecycle");
+        let plugin_a_dir = root.join("com.example.plugin-a");
+        let plugin_b_dir = root.join("com.example.plugin-b");
+        let plugin_a_id = "com.example.plugin-a";
+        let plugin_b_id = "com.example.plugin-b";
+        write_reload_test_plugin(&plugin_a_dir, plugin_a_id, "1.0.0", "a-v1", true);
+        write_reload_test_plugin(&plugin_b_dir, plugin_b_id, "1.0.0", "b-v1", true);
+        let initial_snapshot = scan_plugin_roots(std::slice::from_ref(&root));
+        let mut tracker = PluginReloadTracker::new(initial_snapshot);
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+        let plugin_b_revision = catalog
+            .effective_revisions
+            .borrow()
+            .get(plugin_b_id)
+            .cloned();
+
+        write_reload_test_plugin(&plugin_a_dir, plugin_a_id, "1.1.0", "a-broken", false);
+        let failed_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        assert_eq!(failed_plan.changed_sources.len(), 1);
+        let failed = catalog.reload_incremental(&failed_plan);
+        tracker.finish(failed_plan.generation, true);
+
+        assert!(failed.changed_plugin_ids.is_empty());
+        assert_eq!(
+            failed.retained_plugin_ids,
+            BTreeSet::from([plugin_a_id.to_string()])
+        );
+        let retained = failed.catalog.find(plugin_a_id).unwrap();
+        assert!(retained.is_available());
+        assert_eq!(retained.version, Version::new(1, 0, 0));
+        let canonical_plugin_a_dir = plugin_a_dir.canonicalize().unwrap();
+        assert!(failed
+            .catalog
+            .errors()
+            .iter()
+            .any(|error| error.path.starts_with(&canonical_plugin_a_dir)));
+        assert_eq!(
+            failed
+                .catalog
+                .effective_revisions
+                .borrow()
+                .get(plugin_b_id)
+                .cloned(),
+            plugin_b_revision
+        );
+
+        write_reload_test_plugin(&plugin_a_dir, plugin_a_id, "2.0.0", "a-v2", true);
+        let recovered_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        let recovered = failed.catalog.reload_incremental(&recovered_plan);
+        tracker.finish(recovered_plan.generation, true);
+        assert_eq!(
+            recovered.changed_plugin_ids,
+            BTreeSet::from([plugin_a_id.to_string()])
+        );
+        assert!(recovered.retained_plugin_ids.is_empty());
+        assert_eq!(
+            recovered.catalog.find(plugin_a_id).unwrap().version,
+            Version::new(2, 0, 0)
+        );
+        assert!(recovered.catalog.errors().is_empty());
+        assert_eq!(
+            recovered
+                .catalog
+                .effective_revisions
+                .borrow()
+                .get(plugin_b_id)
+                .cloned(),
+            plugin_b_revision
+        );
+
+        fs::remove_dir_all(&plugin_a_dir).unwrap();
+        let removed_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        let removed = recovered.catalog.reload_incremental(&removed_plan);
+        tracker.finish(removed_plan.generation, true);
+        assert_eq!(
+            removed.changed_plugin_ids,
+            BTreeSet::from([plugin_a_id.to_string()])
+        );
+        assert!(removed.catalog.find(plugin_a_id).is_none());
+
+        write_reload_test_plugin(&plugin_a_dir, plugin_a_id, "3.0.0", "a-v3", true);
+        let reappeared_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        let reappeared = removed.catalog.reload_incremental(&reappeared_plan);
+        tracker.finish(reappeared_plan.generation, true);
+        assert_eq!(
+            reappeared.changed_plugin_ids,
+            BTreeSet::from([plugin_a_id.to_string()])
+        );
+        assert_eq!(
+            reappeared.catalog.find(plugin_a_id).unwrap().version,
+            Version::new(3, 0, 0)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn incremental_reload_keeps_previous_id_when_manifest_changes_to_a_duplicate() {
+        let root = temp_plugin_root("incremental-reload-duplicate-id");
+        let first_dir = root.join("a-first");
+        let second_dir = root.join("b-second");
+        let first_id = "com.example.first";
+        let second_id = "com.example.second";
+        write_reload_test_plugin(&first_dir, first_id, "1.0.0", "first", true);
+        write_reload_test_plugin(&second_dir, second_id, "1.0.0", "second", true);
+        let initial_snapshot = scan_plugin_roots(std::slice::from_ref(&root));
+        let mut tracker = PluginReloadTracker::new(initial_snapshot);
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+
+        write_reload_test_plugin(&second_dir, first_id, "2.0.0", "duplicate", true);
+        let plan = stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        let reload = catalog.reload_incremental(&plan);
+
+        assert!(reload.changed_plugin_ids.is_empty());
+        assert_eq!(
+            reload.retained_plugin_ids,
+            BTreeSet::from([second_id.to_string()])
+        );
+        assert_eq!(
+            reload.catalog.find(first_id).unwrap().version,
+            Version::new(1, 0, 0)
+        );
+        assert_eq!(
+            reload.catalog.find(second_id).unwrap().version,
+            Version::new(1, 0, 0)
+        );
+        assert!(reload
+            .catalog
+            .errors()
+            .iter()
+            .any(|error| error.message.contains("duplicate plugin id")));
+
+        tracker.finish(plan.generation, true);
+        fs::remove_dir_all(&first_dir).unwrap();
+        let resolved_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        assert_eq!(resolved_plan.changed_sources.len(), 1);
+        let resolved = reload.catalog.reload_incremental(&resolved_plan);
+        tracker.finish(resolved_plan.generation, true);
+
+        assert_eq!(resolved.compiled_source_count, 0);
+        assert_eq!(
+            resolved.changed_plugin_ids,
+            BTreeSet::from([first_id.to_string(), second_id.to_string()])
+        );
+        assert_eq!(
+            resolved.catalog.find(first_id).unwrap().version,
+            Version::new(2, 0, 0)
+        );
+        assert!(resolved.catalog.find(second_id).is_none());
+        assert!(resolved
+            .catalog
+            .errors()
+            .iter()
+            .all(|error| !error.message.contains("duplicate plugin id")));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn incremental_reload_preserves_candidates_under_an_incomplete_root_scan() {
+        let root = temp_plugin_root("incremental-reload-incomplete-root");
+        let plugin_dir = root.join("com.example.plugin-a");
+        let plugin_id = "com.example.plugin-a";
+        write_reload_test_plugin(&plugin_dir, plugin_id, "1.0.0", "a-v1", true);
+        let initial_snapshot = scan_plugin_roots(std::slice::from_ref(&root));
+        let mut tracker = PluginReloadTracker::new(initial_snapshot);
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+        let mut incomplete = PluginTreeSnapshot::default();
+        incomplete.incomplete_root_ranks.insert(0);
+        incomplete.scan_errors.push(PluginCatalogError {
+            path: root.clone(),
+            message: "temporary access failure".to_string(),
+        });
+
+        let plan = stable_reload_plan(&mut tracker, incomplete);
+        let reload = catalog.reload_incremental(&plan);
+        tracker.finish(plan.generation, true);
+
+        assert!(reload.changed_plugin_ids.is_empty());
+        assert_eq!(reload.compiled_source_count, 0);
+        assert_eq!(
+            reload.retained_plugin_ids,
+            BTreeSet::from([plugin_id.to_string()])
+        );
+        assert_eq!(
+            reload.catalog.find(plugin_id).unwrap().version,
+            Version::new(1, 0, 0)
+        );
+        assert!(reload
+            .catalog
+            .errors()
+            .iter()
+            .any(|error| error.message.contains("temporary access failure")));
+
+        fs::remove_dir_all(&plugin_dir).unwrap();
+        let confirmed_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        let confirmed = reload.catalog.reload_incremental(&confirmed_plan);
+        tracker.finish(confirmed_plan.generation, true);
+        assert_eq!(
+            confirmed.changed_plugin_ids,
+            BTreeSet::from([plugin_id.to_string()])
+        );
+        assert!(confirmed.catalog.find(plugin_id).is_none());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn incremental_reload_compiles_complete_candidates_despite_an_unrelated_root_error() {
+        let root = temp_plugin_root("incremental-reload-partial-root-scan");
+        let plugin_dir = root.join("com.example.plugin-a");
+        let plugin_id = "com.example.plugin-a";
+        write_reload_test_plugin(&plugin_dir, plugin_id, "1.0.0", "a-v1", true);
+        let initial_snapshot = scan_plugin_roots(std::slice::from_ref(&root));
+        let mut tracker = PluginReloadTracker::new(initial_snapshot);
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+
+        write_reload_test_plugin(&plugin_dir, plugin_id, "2.0.0", "a-v2", true);
+        let mut partial = scan_plugin_roots(std::slice::from_ref(&root));
+        partial.incomplete_root_ranks.insert(0);
+        partial.scan_errors.push(PluginCatalogError {
+            path: root.join("unrelated-entry"),
+            message: "temporary access failure".to_string(),
+        });
+
+        let startup_catalog = PluginCatalog::from_snapshot(partial.clone(), None, 0);
+        assert_eq!(
+            startup_catalog.find(plugin_id).unwrap().version,
+            Version::new(2, 0, 0)
+        );
+        let plan = stable_reload_plan(&mut tracker, partial);
+        let reload = catalog.reload_incremental(&plan);
+        tracker.finish(plan.generation, true);
+
+        assert_eq!(reload.compiled_source_count, 1);
+        assert_eq!(
+            reload.changed_plugin_ids,
+            BTreeSet::from([plugin_id.to_string()])
+        );
+        assert_eq!(
+            reload.catalog.find(plugin_id).unwrap().version,
+            Version::new(2, 0, 0)
+        );
+        assert!(reload
+            .catalog
+            .errors()
+            .iter()
+            .any(|error| error.message.contains("temporary access failure")));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recovered_source_scan_retries_even_when_its_fingerprint_is_unchanged() {
+        let root = temp_plugin_root("incremental-reload-recovered-source-scan");
+        let plugin_dir = root.join("com.example.plugin-a");
+        let plugin_id = "com.example.plugin-a";
+        write_reload_test_plugin(&plugin_dir, plugin_id, "1.0.0", "a-v1", true);
+        let initial_snapshot = scan_plugin_roots(std::slice::from_ref(&root));
+        let mut tracker = PluginReloadTracker::new(initial_snapshot);
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+
+        write_reload_test_plugin(&plugin_dir, plugin_id, "2.0.0", "a-v2", true);
+        let recovered_snapshot = scan_plugin_roots(std::slice::from_ref(&root));
+        let source = recovered_snapshot.candidates.keys().next().unwrap().clone();
+        let mut incomplete = recovered_snapshot.clone();
+        incomplete.incomplete_sources.insert(source);
+        incomplete.scan_errors.push(PluginCatalogError {
+            path: plugin_dir.clone(),
+            message: "temporary fingerprint failure".to_string(),
+        });
+
+        let incomplete_plan = stable_reload_plan(&mut tracker, incomplete);
+        let retained = catalog.reload_incremental(&incomplete_plan);
+        tracker.finish(incomplete_plan.generation, true);
+        assert!(retained.changed_plugin_ids.is_empty());
+        assert_eq!(
+            retained.catalog.find(plugin_id).unwrap().version,
+            Version::new(1, 0, 0)
+        );
+
+        let recovered_plan = stable_reload_plan(&mut tracker, recovered_snapshot);
+        assert_eq!(recovered_plan.changed_sources.len(), 1);
+        let recovered = retained.catalog.reload_incremental(&recovered_plan);
+        tracker.finish(recovered_plan.generation, true);
+        assert_eq!(recovered.compiled_source_count, 1);
+        assert_eq!(
+            recovered.catalog.find(plugin_id).unwrap().version,
+            Version::new(2, 0, 0)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn non_file_manifest_keeps_last_good_until_a_valid_file_returns() {
+        let root = temp_plugin_root("incremental-reload-manifest-directory");
+        let plugin_dir = root.join("com.example.plugin-a");
+        let plugin_id = "com.example.plugin-a";
+        write_reload_test_plugin(&plugin_dir, plugin_id, "1.0.0", "a-v1", true);
+        let initial_snapshot = scan_plugin_roots(std::slice::from_ref(&root));
+        let mut tracker = PluginReloadTracker::new(initial_snapshot);
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+        let manifest_path = plugin_dir.join(MANIFEST_FILE_NAME);
+
+        fs::remove_file(&manifest_path).unwrap();
+        fs::create_dir(&manifest_path).unwrap();
+        let incomplete = scan_plugin_roots(std::slice::from_ref(&root));
+        assert!(incomplete.incomplete_root_ranks.contains(&0));
+        let plan = stable_reload_plan(&mut tracker, incomplete);
+        let retained = catalog.reload_incremental(&plan);
+        tracker.finish(plan.generation, true);
+
+        assert!(retained.changed_plugin_ids.is_empty());
+        assert_eq!(
+            retained.retained_plugin_ids,
+            BTreeSet::from([plugin_id.to_string()])
+        );
+        assert_eq!(
+            retained.catalog.find(plugin_id).unwrap().version,
+            Version::new(1, 0, 0)
+        );
+        assert!(retained
+            .catalog
+            .errors()
+            .iter()
+            .any(|error| error.message.contains("not a regular file")));
+
+        fs::remove_dir(&manifest_path).unwrap();
+        write_reload_test_plugin(&plugin_dir, plugin_id, "2.0.0", "a-v2", true);
+        let recovered_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        let recovered = retained.catalog.reload_incremental(&recovered_plan);
+        tracker.finish(recovered_plan.generation, true);
+        assert_eq!(
+            recovered.changed_plugin_ids,
+            BTreeSet::from([plugin_id.to_string()])
+        );
+        assert_eq!(
+            recovered.catalog.find(plugin_id).unwrap().version,
+            Version::new(2, 0, 0)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_duplicate_id_edit_never_replaces_the_last_good_definition() {
+        let root = temp_plugin_root("incremental-reload-failed-duplicate-id");
+        let first_dir = root.join("a-first");
+        let second_dir = root.join("b-second");
+        let first_id = "com.example.first";
+        let second_id = "com.example.second";
+        write_reload_test_plugin(&first_dir, first_id, "1.0.0", "first", true);
+        write_reload_test_plugin(&second_dir, second_id, "1.0.0", "second", true);
+        let initial_snapshot = scan_plugin_roots(std::slice::from_ref(&root));
+        let mut tracker = PluginReloadTracker::new(initial_snapshot);
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+
+        write_reload_test_plugin(&second_dir, first_id, "2.0.0", "broken", false);
+        let failed_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        let failed = catalog.reload_incremental(&failed_plan);
+        tracker.finish(failed_plan.generation, true);
+        assert!(failed.changed_plugin_ids.is_empty());
+        assert_eq!(
+            failed.catalog.find(second_id).unwrap().version,
+            Version::new(1, 0, 0)
+        );
+
+        fs::remove_dir_all(&first_dir).unwrap();
+        let resolved_plan =
+            stable_reload_plan(&mut tracker, scan_plugin_roots(std::slice::from_ref(&root)));
+        let resolved = failed.catalog.reload_incremental(&resolved_plan);
+        tracker.finish(resolved_plan.generation, true);
+
+        assert_eq!(
+            resolved.changed_plugin_ids,
+            BTreeSet::from([first_id.to_string()])
+        );
+        assert!(resolved.catalog.find(first_id).is_none());
+        assert_eq!(
+            resolved.catalog.find(second_id).unwrap().version,
+            Version::new(1, 0, 0)
+        );
+        assert!(resolved
+            .catalog
+            .errors()
+            .iter()
+            .any(|error| error.message.contains("Slint compilation failed")));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cancellable_plugin_scan_stops_before_touching_roots() {
+        let cancelled = AtomicBool::new(true);
+        let root = temp_plugin_root("cancelled-plugin-scan");
+
+        assert!(
+            scan_plugin_roots_with_cancel(std::slice::from_ref(&root), Some(&cancelled)).is_none()
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1609,6 +2922,26 @@ export component ExamplePriceCard inherits Window {
         assert!(diagnostics
             .iter()
             .all(|message| !message.contains(&state_dir.to_string_lossy().to_string())));
+        let _ = fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn plugin_diagnostics_redact_debug_escaped_compiler_paths() {
+        let state_dir = temp_plugin_root("redacted-plugin-compiler-diagnostics");
+        let plugin_dir = user_plugin_root(&state_dir).join("com.example.invalid");
+        write_reload_test_plugin(&plugin_dir, "com.example.invalid", "1.0.0", "broken", false);
+        let catalog = PluginCatalog::load(&state_dir);
+
+        let diagnostics = catalog.diagnostic_messages(&state_dir).join("\n");
+        let canonical_root = user_plugin_root(&state_dir).canonicalize().unwrap();
+        let canonical_text = canonical_root.to_string_lossy();
+        let debug_escaped = canonical_text.escape_debug().to_string();
+
+        assert!(diagnostics.contains("<user-plugins>"));
+        assert!(!diagnostics.contains(canonical_text.as_ref()));
+        assert!(!diagnostics.contains(&debug_escaped));
+        #[cfg(windows)]
+        assert!(!diagnostics.contains(r"?\\<user-plugins>"));
         let _ = fs::remove_dir_all(state_dir);
     }
 
