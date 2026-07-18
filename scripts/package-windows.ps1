@@ -59,6 +59,7 @@ if (-not $AllowDevelopmentVersion) {
 $DistDir = Join-Path $RepoRoot "dist"
 $PackageRoot = Join-Path $DistDir "crypto-hud-$Version-windows-x64"
 $Exe = Join-Path $RepoRoot "target\release\crypto-hud.exe"
+$TaskbarDll = Join-Path $RepoRoot "target\release\crypto_hud_taskbar.dll"
 $ZipPath = "$PackageRoot.zip"
 $ChecksumPath = "$ZipPath.sha256"
 $PackageManifestPath = Join-Path $PackageRoot "release-manifest.json"
@@ -338,8 +339,9 @@ function Invoke-ReleaseBuildWithoutSigningSecrets {
         }
         cargo build --locked --release -p crypto-hud
         if ($LASTEXITCODE -ne 0) {
-            throw "Release build failed with code $LASTEXITCODE"
+            throw "Release application build failed with code $LASTEXITCODE"
         }
+        & (Join-Path $PSScriptRoot "build-taskbar-extension.ps1") -Release
     } finally {
         foreach ($name in $secretNames) {
             Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
@@ -351,7 +353,10 @@ function Invoke-ReleaseBuildWithoutSigningSecrets {
 }
 
 function Get-SignatureInfo {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [string]$RelativePath = ""
+    )
 
     $signature = Get-AuthenticodeSignature -LiteralPath $Path
     $subject = if ($signature.SignerCertificate) {
@@ -366,7 +371,11 @@ function Get-SignatureInfo {
     }
 
     [ordered]@{
-        path = Split-Path -Leaf $Path
+        path = if ([string]::IsNullOrWhiteSpace($RelativePath)) {
+            Split-Path -Leaf $Path
+        } else {
+            $RelativePath.Replace('\', '/')
+        }
         signed = ($signature.Status -eq "Valid")
         status = [string]$signature.Status
         subject = $subject
@@ -432,6 +441,9 @@ try {
     if (-not (Test-Path $Exe)) {
         throw "Release executable not found: $Exe"
     }
+    if (-not (Test-Path -LiteralPath $TaskbarDll -PathType Leaf)) {
+        throw "Release taskbar extension DLL not found: $TaskbarDll"
+    }
 
     New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
     Assert-NoReparsePoint -Path $DistDir -StopDirectory $RepoRoot
@@ -442,6 +454,7 @@ try {
     New-Item -ItemType Directory -Path $PackageRoot | Out-Null
     $packageFiles = @(
         @{ Source = $Exe; Target = "crypto-hud.exe" },
+        @{ Source = $TaskbarDll; Target = "resources/taskbar/crypto_hud_taskbar.dll" },
         @{ Source = (Join-Path $RepoRoot "README.md"); Target = "README.md" },
         @{ Source = (Join-Path $RepoRoot "LICENSE"); Target = "LICENSE" },
         @{ Source = (Join-Path $RepoRoot "packaging\windows\install.ps1"); Target = "install.ps1" },
@@ -476,6 +489,7 @@ try {
 
     $signedTargets = @(
         "crypto-hud.exe",
+        "resources/taskbar/crypto_hud_taskbar.dll",
         "install.ps1",
         "uninstall.ps1",
         "install-update-package.ps1"
@@ -502,7 +516,7 @@ try {
         Remove-Item "Env:\CRYPTO_HUD_SIGN_CERT_PASSWORD_PROCESS" -ErrorAction SilentlyContinue
     }
     $signatureFiles = @($signedTargets | ForEach-Object {
-        Get-SignatureInfo -Path (Join-Path $PackageRoot $_)
+        Get-SignatureInfo -Path (Join-Path $PackageRoot $_) -RelativePath $_
     })
     $validSignatureFiles = @($signatureFiles | Where-Object { [bool]$_.signed })
     if ([bool]$signingConfig.requested -and $validSignatureFiles.Count -ne $signedTargets.Count) {

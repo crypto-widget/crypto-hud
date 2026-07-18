@@ -96,6 +96,21 @@ pub struct UiText {
     pub shortcut: &'static str,
     pub tray_icon: &'static str,
     pub tray_hover_display: &'static str,
+    pub appearance_laboratory: &'static str,
+    pub tray_market_enabled: &'static str,
+    pub tray_market_switch_interval: &'static str,
+    pub tray_market_switch_interval_help: &'static str,
+    pub tray_market_pairs: &'static str,
+    pub tray_market_pairs_help: &'static str,
+    pub tray_market_add_pair: &'static str,
+    pub tray_market_remove_pair: &'static str,
+    pub tray_market_status_initializing: &'static str,
+    pub tray_market_status_waiting: &'static str,
+    pub tray_market_status_attached: &'static str,
+    pub tray_market_status_detaching: &'static str,
+    pub tray_market_status_unsupported: &'static str,
+    pub tray_market_status_companion_missing: &'static str,
+    pub tray_market_status_failed: &'static str,
     pub network_proxy_settings: &'static str,
     pub network_proxy_enabled: &'static str,
     pub network_proxy_url: &'static str,
@@ -232,6 +247,22 @@ const EN_TEXT: UiText = UiText {
     shortcut: "Show/hide shortcut",
     tray_icon: "Show tray icon",
     tray_hover_display: "Show on tray hover",
+    appearance_laboratory: "Laboratory",
+    tray_market_enabled: "Tray quotes",
+    tray_market_switch_interval: "Switch interval",
+    tray_market_switch_interval_help: "Seconds before showing the next selected pair.",
+    tray_market_pairs: "Taskbar pairs",
+    tray_market_pairs_help:
+        "Select up to 8 pairs. Full prices and 24h changes rotate without abbreviation.",
+    tray_market_add_pair: "Add pair",
+    tray_market_remove_pair: "Remove pair",
+    tray_market_status_initializing: "Starting Explorer integration…",
+    tray_market_status_waiting: "Waiting for the Windows taskbar",
+    tray_market_status_attached: "Connected to the taskbar",
+    tray_market_status_detaching: "Removing the taskbar quote…",
+    tray_market_status_unsupported: "Requires Windows 11 x64",
+    tray_market_status_companion_missing: "Taskbar companion DLL is missing",
+    tray_market_status_failed: "Attachment failed; the app icon was restored",
     network_proxy_settings: "Network Proxy",
     network_proxy_enabled: "Enable network proxy",
     network_proxy_url: "Proxy address",
@@ -260,7 +291,7 @@ const EN_TEXT: UiText = UiText {
     system_maintenance: "Maintenance",
     auto_start_help: "Runs Crypto HUD after you sign in.",
     show_main_window_on_startup_help: "Opens the main window on app launch.",
-    shortcut_help: "Use Alt+C to hide or restore widgets.",
+    shortcut_help: "Use Alt+C to hide or restore widgets and taskbar content.",
     tray_icon_help: "Keeps quick access for the main window and quit.",
     tray_hover_display_help: "Temporarily shows widgets while hovering the tray icon.",
     apply: "Apply",
@@ -369,6 +400,22 @@ const ZH_HANS_TEXT: UiText = UiText {
     shortcut: "显示/隐藏快捷键",
     tray_icon: "显示托盘图标",
     tray_hover_display: "悬停托盘时显示",
+    appearance_laboratory: "实验室",
+    tray_market_enabled: "托盘行情",
+    tray_market_switch_interval: "切换间隔",
+    tray_market_switch_interval_help: "切换到下一个已选交易对前等待的秒数。",
+    tray_market_pairs: "任务栏交易对",
+    tray_market_pairs_help:
+        "最多选择 8 个交易对，轮换显示完整价格和 24 小时涨跌幅，不做 K/M 缩写。",
+    tray_market_add_pair: "添加交易对",
+    tray_market_remove_pair: "移除交易对",
+    tray_market_status_initializing: "正在连接 Explorer…",
+    tray_market_status_waiting: "正在等待 Windows 任务栏",
+    tray_market_status_attached: "已连接到任务栏",
+    tray_market_status_detaching: "正在移除任务栏行情…",
+    tray_market_status_unsupported: "仅支持 Windows 11 x64",
+    tray_market_status_companion_missing: "缺少任务栏注入组件 DLL",
+    tray_market_status_failed: "连接失败，已恢复应用托盘图标",
     network_proxy_settings: "网络代理",
     network_proxy_enabled: "启用网络代理",
     network_proxy_url: "代理地址",
@@ -397,7 +444,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     system_maintenance: "维护",
     auto_start_help: "登录 Windows 后自动运行应用。",
     show_main_window_on_startup_help: "启动应用时同时打开主界面。",
-    shortcut_help: "按 Alt+C 快速隐藏或恢复小组件。",
+    shortcut_help: "按 Alt+C 快速隐藏或恢复小组件和任务栏内容。",
     tray_icon_help: "保留托盘入口，方便打开主界面或退出。",
     tray_hover_display_help: "鼠标悬停托盘图标时临时显示小组件。",
     apply: "应用",
@@ -505,6 +552,22 @@ const ZH_HANT_TEXT: UiText = UiText {
     shortcut: "顯示/隱藏快捷鍵",
     tray_icon: "顯示系統匣圖示",
     tray_hover_display: "游標停在系統匣時顯示",
+    appearance_laboratory: "實驗室",
+    tray_market_enabled: "系統匣行情",
+    tray_market_switch_interval: "切換間隔",
+    tray_market_switch_interval_help: "顯示下一個已選交易對前等待的秒數。",
+    tray_market_pairs: "工作列交易對",
+    tray_market_pairs_help:
+        "最多選擇 8 個交易對，輪換顯示完整價格和 24 小時漲跌幅，不使用 K/M 縮寫。",
+    tray_market_add_pair: "新增交易對",
+    tray_market_remove_pair: "移除交易對",
+    tray_market_status_initializing: "正在連線 Explorer…",
+    tray_market_status_waiting: "正在等待 Windows 工作列",
+    tray_market_status_attached: "已連線到工作列",
+    tray_market_status_detaching: "正在移除工作列行情…",
+    tray_market_status_unsupported: "僅支援 Windows 11 x64",
+    tray_market_status_companion_missing: "缺少工作列注入元件 DLL",
+    tray_market_status_failed: "連線失敗，已還原應用程式系統匣圖示",
     network_proxy_settings: "網路代理",
     network_proxy_enabled: "啟用網路代理",
     network_proxy_url: "代理位址",
@@ -533,7 +596,7 @@ const ZH_HANT_TEXT: UiText = UiText {
     system_maintenance: "維護",
     auto_start_help: "登入 Windows 後自動執行應用程式。",
     show_main_window_on_startup_help: "啟動應用程式時同時開啟主視窗。",
-    shortcut_help: "按 Alt+C 快速隱藏或還原小工具。",
+    shortcut_help: "按 Alt+C 快速隱藏或還原小工具和工作列內容。",
     tray_icon_help: "保留系統匣入口，方便開啟主視窗或結束。",
     tray_hover_display_help: "游標停在系統匣圖示時暫時顯示小工具。",
     apply: "套用",
@@ -641,6 +704,22 @@ const ES_419_TEXT: UiText = UiText {
     shortcut: "Atajo para mostrar/ocultar",
     tray_icon: "Mostrar icono de bandeja",
     tray_hover_display: "Mostrar al pasar por la bandeja",
+    appearance_laboratory: "Laboratorio",
+    tray_market_enabled: "Cotizaciones de bandeja",
+    tray_market_switch_interval: "Intervalo de cambio",
+    tray_market_switch_interval_help: "Segundos antes de mostrar el siguiente par seleccionado.",
+    tray_market_pairs: "Pares de la barra de tareas",
+    tray_market_pairs_help:
+        "Selecciona hasta 8 pares. Los precios completos y los cambios de 24 h rotan sin abreviaturas.",
+    tray_market_add_pair: "Agregar par",
+    tray_market_remove_pair: "Eliminar par",
+    tray_market_status_initializing: "Iniciando integración con Explorer…",
+    tray_market_status_waiting: "Esperando la barra de tareas de Windows",
+    tray_market_status_attached: "Conectado a la barra de tareas",
+    tray_market_status_detaching: "Quitando la cotización…",
+    tray_market_status_unsupported: "Requiere Windows 11 x64",
+    tray_market_status_companion_missing: "Falta la DLL auxiliar de la barra de tareas",
+    tray_market_status_failed: "Falló la conexión; se restauró el icono de la app",
     network_proxy_settings: "Proxy de red",
     network_proxy_enabled: "Activar proxy de red",
     network_proxy_url: "Dirección del proxy",
@@ -669,7 +748,7 @@ const ES_419_TEXT: UiText = UiText {
     system_maintenance: "Mantenimiento",
     auto_start_help: "Ejecuta Crypto HUD después de iniciar sesión.",
     show_main_window_on_startup_help: "Abre la ventana principal al iniciar la app.",
-    shortcut_help: "Usa Alt+C para ocultar o restaurar widgets.",
+    shortcut_help: "Usa Alt+C para ocultar o restaurar widgets y el contenido de la barra de tareas.",
     tray_icon_help: "Mantiene acceso rápido para abrir la ventana principal o salir.",
     tray_hover_display_help: "Muestra temporalmente los widgets al pasar por el icono de bandeja.",
     apply: "Aplicar",
@@ -777,6 +856,22 @@ const PT_BR_TEXT: UiText = UiText {
     shortcut: "Atalho mostrar/ocultar",
     tray_icon: "Mostrar ícone na bandeja",
     tray_hover_display: "Mostrar ao passar na bandeja",
+    appearance_laboratory: "Laboratório",
+    tray_market_enabled: "Cotações da bandeja",
+    tray_market_switch_interval: "Intervalo de troca",
+    tray_market_switch_interval_help: "Segundos antes de mostrar o próximo par selecionado.",
+    tray_market_pairs: "Pares da barra de tarefas",
+    tray_market_pairs_help:
+        "Selecione até 8 pares. Os preços completos e as variações de 24 h alternam sem abreviação.",
+    tray_market_add_pair: "Adicionar par",
+    tray_market_remove_pair: "Remover par",
+    tray_market_status_initializing: "Iniciando integração com o Explorer…",
+    tray_market_status_waiting: "Aguardando a barra de tarefas do Windows",
+    tray_market_status_attached: "Conectado à barra de tarefas",
+    tray_market_status_detaching: "Removendo a cotação…",
+    tray_market_status_unsupported: "Requer Windows 11 x64",
+    tray_market_status_companion_missing: "A DLL auxiliar da barra de tarefas está ausente",
+    tray_market_status_failed: "Falha na conexão; o ícone do app foi restaurado",
     network_proxy_settings: "Proxy de rede",
     network_proxy_enabled: "Ativar proxy de rede",
     network_proxy_url: "Endereço do proxy",
@@ -805,7 +900,7 @@ const PT_BR_TEXT: UiText = UiText {
     system_maintenance: "Manutenção",
     auto_start_help: "Executa o Crypto HUD depois que você entra.",
     show_main_window_on_startup_help: "Abre a janela principal ao iniciar o app.",
-    shortcut_help: "Use Alt+C para ocultar ou restaurar widgets.",
+    shortcut_help: "Use Alt+C para ocultar ou restaurar widgets e o conteúdo da barra de tarefas.",
     tray_icon_help: "Mantém acesso rápido para abrir a janela principal ou sair.",
     tray_hover_display_help: "Mostra temporariamente os widgets ao passar pelo ícone da bandeja.",
     apply: "Aplicar",
@@ -913,6 +1008,22 @@ const VI_TEXT: UiText = UiText {
     shortcut: "Phím tắt hiện/ẩn",
     tray_icon: "Hiện biểu tượng khay",
     tray_hover_display: "Hiện khi rê chuột lên khay",
+    appearance_laboratory: "Phòng thí nghiệm",
+    tray_market_enabled: "Giá trong khay",
+    tray_market_switch_interval: "Khoảng chuyển",
+    tray_market_switch_interval_help: "Số giây trước khi hiện cặp đã chọn tiếp theo.",
+    tray_market_pairs: "Cặp trên thanh tác vụ",
+    tray_market_pairs_help:
+        "Chọn tối đa 8 cặp. Giá đầy đủ và mức thay đổi 24 giờ luân phiên, không viết tắt.",
+    tray_market_add_pair: "Thêm cặp",
+    tray_market_remove_pair: "Xóa cặp",
+    tray_market_status_initializing: "Đang khởi tạo tích hợp Explorer…",
+    tray_market_status_waiting: "Đang chờ thanh tác vụ Windows",
+    tray_market_status_attached: "Đã kết nối thanh tác vụ",
+    tray_market_status_detaching: "Đang xóa giá khỏi thanh tác vụ…",
+    tray_market_status_unsupported: "Yêu cầu Windows 11 x64",
+    tray_market_status_companion_missing: "Thiếu DLL hỗ trợ thanh tác vụ",
+    tray_market_status_failed: "Kết nối lỗi; đã khôi phục biểu tượng ứng dụng",
     network_proxy_settings: "Proxy mạng",
     network_proxy_enabled: "Bật proxy mạng",
     network_proxy_url: "Địa chỉ proxy",
@@ -941,7 +1052,7 @@ const VI_TEXT: UiText = UiText {
     system_maintenance: "Bảo trì",
     auto_start_help: "Chạy Crypto HUD sau khi bạn đăng nhập.",
     show_main_window_on_startup_help: "Mở cửa sổ chính khi khởi chạy ứng dụng.",
-    shortcut_help: "Dùng Alt+C để ẩn hoặc khôi phục widget.",
+    shortcut_help: "Dùng Alt+C để ẩn hoặc khôi phục widget và nội dung trên thanh tác vụ.",
     tray_icon_help: "Giữ lối tắt để mở cửa sổ chính hoặc thoát.",
     tray_hover_display_help: "Tạm thời hiện widget khi rê chuột lên biểu tượng khay.",
     apply: "Áp dụng",
@@ -1049,6 +1160,22 @@ const ID_TEXT: UiText = UiText {
     shortcut: "Pintasan tampil/sembunyi",
     tray_icon: "Tampilkan ikon tray",
     tray_hover_display: "Tampilkan saat hover tray",
+    appearance_laboratory: "Laboratorium",
+    tray_market_enabled: "Harga tray",
+    tray_market_switch_interval: "Interval pergantian",
+    tray_market_switch_interval_help: "Detik sebelum menampilkan pair terpilih berikutnya.",
+    tray_market_pairs: "Pair taskbar",
+    tray_market_pairs_help:
+        "Pilih hingga 8 pair. Harga penuh dan perubahan 24 jam bergilir tanpa singkatan.",
+    tray_market_add_pair: "Tambah pair",
+    tray_market_remove_pair: "Hapus pair",
+    tray_market_status_initializing: "Memulai integrasi Explorer…",
+    tray_market_status_waiting: "Menunggu taskbar Windows",
+    tray_market_status_attached: "Terhubung ke taskbar",
+    tray_market_status_detaching: "Menghapus harga taskbar…",
+    tray_market_status_unsupported: "Memerlukan Windows 11 x64",
+    tray_market_status_companion_missing: "DLL pendamping taskbar tidak ditemukan",
+    tray_market_status_failed: "Koneksi gagal; ikon aplikasi dipulihkan",
     network_proxy_settings: "Proxy jaringan",
     network_proxy_enabled: "Aktifkan proxy jaringan",
     network_proxy_url: "Alamat proxy",
@@ -1077,7 +1204,7 @@ const ID_TEXT: UiText = UiText {
     system_maintenance: "Pemeliharaan",
     auto_start_help: "Menjalankan Crypto HUD setelah Anda masuk.",
     show_main_window_on_startup_help: "Membuka jendela utama saat aplikasi mulai.",
-    shortcut_help: "Gunakan Alt+C untuk menyembunyikan atau memulihkan widget.",
+    shortcut_help: "Gunakan Alt+C untuk menyembunyikan atau memulihkan widget dan konten taskbar.",
     tray_icon_help: "Menyimpan akses cepat untuk membuka jendela utama atau keluar.",
     tray_hover_display_help: "Menampilkan widget sementara saat ikon tray di-hover.",
     apply: "Terapkan",
@@ -1185,6 +1312,22 @@ const TR_TEXT: UiText = UiText {
     shortcut: "Göster/gizle kısayolu",
     tray_icon: "Tepsi simgesini göster",
     tray_hover_display: "Tepsi üzerine gelince göster",
+    appearance_laboratory: "Laboratuvar",
+    tray_market_enabled: "Tepsi fiyatları",
+    tray_market_switch_interval: "Geçiş aralığı",
+    tray_market_switch_interval_help: "Sonraki seçili çift gösterilmeden önce beklenecek saniye.",
+    tray_market_pairs: "Görev çubuğu çiftleri",
+    tray_market_pairs_help:
+        "En fazla 8 çift seçin. Tam fiyatlar ve 24 saatlik değişimler kısaltılmadan dönüşümlü gösterilir.",
+    tray_market_add_pair: "Çift ekle",
+    tray_market_remove_pair: "Çifti kaldır",
+    tray_market_status_initializing: "Explorer entegrasyonu başlatılıyor…",
+    tray_market_status_waiting: "Windows görev çubuğu bekleniyor",
+    tray_market_status_attached: "Görev çubuğuna bağlandı",
+    tray_market_status_detaching: "Görev çubuğu fiyatı kaldırılıyor…",
+    tray_market_status_unsupported: "Windows 11 x64 gerekir",
+    tray_market_status_companion_missing: "Görev çubuğu yardımcı DLL'si eksik",
+    tray_market_status_failed: "Bağlantı başarısız; uygulama simgesi geri yüklendi",
     network_proxy_settings: "Ağ proxy'si",
     network_proxy_enabled: "Ağ proxy'sini etkinleştir",
     network_proxy_url: "Proxy adresi",
@@ -1213,7 +1356,8 @@ const TR_TEXT: UiText = UiText {
     system_maintenance: "Bakım",
     auto_start_help: "Oturum açtıktan sonra Crypto HUD'u çalıştırır.",
     show_main_window_on_startup_help: "Uygulama açıldığında ana pencereyi açar.",
-    shortcut_help: "Widget'ları gizlemek veya geri getirmek için Alt+C kullanın.",
+    shortcut_help:
+        "Widget'ları ve görev çubuğu içeriğini gizlemek veya geri getirmek için Alt+C kullanın.",
     tray_icon_help: "Ana pencereyi açmak veya çıkmak için hızlı erişimi korur.",
     tray_hover_display_help: "Tepsi simgesi üzerindeyken widget'ları geçici gösterir.",
     apply: "Uygula",
@@ -1323,6 +1467,22 @@ const KO_TEXT: UiText = UiText {
     shortcut: "표시/숨김 단축키",
     tray_icon: "트레이 아이콘 표시",
     tray_hover_display: "트레이에 올리면 표시",
+    appearance_laboratory: "실험실",
+    tray_market_enabled: "트레이 시세",
+    tray_market_switch_interval: "전환 간격",
+    tray_market_switch_interval_help: "다음 선택 페어를 표시하기 전의 시간(초)입니다.",
+    tray_market_pairs: "작업 표시줄 페어",
+    tray_market_pairs_help:
+        "최대 8개 페어를 선택합니다. 전체 가격과 24시간 등락률을 줄임 없이 순환 표시합니다.",
+    tray_market_add_pair: "페어 추가",
+    tray_market_remove_pair: "페어 제거",
+    tray_market_status_initializing: "Explorer 통합 시작 중…",
+    tray_market_status_waiting: "Windows 작업 표시줄 대기 중",
+    tray_market_status_attached: "작업 표시줄에 연결됨",
+    tray_market_status_detaching: "작업 표시줄 시세 제거 중…",
+    tray_market_status_unsupported: "Windows 11 x64 필요",
+    tray_market_status_companion_missing: "작업 표시줄 보조 DLL 누락",
+    tray_market_status_failed: "연결 실패; 앱 아이콘을 복원했습니다",
     network_proxy_settings: "네트워크 프록시",
     network_proxy_enabled: "네트워크 프록시 사용",
     network_proxy_url: "프록시 주소",
@@ -1351,7 +1511,7 @@ const KO_TEXT: UiText = UiText {
     system_maintenance: "관리",
     auto_start_help: "로그인 후 Crypto HUD를 실행합니다.",
     show_main_window_on_startup_help: "앱 시작 시 메인 창을 엽니다.",
-    shortcut_help: "Alt+C로 위젯을 숨기거나 복원합니다.",
+    shortcut_help: "Alt+C로 위젯과 작업 표시줄 콘텐츠를 숨기거나 복원합니다.",
     tray_icon_help: "메인 창 열기와 종료를 위한 빠른 접근을 유지합니다.",
     tray_hover_display_help: "트레이 아이콘에 마우스를 올리면 위젯을 잠시 표시합니다.",
     apply: "적용",
@@ -1459,6 +1619,22 @@ const JA_TEXT: UiText = UiText {
     shortcut: "表示/非表示ショートカット",
     tray_icon: "トレイアイコンを表示",
     tray_hover_display: "トレイにホバー時表示",
+    appearance_laboratory: "ラボ",
+    tray_market_enabled: "トレイ相場",
+    tray_market_switch_interval: "切替間隔",
+    tray_market_switch_interval_help: "次の選択ペアを表示するまでの秒数です。",
+    tray_market_pairs: "タスクバーのペア",
+    tray_market_pairs_help:
+        "最大 8 ペアを選択できます。価格と24時間変動率を省略せず順番に表示します。",
+    tray_market_add_pair: "ペアを追加",
+    tray_market_remove_pair: "ペアを削除",
+    tray_market_status_initializing: "Explorer 連携を開始中…",
+    tray_market_status_waiting: "Windows タスクバーを待機中",
+    tray_market_status_attached: "タスクバーに接続済み",
+    tray_market_status_detaching: "タスクバー相場を削除中…",
+    tray_market_status_unsupported: "Windows 11 x64 が必要です",
+    tray_market_status_companion_missing: "タスクバー補助 DLL がありません",
+    tray_market_status_failed: "接続失敗：アプリアイコンを復元しました",
     network_proxy_settings: "ネットワークプロキシ",
     network_proxy_enabled: "ネットワークプロキシを有効化",
     network_proxy_url: "プロキシアドレス",
@@ -1487,7 +1663,7 @@ const JA_TEXT: UiText = UiText {
     system_maintenance: "メンテナンス",
     auto_start_help: "サインイン後に Crypto HUD を実行します。",
     show_main_window_on_startup_help: "アプリ起動時にメインウィンドウを開きます。",
-    shortcut_help: "Alt+C でウィジェットを非表示または復元します。",
+    shortcut_help: "Alt+C でウィジェットとタスクバー表示を非表示または復元します。",
     tray_icon_help: "メインウィンドウを開く、または終了するための入口を保持します。",
     tray_hover_display_help: "トレイアイコンにホバーしている間だけウィジェットを表示します。",
     apply: "適用",
@@ -1595,6 +1771,22 @@ const RU_TEXT: UiText = UiText {
     shortcut: "Горячая клавиша показа/скрытия",
     tray_icon: "Показывать значок в трее",
     tray_hover_display: "Показывать при наведении на трей",
+    appearance_laboratory: "Лаборатория",
+    tray_market_enabled: "Котировки в трее",
+    tray_market_switch_interval: "Интервал смены",
+    tray_market_switch_interval_help: "Секунды до показа следующей выбранной пары.",
+    tray_market_pairs: "Пары на панели задач",
+    tray_market_pairs_help:
+        "Выберите до 8 пар. Полные цены и изменения за 24 часа сменяются без сокращений.",
+    tray_market_add_pair: "Добавить пару",
+    tray_market_remove_pair: "Удалить пару",
+    tray_market_status_initializing: "Запуск интеграции с Explorer…",
+    tray_market_status_waiting: "Ожидание панели задач Windows",
+    tray_market_status_attached: "Подключено к панели задач",
+    tray_market_status_detaching: "Удаление котировки с панели…",
+    tray_market_status_unsupported: "Требуется Windows 11 x64",
+    tray_market_status_companion_missing: "Отсутствует вспомогательная DLL панели задач",
+    tray_market_status_failed: "Сбой подключения; значок приложения восстановлен",
     network_proxy_settings: "Сетевой прокси",
     network_proxy_enabled: "Включить сетевой прокси",
     network_proxy_url: "Адрес прокси",
@@ -1623,7 +1815,7 @@ const RU_TEXT: UiText = UiText {
     system_maintenance: "Обслуживание",
     auto_start_help: "Запускает Crypto HUD после входа в систему.",
     show_main_window_on_startup_help: "Открывает главное окно при запуске приложения.",
-    shortcut_help: "Используйте Alt+C, чтобы скрыть или вернуть виджеты.",
+    shortcut_help: "Используйте Alt+C, чтобы скрыть или вернуть виджеты и содержимое панели задач.",
     tray_icon_help: "Оставляет быстрый доступ к главному окну и выходу.",
     tray_hover_display_help: "Временно показывает виджеты при наведении на значок в трее.",
     apply: "Применить",
@@ -1731,6 +1923,22 @@ const AR_TEXT: UiText = UiText {
     shortcut: "اختصار الإظهار/الإخفاء",
     tray_icon: "إظهار أيقونة علبة النظام",
     tray_hover_display: "إظهار عند تمرير المؤشر على العلبة",
+    appearance_laboratory: "المختبر",
+    tray_market_enabled: "أسعار علبة النظام",
+    tray_market_switch_interval: "فاصل التبديل",
+    tray_market_switch_interval_help: "عدد الثواني قبل عرض الزوج المحدد التالي.",
+    tray_market_pairs: "أزواج شريط المهام",
+    tray_market_pairs_help:
+        "اختر حتى \u{2066}8\u{2069} أزواج. تتناوب الأسعار الكاملة ونسب التغير خلال \u{2066}24\u{2069} ساعة من دون اختصار.",
+    tray_market_add_pair: "إضافة زوج",
+    tray_market_remove_pair: "إزالة الزوج",
+    tray_market_status_initializing: "جار بدء التكامل مع \u{2066}Explorer\u{2069}…",
+    tray_market_status_waiting: "في انتظار شريط مهام \u{2066}Windows\u{2069}",
+    tray_market_status_attached: "متصل بشريط المهام",
+    tray_market_status_detaching: "جار إزالة السعر من شريط المهام…",
+    tray_market_status_unsupported: "يتطلب \u{2066}Windows 11 x64\u{2069}",
+    tray_market_status_companion_missing: "ملف \u{2066}DLL\u{2069} المساعد لشريط المهام مفقود",
+    tray_market_status_failed: "فشل الاتصال؛ تمت استعادة أيقونة التطبيق",
     network_proxy_settings: "وكيل الشبكة",
     network_proxy_enabled: "تفعيل وكيل الشبكة",
     network_proxy_url: "عنوان الوكيل",
@@ -1760,7 +1968,8 @@ const AR_TEXT: UiText = UiText {
     system_maintenance: "الصيانة",
     auto_start_help: "يشغل \u{2066}Crypto HUD\u{2069} بعد تسجيل الدخول.",
     show_main_window_on_startup_help: "يفتح النافذة الرئيسية عند تشغيل التطبيق.",
-    shortcut_help: "استخدم \u{2066}Alt+C\u{2069} لإخفاء الأدوات أو استعادتها.",
+    shortcut_help:
+        "استخدم \u{2066}Alt+C\u{2069} لإخفاء الأدوات ومحتوى شريط المهام أو استعادتهما.",
     tray_icon_help: "يبقي وصولا سريعا للنافذة الرئيسية والخروج.",
     tray_hover_display_help: "يعرض الأدوات مؤقتا عند تمرير المؤشر فوق أيقونة العلبة.",
     apply: "تطبيق",
@@ -3122,6 +3331,7 @@ pub enum SymbolPickerCopyMode {
     DefaultReplace,
     WidgetAdd,
     WidgetReplace,
+    TrayMarketAdd,
 }
 
 pub fn icon_cache_cleared(locale: Locale, deleted: usize) -> String {
@@ -3240,6 +3450,18 @@ pub fn symbol_picker_title_text(locale: Locale, mode: SymbolPickerCopyMode) -> &
         (Locale::Ar, SymbolPickerCopyMode::DefaultReplace) => "استبدال الزوج الافتراضي",
         (Locale::Ar, SymbolPickerCopyMode::WidgetAdd) => "إضافة زوج للأداة",
         (Locale::Ar, SymbolPickerCopyMode::WidgetReplace) => "استبدال زوج الأداة",
+        (Locale::En, SymbolPickerCopyMode::TrayMarketAdd) => "Add tray pair",
+        (Locale::ZhHans, SymbolPickerCopyMode::TrayMarketAdd) => "添加托盘交易对",
+        (Locale::ZhHant, SymbolPickerCopyMode::TrayMarketAdd) => "新增系統匣交易對",
+        (Locale::Es419, SymbolPickerCopyMode::TrayMarketAdd) => "Agregar par a la bandeja",
+        (Locale::PtBr, SymbolPickerCopyMode::TrayMarketAdd) => "Adicionar par à bandeja",
+        (Locale::Vi, SymbolPickerCopyMode::TrayMarketAdd) => "Thêm cặp vào khay",
+        (Locale::Id, SymbolPickerCopyMode::TrayMarketAdd) => "Tambah pair tray",
+        (Locale::Tr, SymbolPickerCopyMode::TrayMarketAdd) => "Tepsi çifti ekle",
+        (Locale::Ko, SymbolPickerCopyMode::TrayMarketAdd) => "트레이 페어 추가",
+        (Locale::Ja, SymbolPickerCopyMode::TrayMarketAdd) => "トレイのペアを追加",
+        (Locale::Ru, SymbolPickerCopyMode::TrayMarketAdd) => "Добавить пару в трей",
+        (Locale::Ar, SymbolPickerCopyMode::TrayMarketAdd) => "إضافة زوج إلى علبة النظام",
     }
 }
 
@@ -3355,6 +3577,22 @@ pub fn symbol_picker_empty_status_text(locale: Locale, mode: SymbolPickerCopyMod
         (Locale::Ar, SymbolPickerCopyMode::DefaultReplace) => "لا توجد أزواج افتراضية للاستبدال",
         (Locale::Ar, SymbolPickerCopyMode::WidgetAdd) => "لا توجد أزواج متاحة لهذه الأداة",
         (Locale::Ar, SymbolPickerCopyMode::WidgetReplace) => "لا توجد أزواج في الأداة للاستبدال",
+        (Locale::En, SymbolPickerCopyMode::TrayMarketAdd) => "No tray pairs are available",
+        (Locale::ZhHans, SymbolPickerCopyMode::TrayMarketAdd) => "没有可添加的托盘交易对",
+        (Locale::ZhHant, SymbolPickerCopyMode::TrayMarketAdd) => "沒有可新增的系統匣交易對",
+        (Locale::Es419, SymbolPickerCopyMode::TrayMarketAdd) => {
+            "No hay pares disponibles para la bandeja"
+        }
+        (Locale::PtBr, SymbolPickerCopyMode::TrayMarketAdd) => {
+            "Não há pares disponíveis para a bandeja"
+        }
+        (Locale::Vi, SymbolPickerCopyMode::TrayMarketAdd) => "Không có cặp để thêm vào khay",
+        (Locale::Id, SymbolPickerCopyMode::TrayMarketAdd) => "Tidak ada pair tray yang tersedia",
+        (Locale::Tr, SymbolPickerCopyMode::TrayMarketAdd) => "Kullanılabilir tepsi çifti yok",
+        (Locale::Ko, SymbolPickerCopyMode::TrayMarketAdd) => "추가할 트레이 페어가 없습니다",
+        (Locale::Ja, SymbolPickerCopyMode::TrayMarketAdd) => "トレイに追加できるペアがありません",
+        (Locale::Ru, SymbolPickerCopyMode::TrayMarketAdd) => "Нет доступных пар для трея",
+        (Locale::Ar, SymbolPickerCopyMode::TrayMarketAdd) => "لا توجد أزواج متاحة لعلبة النظام",
     }
 }
 
@@ -3396,6 +3634,7 @@ pub fn symbol_picker_status_text(
         _ if fallback_only => local_candidates_found(locale, candidate_count),
         SymbolPickerCopyMode::DefaultAdd => add_pairs_found(locale, candidate_count, false),
         SymbolPickerCopyMode::WidgetAdd => add_pairs_found(locale, candidate_count, true),
+        SymbolPickerCopyMode::TrayMarketAdd => tray_pairs_found(locale, candidate_count),
     }
 }
 
@@ -3683,6 +3922,28 @@ fn add_pairs_found(locale: Locale, candidate_count: usize, current_widget: bool)
     }
 }
 
+fn tray_pairs_found(locale: Locale, candidate_count: usize) -> String {
+    let candidate_count = count_text_for_locale(locale, candidate_count);
+    match locale {
+        Locale::En => format!("Found {candidate_count} pairs. Applies to the tray immediately"),
+        Locale::ZhHans => format!("找到 {candidate_count} 个可添加交易对，会立即应用到托盘"),
+        Locale::ZhHant => format!("找到 {candidate_count} 個可新增交易對，會立即套用到系統匣"),
+        Locale::Es419 => {
+            format!("Se encontraron {candidate_count} pares. Se aplican a la bandeja de inmediato")
+        }
+        Locale::PtBr => {
+            format!("{candidate_count} pares encontrados. Aplicam-se à bandeja imediatamente")
+        }
+        Locale::Vi => format!("Tìm thấy {candidate_count} cặp. Áp dụng ngay cho khay"),
+        Locale::Id => format!("Ditemukan {candidate_count} pair. Langsung berlaku untuk tray"),
+        Locale::Tr => format!("{candidate_count} çift bulundu. Tepsiye hemen uygulanır"),
+        Locale::Ko => format!("페어 {candidate_count}개 발견. 트레이에 즉시 적용됩니다"),
+        Locale::Ja => format!("ペアが {candidate_count} 件見つかりました。トレイに即時適用"),
+        Locale::Ru => format!("Найдено пар: {candidate_count}. Сразу применяется к трею"),
+        Locale::Ar => format!("تم العثور على {candidate_count} أزواج. تُطبق على علبة النظام فورًا"),
+    }
+}
+
 fn default_symbols_full(locale: Locale, selected_count: usize, max: usize) -> String {
     let selected = selected_count_text_for_locale(locale, selected_count, max);
     match locale {
@@ -3829,6 +4090,16 @@ mod tests {
                 .collect::<Vec<_>>()
                 .as_slice()
         );
+    }
+
+    #[test]
+    fn taskbar_pair_help_mentions_the_24_hour_change_in_every_locale() {
+        for locale in Locale::ALL {
+            assert!(
+                text(locale).tray_market_pairs_help.contains("24"),
+                "{locale:?} taskbar pair help should describe the 24-hour change"
+            );
+        }
     }
 
     #[test]
@@ -4192,7 +4463,7 @@ mod tests {
         );
         assert_eq!(
             ar_text.shortcut_help,
-            "استخدم \u{2066}Alt+C\u{2069} لإخفاء الأدوات أو استعادتها."
+            "استخدم \u{2066}Alt+C\u{2069} لإخفاء الأدوات ومحتوى شريط المهام أو استعادتهما."
         );
         assert_eq!(
             ar_text.widget_hide_quote_asset_help,
@@ -4603,6 +4874,7 @@ mod tests {
             SymbolPickerCopyMode::DefaultReplace,
             SymbolPickerCopyMode::WidgetAdd,
             SymbolPickerCopyMode::WidgetReplace,
+            SymbolPickerCopyMode::TrayMarketAdd,
         ];
 
         for locale in Locale::NON_ENGLISH {
@@ -5024,6 +5296,11 @@ mod tests {
             ("tray_icon_help", text.tray_icon_help),
             ("tray_hover_display_help", text.tray_hover_display_help),
             (
+                "tray_market_switch_interval_help",
+                text.tray_market_switch_interval_help,
+            ),
+            ("tray_market_pairs_help", text.tray_market_pairs_help),
+            (
                 "selected_widget_description",
                 text.selected_widget_description,
             ),
@@ -5095,6 +5372,40 @@ mod tests {
             ("shortcut", text.shortcut),
             ("tray_icon", text.tray_icon),
             ("tray_hover_display", text.tray_hover_display),
+            ("appearance_laboratory", text.appearance_laboratory),
+            ("tray_market_enabled", text.tray_market_enabled),
+            (
+                "tray_market_switch_interval",
+                text.tray_market_switch_interval,
+            ),
+            ("tray_market_pairs", text.tray_market_pairs),
+            ("tray_market_add_pair", text.tray_market_add_pair),
+            ("tray_market_remove_pair", text.tray_market_remove_pair),
+            (
+                "tray_market_status_initializing",
+                text.tray_market_status_initializing,
+            ),
+            (
+                "tray_market_status_waiting",
+                text.tray_market_status_waiting,
+            ),
+            (
+                "tray_market_status_attached",
+                text.tray_market_status_attached,
+            ),
+            (
+                "tray_market_status_detaching",
+                text.tray_market_status_detaching,
+            ),
+            (
+                "tray_market_status_unsupported",
+                text.tray_market_status_unsupported,
+            ),
+            (
+                "tray_market_status_companion_missing",
+                text.tray_market_status_companion_missing,
+            ),
+            ("tray_market_status_failed", text.tray_market_status_failed),
             ("network_proxy_settings", text.network_proxy_settings),
             ("network_proxy_enabled", text.network_proxy_enabled),
             ("network_proxy_url", text.network_proxy_url),
@@ -5253,6 +5564,8 @@ mod tests {
         );
         assert_eq!(en.network_proxy_settings, "Network Proxy");
         assert_eq!(en.tray_hover_display, "Show on tray hover");
+        assert_eq!(en.appearance_laboratory, "Laboratory");
+        assert_eq!(en.tray_market_enabled, "Tray quotes");
         assert_eq!(en.seconds_unit, "sec");
         assert_eq!(en.appearance_widget_defaults, "Widget Defaults");
         assert_eq!(en.system_tray, "Tray");
@@ -5313,6 +5626,8 @@ mod tests {
         assert_eq!(zh.show_main_window_on_startup, "启动时显示主界面");
         assert_eq!(zh.network_proxy_settings, "网络代理");
         assert_eq!(zh.tray_hover_display, "悬停托盘时显示");
+        assert_eq!(zh.appearance_laboratory, "实验室");
+        assert_eq!(zh.tray_market_enabled, "托盘行情");
         assert_eq!(zh.seconds_unit, "秒");
         assert_eq!(zh.appearance_widget_defaults, "小组件默认值");
         assert_eq!(zh.system_tray, "托盘");

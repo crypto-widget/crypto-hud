@@ -298,6 +298,10 @@ try {
 
     $installedExe = Join-Path $InstallDir "crypto-hud.exe"
     Assert-Hash -Path $installedExe -ExpectedHash ([string]$manifest.executableSha256)
+    $installedTaskbarDll = Join-Path $InstallDir "resources\taskbar\crypto_hud_taskbar.dll"
+    if (-not (Test-Path -LiteralPath $installedTaskbarDll -PathType Leaf)) {
+        throw "Installed update is missing the taskbar extension DLL"
+    }
     if (-not (Test-Path -LiteralPath (Join-Path $InstallDir "install-update-package.ps1"))) {
         throw "Installed update handoff script was not copied"
     }

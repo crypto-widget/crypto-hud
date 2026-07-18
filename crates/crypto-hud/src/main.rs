@@ -11,6 +11,7 @@ mod runtime_bridge;
 mod settings_window;
 mod shortcuts;
 mod state_bridge;
+mod taskbar_market;
 mod theme;
 mod updater;
 mod widget_host;
@@ -35,7 +36,7 @@ use crypto_hud_shell_state as settings;
 use desktop_shell::{
     install_gui_smoke_ready_timer, install_gui_smoke_timer, install_instance_activation_timer,
     install_keepalive_window, install_single_instance_guard, install_tray, parse_launch_options,
-    refresh_tray_text,
+    refresh_tray_text, show_settings_window,
 };
 use runtime_bridge::{install_runtime_event_timer, sync_widget_runtimes, RuntimeEventTimerDeps};
 #[cfg(test)]
@@ -411,6 +412,26 @@ fn main() -> Result<()> {
             updater::spawn_update_check(config)
         })
     };
+    let open_settings_from_taskbar: Rc<dyn Fn()> = Rc::new({
+        let settings_window = settings_window.as_weak();
+        let widgets = widgets.clone();
+        let layouts = layouts.clone();
+        let state_path = state_path.clone();
+        let settings_mode_active = settings_mode_active.clone();
+        let plugin_catalog = plugin_catalog.clone();
+        move || {
+            if let Some(ui) = settings_window.upgrade() {
+                show_settings_window(
+                    &ui,
+                    &widgets,
+                    &layouts,
+                    &state_path,
+                    &settings_mode_active,
+                    &plugin_catalog,
+                );
+            }
+        }
+    });
     let runtime_event_timer = install_runtime_event_timer(RuntimeEventTimerDeps {
         widgets: widgets.clone(),
         layouts: layouts.clone(),
@@ -418,6 +439,9 @@ fn main() -> Result<()> {
         coin_icons: coin_icons.clone(),
         plugin_catalog: plugin_catalog.clone(),
         settings_window: settings_window.as_weak(),
+        tray: tray.as_weak(),
+        state_dir: settings::state_dir_for_path(&state_path),
+        open_settings: open_settings_from_taskbar,
         market_updates,
         update_events,
     });
@@ -1049,6 +1073,69 @@ mod tests {
                     needs_candles: false,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn tray_market_pairs_are_subscribed_and_deduplicated() {
+        let mut candle_plugin = local_test_plugin_definition();
+        candle_plugin
+            .data_requirements
+            .push(plugin::PluginDataRequirement {
+                capability: "market.candles".to_string(),
+            });
+        let catalog = plugin::PluginCatalog::from_plugins_for_tests(vec![candle_plugin.clone()]);
+        let store = LayoutStore {
+            settings: AppSettings {
+                tray_market_enabled: true,
+                tray_market_symbols: vec![
+                    "BTC".to_string(),
+                    "ETH/USDT".to_string(),
+                    "BTCUSDT".to_string(),
+                ],
+                ..AppSettings::default()
+            },
+            widgets: vec![WidgetInstance {
+                id: "chart-card-1".to_string(),
+                plugin_id: candle_plugin.id,
+                legacy_widget_type: None,
+                name: "Chart Card 1".to_string(),
+                visible: true,
+                layout: WidgetLayout::default(),
+                symbols: vec!["BTC".to_string()],
+                config: default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+
+        assert_eq!(
+            market_subscriptions_from_store(&store, &catalog),
+            vec![
+                market::MarketSubscription {
+                    symbol: "binance:spot:BTC/USDT".to_string(),
+                    needs_candles: true,
+                },
+                market::MarketSubscription {
+                    symbol: "binance:spot:ETH/USDT".to_string(),
+                    needs_candles: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn disabled_tray_market_pairs_are_not_subscribed() {
+        let store = LayoutStore {
+            settings: AppSettings {
+                tray_market_enabled: false,
+                tray_market_symbols: vec!["SOL".to_string()],
+                ..AppSettings::default()
+            },
+            ..LayoutStore::default()
+        };
+
+        assert!(
+            market_subscriptions_from_store(&store, &plugin::PluginCatalog::builtins()).is_empty()
         );
     }
 

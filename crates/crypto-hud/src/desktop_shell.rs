@@ -16,7 +16,7 @@ use single_instance::SingleInstance;
 use slint::{ComponentHandle, PhysicalPosition, Timer, TimerMode, WindowPosition};
 
 use crate::{
-    i18n, plugin,
+    i18n, notifications, plugin,
     settings_window::{refresh_settings_window, request_symbol_catalog_refresh_from_store},
     widget_host::WidgetRuntime,
     window_manager::{
@@ -181,7 +181,7 @@ fn write_instance_activation_marker() {
     }
 }
 
-fn show_settings_window(
+pub(crate) fn show_settings_window(
     ui: &SettingsWindow,
     widgets: &Rc<RefCell<Vec<WidgetRuntime>>>,
     layouts: &Rc<RefCell<LayoutStore>>,
@@ -601,7 +601,23 @@ pub(crate) fn install_tray(
 
     refresh_tray_text(&tray, layouts.borrow().settings.clone().normalized());
     tray.show().context("failed to show Slint tray icon")?;
+    schedule_tray_menu_toggle_installation();
     Ok(tray)
+}
+
+fn schedule_tray_menu_toggle_installation() {
+    notifications::install_tray_menu_toggle();
+    Timer::single_shot(Duration::from_millis(50), || {
+        notifications::install_tray_menu_toggle();
+    });
+    Timer::single_shot(Duration::from_millis(250), || {
+        notifications::install_tray_menu_toggle();
+    });
+    Timer::single_shot(Duration::from_secs(1), || {
+        if !notifications::install_tray_menu_toggle() {
+            eprintln!("failed to install tray context-menu toggling");
+        }
+    });
 }
 
 pub(crate) fn install_keepalive_window() -> Result<KeepAliveWindow> {

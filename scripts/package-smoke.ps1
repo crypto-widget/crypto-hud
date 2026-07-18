@@ -12,6 +12,7 @@ if (-not (Test-Path -LiteralPath $PowerShellExe -PathType Leaf) -or
 }
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$TaskbarDllSmokeScript = Join-Path $PSScriptRoot "taskbar-dll-smoke.ps1"
 if ([System.IO.Path]::IsPathRooted($Version) -or
     $Version.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
     $Version.Contains("\") -or
@@ -401,9 +402,33 @@ try {
     if ($SkipBuild) {
         $packageArgs += "-SkipBuild"
     }
-    & $PowerShellExe -NoProfile @packageArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "Package script failed with code $LASTEXITCODE"
+    $hadEncodedRustFlags = Test-Path "Env:\CARGO_ENCODED_RUSTFLAGS"
+    $previousEncodedRustFlags = if ($hadEncodedRustFlags) {
+        $env:CARGO_ENCODED_RUSTFLAGS
+    } else {
+        $null
+    }
+    try {
+        if (-not $SkipBuild) {
+            # Exercise the build helper under Cargo's highest-priority rustflags
+            # environment variable. The packaged DLL smoke below must still
+            # prove that the companion uses the static MSVC runtime.
+            $unitSeparator = [char]0x1F
+            $env:CARGO_ENCODED_RUSTFLAGS = [string]::Join(
+                $unitSeparator,
+                @("-C", "target-feature=-crt-static")
+            )
+        }
+        & $PowerShellExe -NoProfile @packageArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "Package script failed with code $LASTEXITCODE"
+        }
+    } finally {
+        if ($hadEncodedRustFlags) {
+            $env:CARGO_ENCODED_RUSTFLAGS = $previousEncodedRustFlags
+        } else {
+            Remove-Item Env:\CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+        }
     }
 
     if (-not (Test-Path $ZipPath)) {
@@ -441,8 +466,15 @@ try {
     if (-not (@($manifest.files).path -contains "LICENSE")) {
         throw "Package manifest is missing LICENSE"
     }
+    $taskbarDllRelativePath = "resources/taskbar/crypto_hud_taskbar.dll"
+    if (-not (@($manifest.files).path -contains $taskbarDllRelativePath)) {
+        throw "Package manifest is missing $taskbarDllRelativePath"
+    }
     if (-not $manifest.codeSigning) {
         throw "Package manifest is missing codeSigning metadata"
+    }
+    if (-not (@($manifest.codeSigning.files).path -contains $taskbarDllRelativePath)) {
+        throw "Package signing metadata is missing $taskbarDllRelativePath"
     }
     if ([string]$manifest.codeSigning.detachedManifest -ne "release-integrity.ps1") {
         throw "Package manifest is missing signed integrity metadata binding"
@@ -489,6 +521,17 @@ try {
     if (-not (@($manifest.files).path -contains "resources/icon.ico")) {
         throw "Package manifest omitted resources/icon.ico"
     }
+    $taskbarDllEntry = @($manifest.files | Where-Object {
+        [string]$_.path -eq $taskbarDllRelativePath
+    })[0]
+    Assert-Hash `
+        -Path (Join-Path $ActivePackageRoot $taskbarDllRelativePath) `
+        -ExpectedHash ([string]$taskbarDllEntry.sha256)
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $TaskbarDllSmokeScript `
+        -DllPath (Join-Path $ActivePackageRoot $taskbarDllRelativePath)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Packaged taskbar extension DLL smoke failed with code $LASTEXITCODE"
+    }
     Invoke-IsolatedPluginRuntimeSmoke `
         -Executable (Join-Path $ActivePackageRoot "crypto-hud.exe") `
         -WorkingDirectory $ActivePackageRoot `
@@ -527,9 +570,17 @@ try {
     if (-not (Test-Path (Join-Path $InstallDir "LICENSE"))) {
         throw "Installed license was not copied"
     }
+    if (-not (Test-Path -LiteralPath (Join-Path $InstallDir $taskbarDllRelativePath) -PathType Leaf)) {
+        throw "Installed taskbar extension DLL was not copied"
+    }
     foreach ($file in @($manifest.files)) {
         $installedPath = [System.IO.Path]::GetFullPath((Join-Path $InstallDir ([string]$file.path)))
         Assert-Hash -Path $installedPath -ExpectedHash ([string]$file.sha256)
+    }
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $TaskbarDllSmokeScript `
+        -DllPath (Join-Path $InstallDir $taskbarDllRelativePath)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installed taskbar extension DLL smoke failed with code $LASTEXITCODE"
     }
     Assert-PackagedResourceHeaders -Root $InstallDir
     Invoke-IsolatedPluginRuntimeSmoke `

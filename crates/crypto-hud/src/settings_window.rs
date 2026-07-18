@@ -28,8 +28,8 @@ use crate::{
     desktop_shell::{
         install_settings_drag_handler, open_external_url, open_path, refresh_tray_text,
     },
-    feature_flags, i18n, notifications, plugin, shortcuts, updater, AppTray, SettingsWindow,
-    ABOUT_REPOSITORY_URL, RELEASES_URL, WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT,
+    feature_flags, i18n, notifications, plugin, shortcuts, taskbar_market, updater, AppTray,
+    SettingsWindow, ABOUT_REPOSITORY_URL, RELEASES_URL, WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT,
 };
 use crate::{
     runtime_bridge::{
@@ -81,12 +81,17 @@ const SYMBOL_PICKER_MODE_WIDGET: i32 = 0;
 const SYMBOL_PICKER_MODE_DEFAULT: i32 = 1;
 const SYMBOL_PICKER_MODE_WIDGET_REPLACE: i32 = 2;
 const SYMBOL_PICKER_MODE_DEFAULT_REPLACE: i32 = 3;
+const SYMBOL_PICKER_MODE_TRAY_MARKET: i32 = 4;
 const STATUS_STRIP_PLUGIN_ID: &str = "com.cryptohud.status-strip";
 const STATUS_STRIP_VISIBLE_HEIGHT: i32 = 84;
 const STATUS_STRIP_PREVIOUS_TIGHT_HEIGHT: i32 = 84;
 const SETTINGS_WINDOW_DESIGN_WIDTH: f32 = 1120.0;
 const SETTINGS_WINDOW_DESIGN_HEIGHT: f32 = 720.0;
 const SETTINGS_WINDOW_WORK_AREA_MARGIN_LOGICAL: f32 = 32.0;
+
+fn tray_market_enabled_help_text(text: &i18n::UiText) -> String {
+    text.tray_market_status_unsupported.to_string()
+}
 const SETTINGS_WINDOW_MIN_SCALE: f32 = 0.3;
 const POPULAR_SYMBOL_ORDER: &[&str] = &[
     "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX", "TON", "LINK", "AVAX", "DOT", "LTC",
@@ -1120,6 +1125,9 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 language: LanguagePreference::from_index(language_index),
                 tray_icon_enabled,
                 tray_hover_display_enabled,
+                tray_market_enabled: previous.tray_market_enabled,
+                tray_market_symbols: previous.tray_market_symbols.clone(),
+                tray_market_switch_interval_seconds: previous.tray_market_switch_interval_seconds,
                 network_proxy_enabled: previous.network_proxy_enabled,
                 network_proxy_url: previous.network_proxy_url.clone(),
                 alert_rules: previous.alert_rules.clone(),
@@ -1237,6 +1245,30 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.on_apply_tray_market_settings({
+        let commit = commit_context.clone();
+        let tray_handle = tray_handle.clone();
+        let weak = ui.as_weak();
+        move |enabled, switch_interval_seconds| {
+            let mut settings = commit.current_settings();
+            settings.tray_market_enabled = enabled && taskbar_market::is_windows_11_x64();
+            settings.tray_market_switch_interval_seconds =
+                settings::clamp_tray_market_switch_interval_seconds(switch_interval_seconds);
+            let settings = settings.normalized();
+            apply_settings_to_store(&commit.layouts, &commit.state_path, settings.clone());
+            commit.update_market_feed_config_from_store();
+            commit.set_saved_status(settings.clone());
+            if let Some(tray) = tray_handle
+                .borrow()
+                .as_ref()
+                .and_then(|tray| tray.upgrade())
+            {
+                refresh_tray_text(&tray, settings);
+            }
+            commit.refresh_settings_window(&weak);
+        }
+    });
+
     ui.on_apply_alert_settings({
         let commit = commit_context.clone();
         let weak = ui.as_weak();
@@ -1326,6 +1358,15 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.on_open_tray_market_symbol_picker({
+        let weak = ui.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                open_symbol_picker(&ui, SYMBOL_PICKER_MODE_TRAY_MARKET);
+            }
+        }
+    });
+
     ui.on_close_symbol_picker({
         let weak = ui.as_weak();
         move || {
@@ -1360,6 +1401,23 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.on_remove_tray_market_symbol({
+        let commit = commit_context.clone();
+        let weak = ui.as_weak();
+        move |symbol_index| {
+            let Some(settings) = remove_tray_market_symbol_from_store(
+                &commit.layouts,
+                &commit.state_path,
+                symbol_index,
+            ) else {
+                return;
+            };
+            commit.update_market_feed_config_from_store();
+            commit.set_saved_status(settings);
+            commit.refresh_settings_window(&weak);
+        }
+    });
+
     ui.on_confirm_symbol_picker({
         let commit = commit_context.clone();
         let weak = ui.as_weak();
@@ -1376,7 +1434,20 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 return;
             };
 
-            if mode == SYMBOL_PICKER_MODE_DEFAULT {
+            if mode == SYMBOL_PICKER_MODE_TRAY_MARKET {
+                let Some(settings) =
+                    add_tray_market_symbol_to_store(&commit.layouts, &commit.state_path, &symbol)
+                else {
+                    ui.set_symbol_picker_status_text(
+                        symbol_picker_empty_status_text(mode, current_ui_locale(&ui)).into(),
+                    );
+                    return;
+                };
+                close_symbol_picker(&ui);
+                commit.update_market_feed_config_from_store();
+                commit.set_saved_status(settings);
+                commit.refresh_settings_window(&weak);
+            } else if mode == SYMBOL_PICKER_MODE_DEFAULT {
                 let Some(settings) =
                     add_default_symbol_to_store(&commit.layouts, &commit.state_path, &symbol)
                 else {
@@ -2332,6 +2403,50 @@ fn replace_default_symbol_in_store(
     Some(store.settings.clone())
 }
 
+fn add_tray_market_symbol_to_store(
+    layouts: &Rc<RefCell<LayoutStore>>,
+    state_path: &std::path::Path,
+    symbol: &str,
+) -> Option<AppSettings> {
+    let symbol = settings::normalize_market_pair_key(symbol)?;
+    let mut store = layouts.borrow_mut();
+    let mut app_settings = store.settings.clone().normalized();
+    app_settings.tray_market_symbols = add_symbol_with_limit(
+        app_settings.tray_market_symbols.clone(),
+        symbol,
+        settings::MAX_TRAY_MARKET_SYMBOLS,
+        settings::default_tray_market_symbols(),
+    );
+    store.settings = app_settings.normalized();
+    if let Err(error) = save_layout_store(state_path, &store) {
+        eprintln!("failed to save tray market symbols: {error:#}");
+    }
+    Some(store.settings.clone())
+}
+
+fn remove_tray_market_symbol_from_store(
+    layouts: &Rc<RefCell<LayoutStore>>,
+    state_path: &std::path::Path,
+    symbol_index: i32,
+) -> Option<AppSettings> {
+    if symbol_index < 0 {
+        return None;
+    }
+    let mut store = layouts.borrow_mut();
+    let mut app_settings = store.settings.clone().normalized();
+    app_settings.tray_market_symbols = remove_symbol_with_limit(
+        app_settings.tray_market_symbols.clone(),
+        symbol_index as usize,
+        settings::MAX_TRAY_MARKET_SYMBOLS,
+        settings::default_tray_market_symbols(),
+    );
+    store.settings = app_settings.normalized();
+    if let Err(error) = save_layout_store(state_path, &store) {
+        eprintln!("failed to save tray market symbols: {error:#}");
+    }
+    Some(store.settings.clone())
+}
+
 fn add_widget_symbol_to_store(
     layouts: &Rc<RefCell<LayoutStore>>,
     state_path: &std::path::Path,
@@ -2518,6 +2633,7 @@ fn collect_symbol_fallback_symbols(
     let definitions = widget_definitions_from_catalog(plugin_catalog);
     let mut symbols = settings::default_market_symbols();
     symbols.extend(store.settings.clone().normalized().market_default_symbols);
+    symbols.extend(store.settings.clone().normalized().tray_market_symbols);
     for widget in &store.widgets {
         symbols.extend(settings::normalized_symbols_for_instance(
             widget,
@@ -2609,14 +2725,19 @@ fn refresh_symbol_picker_models_from_ui(
     let query = ui.get_symbol_picker_search_text().to_string();
     let is_default_mode =
         mode == SYMBOL_PICKER_MODE_DEFAULT || mode == SYMBOL_PICKER_MODE_DEFAULT_REPLACE;
+    let is_tray_market_mode = mode == SYMBOL_PICKER_MODE_TRAY_MARKET;
     let is_replace_mode =
         mode == SYMBOL_PICKER_MODE_WIDGET_REPLACE || mode == SYMBOL_PICKER_MODE_DEFAULT_REPLACE;
-    let selected_symbols = if is_default_mode {
+    let selected_symbols = if is_tray_market_mode {
+        model_symbols(ui.get_tray_market_symbol_values())
+    } else if is_default_mode {
         model_symbols(ui.get_default_symbol_values())
     } else {
         model_symbols(ui.get_widget_symbol_values())
     };
-    let max = if is_default_mode {
+    let max = if is_tray_market_mode {
+        ui.get_tray_market_symbol_max().max(0) as usize
+    } else if is_default_mode {
         ui.get_default_symbol_max().max(0) as usize
     } else {
         ui.get_widget_symbol_max().max(0) as usize
@@ -3144,6 +3265,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_widget_symbol_max(symbol_bounds.map(|(_, max)| max as i32).unwrap_or(1));
     ui.set_default_symbol_min(1);
     ui.set_default_symbol_max(WidgetType::QuoteBoard.symbol_limit() as i32);
+    ui.set_tray_market_symbol_max(settings::MAX_TRAY_MARKET_SYMBOLS as i32);
     ui.set_symbol_search_placeholder_text(symbol_search_placeholder(locale).into());
     ui.set_symbols_help_text(
         symbol_bounds
@@ -3156,6 +3278,17 @@ pub(crate) fn refresh_settings_window(
     ui.set_shortcut_text(text.shortcut.into());
     ui.set_tray_icon_text(text.tray_icon.into());
     ui.set_tray_hover_display_text(text.tray_hover_display.into());
+    ui.set_appearance_laboratory_text(text.appearance_laboratory.into());
+    ui.set_tray_market_enabled_text(text.tray_market_enabled.into());
+    ui.set_tray_market_enabled_help_text(tray_market_enabled_help_text(text).into());
+    ui.set_tray_market_switch_interval_text(text.tray_market_switch_interval.into());
+    ui.set_tray_market_switch_interval_help_text(text.tray_market_switch_interval_help.into());
+    ui.set_tray_market_pairs_text(text.tray_market_pairs.into());
+    ui.set_tray_market_pairs_help_text(text.tray_market_pairs_help.into());
+    ui.set_tray_market_add_pair_text(text.tray_market_add_pair.into());
+    ui.set_tray_market_remove_pair_text(text.tray_market_remove_pair.into());
+    ui.set_tray_market_platform_supported(taskbar_market::is_windows_11_x64());
+    ui.set_tray_market_platform_requirement_text(text.tray_market_status_unsupported.into());
     ui.set_network_proxy_settings_text(text.network_proxy_settings.into());
     ui.set_network_proxy_enabled_text(text.network_proxy_enabled.into());
     ui.set_network_proxy_url_text(text.network_proxy_url.into());
@@ -3370,6 +3503,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_refresh_interval_seconds(settings.refresh_interval_seconds);
     ui.set_alert_enabled(primary_alert.map(|rule| rule.enabled).unwrap_or(false));
     let default_symbols = settings.market_default_symbols.clone();
+    let tray_market_symbols = settings.tray_market_symbols.clone();
     let widget_symbols = selected_widget
         .map(|widget| widget.symbols.clone())
         .unwrap_or_default();
@@ -3385,6 +3519,18 @@ pub(crate) fn refresh_settings_window(
     ));
     ui.set_default_symbol_chip_values(owned_string_model(
         default_symbols
+            .iter()
+            .map(|symbol| format_symbol_chip_label(symbol, locale))
+            .collect(),
+    ));
+    ui.set_tray_market_symbol_values(owned_string_model(
+        tray_market_symbols
+            .iter()
+            .map(|symbol| format_symbol_option(symbol, locale))
+            .collect(),
+    ));
+    ui.set_tray_market_symbol_chip_values(owned_string_model(
+        tray_market_symbols
             .iter()
             .map(|symbol| format_symbol_chip_label(symbol, locale))
             .collect(),
@@ -3476,6 +3622,8 @@ pub(crate) fn refresh_settings_window(
     ui.set_language_index(settings.language.index());
     ui.set_tray_icon_enabled(settings.tray_icon_enabled);
     ui.set_tray_hover_display_enabled(settings.tray_hover_display_enabled);
+    ui.set_tray_market_enabled(settings.tray_market_enabled);
+    ui.set_tray_market_switch_interval_seconds(settings.tray_market_switch_interval_seconds);
     ui.set_network_proxy_enabled(settings.network_proxy_enabled);
     ui.set_network_proxy_url_input_text(settings.network_proxy_url.clone().into());
     ui.set_settings_path_text(
@@ -3995,6 +4143,7 @@ fn symbol_picker_empty_status_text(mode: i32, locale: i18n::Locale) -> &'static 
 
 fn symbol_picker_copy_mode(mode: i32) -> i18n::SymbolPickerCopyMode {
     match mode {
+        SYMBOL_PICKER_MODE_TRAY_MARKET => i18n::SymbolPickerCopyMode::TrayMarketAdd,
         SYMBOL_PICKER_MODE_DEFAULT => i18n::SymbolPickerCopyMode::DefaultAdd,
         SYMBOL_PICKER_MODE_DEFAULT_REPLACE => i18n::SymbolPickerCopyMode::DefaultReplace,
         SYMBOL_PICKER_MODE_WIDGET_REPLACE => i18n::SymbolPickerCopyMode::WidgetReplace,
@@ -4176,6 +4325,139 @@ mod tests {
     }
 
     #[test]
+    fn appearance_laboratory_expands_taskbar_market_details_only_when_enabled() {
+        fn named_slint_block<'a>(source: &'a str, marker: &str) -> &'a str {
+            let start = source.find(marker).unwrap();
+            let open = start + source[start..].find('{').unwrap();
+            let mut depth = 0_i32;
+
+            for (offset, ch) in source[open..].char_indices() {
+                match ch {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return &source[start..open + offset + ch.len_utf8()];
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            panic!("unterminated Slint block: {marker}");
+        }
+
+        let source = settings_window_ui_source();
+        let appearance = named_slint_block(&source, "appearance_tab := Rectangle {");
+        let laboratory = named_slint_block(appearance, "laboratory_card := Rectangle {");
+        let tray_market = named_slint_block(laboratory, "tray_market_group := Rectangle {");
+        let tray_header = named_slint_block(tray_market, "tray_market_header := Rectangle {");
+        let tray_details = named_slint_block(tray_market, "tray_market_details := Rectangle {");
+        assert!(!source.contains("tray-widget-settings-expanded"));
+        assert!(!source.contains("tray-widget-section-text"));
+        assert!(!source.contains("tray_widget_"));
+
+        let tray_header_geometry = &tray_header[..tray_header.find("SettingLabel {").unwrap()];
+        assert!(tray_header_geometry.contains("x: 0px;"));
+        assert!(tray_header_geometry.contains("y: 0px;"));
+        assert!(tray_header_geometry.contains("height: 45px;"));
+
+        let tray_details_open = tray_details.find('{').unwrap() + 1;
+        let tray_details_geometry_end = tray_details_open
+            + tray_details[tray_details_open..]
+                .find("Rectangle {")
+                .unwrap();
+        let tray_details_geometry = &tray_details[..tray_details_geometry_end];
+        assert!(tray_details_geometry.contains("y: 45px;"));
+        assert!(tray_details_geometry.contains("height: 130px;"));
+        assert!(tray_details_geometry.contains("visible: root.tray-market-enabled;"));
+
+        let laboratory_title = laboratory
+            .find("title: root.appearance-laboratory-text;")
+            .unwrap();
+        let tray_market_start = laboratory.find("tray_market_group := Rectangle {").unwrap();
+        let tray_market_enable = laboratory
+            .find("label: root.tray-market-enabled-text;")
+            .unwrap();
+        let tray_details_start = laboratory
+            .find("tray_market_details := Rectangle {")
+            .unwrap();
+        let tray_interval_start = laboratory
+            .find("label: root.tray-market-switch-interval-text;")
+            .unwrap();
+        assert!(laboratory_title < tray_market_start);
+        assert!(tray_market_start < tray_market_enable);
+        assert!(tray_market_enable < tray_details_start);
+        assert!(tray_details_start < tray_interval_start);
+        assert!(laboratory.contains("height: root.tray-market-enabled ? 234px : 105px;"));
+        assert!(tray_market.contains("height: root.tray-market-enabled ? 175px : 46px;"));
+
+        for required in [
+            "label: root.tray-market-enabled-text;",
+            "help: root.tray-market-enabled-help-text;",
+            "text: root.tray-market-status-text;",
+            "visible: root.tray-market-enabled && root.tray-market-status-text != \"\";",
+            "accessible-label: root.tray-market-status-text;",
+            "checked <=> root.tray-market-enabled;",
+            "y: (parent.height - self.height) / 2;",
+            "enabled: root.tray-market-platform-supported || root.tray-market-enabled;",
+            "root.tray-market-enabled = !root.tray-market-enabled;",
+            "root.apply-current-tray-market-settings();",
+            "visible: !root.tray-market-platform-supported;",
+            "accessible-role: image;",
+            "accessible-label: root.tray-market-platform-requirement-text;",
+            "text: @markdown(\"\\{root.tray-market-platform-requirement-text}\");",
+            "x: root.rtl-layout ? 62px : parent.width - 81px;",
+        ] {
+            assert!(
+                tray_header.contains(required),
+                "tray market enable row should remain visible and interactive: {required}"
+            );
+        }
+        assert!(!tray_details.contains("root.tray-market-enabled-text"));
+        assert!(!tray_details.contains("checked <=> root.tray-market-enabled;"));
+
+        for required in [
+            "visible: root.tray-market-enabled;",
+            "label: root.tray-market-switch-interval-text;",
+            "label: root.tray-market-pairs-text;",
+            "minimum: 2;",
+            "maximum: 300;",
+            "for symbol[index] in root.tray-market-symbol-chip-values",
+            "root.remove-tray-market-symbol(index);",
+            "root.open-tray-market-symbol-picker();",
+            "accessible-label: root.tray-market-remove-pair-text",
+            "accessible-label: root.tray-market-add-pair-text;",
+            "event.text == Key.Space || event.text == Key.Return",
+            "x: root.rtl-layout ? parent.width - 101px - index * 92px",
+        ] {
+            assert!(
+                tray_details.contains(required),
+                "enabled tray market details should keep their UI contract: {required}"
+            );
+        }
+
+        let backend = settings_window_rs_source();
+        assert!(backend.contains(
+            "settings.tray_market_enabled = enabled && taskbar_market::is_windows_11_x64();"
+        ));
+        assert!(backend.contains(
+            "ui.set_tray_market_platform_supported(taskbar_market::is_windows_11_x64());"
+        ));
+    }
+
+    #[test]
+    fn taskbar_market_help_only_shows_the_platform_requirement_in_every_locale() {
+        for locale in i18n::Locale::ALL {
+            let text = i18n::text(locale);
+            let help = tray_market_enabled_help_text(text);
+
+            assert_eq!(help, text.tray_market_status_unsupported);
+            assert!(help.contains("Windows 11 x64"));
+        }
+    }
+
+    #[test]
     fn widget_list_wires_pointer_and_keyboard_reordering_to_persistent_backend() {
         let source = settings_window_ui_source();
         let row_start = source.find("row_focus := FocusScope {").unwrap();
@@ -4313,22 +4595,19 @@ mod tests {
             "SettingSectionTitle",
             "SettingLabel",
         ] {
-            let instance_count = source.matches(&format!("{component} {{")).count();
-            let bound_count = source
-                .matches(&format!(
-                    "{component} {{\n                rtl-layout: root.rtl-layout;"
-                ))
-                .count()
-                + source
-                    .matches(&format!(
-                        "{component} {{\n                    rtl-layout: root.rtl-layout;"
-                    ))
-                    .count()
-                + source
-                    .matches(&format!(
-                        "{component} {{\n                        rtl-layout: root.rtl-layout;"
-                    ))
-                    .count();
+            let component_start = format!("{component} {{");
+            let lines = source.lines().collect::<Vec<_>>();
+            let instance_count = lines
+                .iter()
+                .filter(|line| line.trim() == component_start)
+                .count();
+            let bound_count = lines
+                .windows(2)
+                .filter(|window| {
+                    window[0].trim() == component_start
+                        && window[1].trim() == "rtl-layout: root.rtl-layout;"
+                })
+                .count();
 
             assert_eq!(
                 bound_count, instance_count,
@@ -4399,7 +4678,8 @@ mod tests {
                 }
                 for literal in quoted_literals(line) {
                     assert!(
-                        allowed.contains(&literal.as_str()),
+                        allowed.contains(&literal.as_str())
+                            || is_dynamic_slint_property_interpolation(&literal),
                         "unexpected visible text literal in {file_name} line {}: {:?}",
                         line_index + 1,
                         literal
@@ -4407,6 +4687,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn is_dynamic_slint_property_interpolation(literal: &str) -> bool {
+        literal
+            .strip_prefix("{root.")
+            .and_then(|value| value.strip_suffix('}'))
+            .is_some_and(|property| {
+                !property.is_empty()
+                    && property
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+            })
     }
 
     #[test]
@@ -5697,6 +5989,48 @@ mod tests {
     }
 
     #[test]
+    fn tray_market_symbol_actions_persist_deduplicated_nonempty_selection() {
+        let state_path = temp_state_path("tray-market-symbol-actions");
+        let layouts = Rc::new(RefCell::new(LayoutStore {
+            settings: AppSettings {
+                tray_market_symbols: vec!["BTC".to_string()],
+                ..AppSettings::default()
+            },
+            ..LayoutStore::default()
+        }));
+
+        add_tray_market_symbol_to_store(&layouts, &state_path, "ETH").unwrap();
+        add_tray_market_symbol_to_store(&layouts, &state_path, "BTCUSDT").unwrap();
+        assert_eq!(
+            layouts.borrow().settings.tray_market_symbols,
+            vec!["binance:spot:BTC/USDT", "binance:spot:ETH/USDT"]
+        );
+
+        remove_tray_market_symbol_from_store(&layouts, &state_path, 0).unwrap();
+        assert_eq!(
+            layouts.borrow().settings.tray_market_symbols,
+            vec!["binance:spot:ETH/USDT"]
+        );
+        remove_tray_market_symbol_from_store(&layouts, &state_path, 0).unwrap();
+        assert_eq!(
+            layouts.borrow().settings.tray_market_symbols,
+            settings::default_tray_market_symbols()
+        );
+
+        let persisted = settings::try_load_persisted_layout_store(&state_path)
+            .unwrap()
+            .unwrap();
+        let settings::PersistedLayoutStore::Current(persisted) = persisted else {
+            panic!("tray market settings should use the current layout schema");
+        };
+        assert_eq!(
+            persisted.settings.tray_market_symbols,
+            settings::default_tray_market_symbols()
+        );
+        let _ = std::fs::remove_file(state_path);
+    }
+
+    #[test]
     fn replace_widget_symbol_allows_single_symbol_widget_at_limit() {
         let catalog = plugin::PluginCatalog::builtins();
         let definitions = widget_definitions_from_catalog(&catalog);
@@ -6184,6 +6518,18 @@ mod tests {
                 i18n::Locale::ZhHans,
             ),
             "找到 4 个可更换交易对，会立即影响当前小组件"
+        );
+        assert_eq!(
+            symbol_picker_status_text(
+                SYMBOL_PICKER_MODE_TRAY_MARKET,
+                2,
+                8,
+                4,
+                "",
+                false,
+                i18n::Locale::ZhHans,
+            ),
+            "找到 4 个可添加交易对，会立即应用到托盘"
         );
     }
 

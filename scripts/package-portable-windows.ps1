@@ -55,6 +55,7 @@ $PackageRoot = Join-Path $DistDir "crypto-hud-$Version-windows-x64-portable"
 $ZipPath = "$PackageRoot.zip"
 $ChecksumPath = "$ZipPath.sha256"
 $Exe = Join-Path $RepoRoot "target\release\crypto-hud.exe"
+$TaskbarDll = Join-Path $RepoRoot "target\release\crypto_hud_taskbar.dll"
 $ManifestPath = Join-Path $PackageRoot "portable-manifest.json"
 
 function Assert-UnderDirectory {
@@ -174,8 +175,9 @@ function Invoke-ReleaseBuildWithoutSigningSecrets {
         }
         cargo build --locked --release -p crypto-hud
         if ($LASTEXITCODE -ne 0) {
-            throw "Portable release build failed with code $LASTEXITCODE"
+            throw "Portable release application build failed with code $LASTEXITCODE"
         }
+        & (Join-Path $PSScriptRoot "build-taskbar-extension.ps1") -Release
     } finally {
         foreach ($name in $secretNames) {
             Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
@@ -209,6 +211,9 @@ try {
     if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
         throw "Portable release executable not found: $Exe"
     }
+    if (-not (Test-Path -LiteralPath $TaskbarDll -PathType Leaf)) {
+        throw "Portable release taskbar extension DLL not found: $TaskbarDll"
+    }
 
     New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
     Assert-NoReparsePoint -Path $DistDir -StopDirectory $RepoRoot
@@ -220,6 +225,7 @@ try {
 
     $packageFiles = @(
         @{ Source = $Exe; Target = "crypto-hud.exe" },
+        @{ Source = $TaskbarDll; Target = "resources/taskbar/crypto_hud_taskbar.dll" },
         @{ Source = (Join-Path $RepoRoot "README.md"); Target = "README.md" },
         @{ Source = (Join-Path $RepoRoot "LICENSE"); Target = "LICENSE" }
     )

@@ -249,6 +249,7 @@ pub(crate) fn market_subscriptions_from_store(
     plugin_catalog: &plugin::PluginCatalog,
 ) -> Vec<market::MarketSubscription> {
     let mut subscriptions = Vec::new();
+    let app_settings = store.settings.clone().normalized();
     let definitions = widget_definitions_from_catalog(plugin_catalog);
     for widget in &store.widgets {
         let needs_candles = plugin_catalog
@@ -264,8 +265,13 @@ pub(crate) fn market_subscriptions_from_store(
             merge_market_subscription(&mut subscriptions, symbol, needs_candles);
         }
     }
+    if app_settings.tray_market_enabled {
+        for symbol in &app_settings.tray_market_symbols {
+            merge_market_subscription(&mut subscriptions, symbol.clone(), false);
+        }
+    }
     if feature_flags::ALERT_RULES_ENABLED {
-        for rule in &store.settings.alert_rules {
+        for rule in &app_settings.alert_rules {
             if !rule.enabled {
                 continue;
             }

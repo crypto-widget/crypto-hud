@@ -29,12 +29,13 @@ use crate::{
         layout_for_instance, market_subscriptions_from_store, normalized_symbols_for_instance,
         widget_definitions_from_catalog,
     },
+    taskbar_market::TaskbarMarketController,
     theme, updater,
     widget_host::{
         apply_runtime_view_to_widget, logical_size_from_physical, WidgetRuntime, WidgetUi,
     },
     window_manager::schedule_widget_shell_window_configuration,
-    SettingsWindow,
+    AppTray, SettingsWindow,
 };
 
 const NOTIFICATION_COOLDOWN: Duration = Duration::from_secs(300);
@@ -79,6 +80,9 @@ pub(crate) struct RuntimeEventTimerDeps {
     pub(crate) coin_icons: Rc<CoinIconRegistry>,
     pub(crate) plugin_catalog: Rc<plugin::PluginCatalog>,
     pub(crate) settings_window: slint::Weak<SettingsWindow>,
+    pub(crate) tray: slint::Weak<AppTray>,
+    pub(crate) state_dir: PathBuf,
+    pub(crate) open_settings: Rc<dyn Fn()>,
     pub(crate) market_updates: market::MarketFeed,
     pub(crate) update_events: Option<std::sync::mpsc::Receiver<updater::UpdateEvent>>,
 }
@@ -91,12 +95,31 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
         coin_icons,
         plugin_catalog,
         settings_window,
+        tray,
+        state_dir,
+        open_settings,
         market_updates,
         update_events,
     } = deps;
     let notification_throttle = Rc::new(RefCell::new(notifications::NotificationThrottle::new(
         NOTIFICATION_COOLDOWN,
     )));
+    let taskbar_market_controller = Rc::new(RefCell::new(TaskbarMarketController::new(
+        state_dir.join("taskbar-runtime"),
+    )));
+    if let Some(tray) = tray.upgrade() {
+        let open_requested = taskbar_market_controller.borrow_mut().refresh(
+            &tray,
+            &settings_window,
+            &layouts.borrow().settings.clone().normalized(),
+            &quote_cache.borrow(),
+            false,
+            Instant::now(),
+        );
+        if open_requested {
+            open_settings();
+        }
+    }
     let timer = Timer::default();
     {
         let widgets = widgets.clone();
@@ -104,6 +127,10 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
         let quote_cache = quote_cache.clone();
         let coin_icons = coin_icons.clone();
         let notification_throttle = notification_throttle.clone();
+        let taskbar_market_controller = taskbar_market_controller.clone();
+        let tray = tray.clone();
+        let settings_window = settings_window.clone();
+        let open_settings = open_settings.clone();
         let market_error_active = Rc::new(RefCell::new(false));
         timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
             refresh_runtime_symbols_from_store(
@@ -207,6 +234,19 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
                     display_options: widget.display_options,
                     widget_scale: widget.widget_scale,
                 });
+            }
+            if let Some(tray) = tray.upgrade() {
+                let open_requested = taskbar_market_controller.borrow_mut().refresh(
+                    &tray,
+                    &settings_window,
+                    &settings,
+                    &cache,
+                    has_market_error,
+                    now,
+                );
+                if open_requested {
+                    open_settings();
+                }
             }
         });
     }
