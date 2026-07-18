@@ -19,6 +19,8 @@ const DEFAULT_DESKTOP_HEIGHT: i32 = 1080;
 const TRAY_HOVER_DISPLAY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WIDGET_SHELL_WINDOW_MAINTENANCE_INTERVAL: Duration = Duration::from_millis(250);
 static SETTINGS_MODE_ACTIVE_FOR_WINDOW_CONFIGURATION: AtomicBool = AtomicBool::new(false);
+static TASKBAR_MARKET_ATTACHED: AtomicBool = AtomicBool::new(false);
+static SHORTCUT_SURFACES_HIDDEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TrayHoverDisplayState {
@@ -184,7 +186,7 @@ pub(crate) fn apply_tray_hover_display(
         let mut state = tray_hover_state.borrow_mut();
         tray_hover_display_action(
             &mut state,
-            settings.tray_hover_display_enabled,
+            settings.tray_hover_display_enabled && !taskbar_market_attached(),
             tray_hovered,
             widgets_are_hidden,
         )
@@ -232,7 +234,39 @@ pub(crate) fn tray_hover_display_action(
 }
 
 pub(crate) fn effective_tray_icon_enabled(settings: &AppSettings) -> bool {
-    settings.tray_icon_enabled || settings.tray_hover_display_enabled
+    native_tray_icon_enabled(
+        settings,
+        taskbar_market_attached(),
+        shortcut_surfaces_hidden(),
+    )
+}
+
+fn native_tray_icon_enabled(
+    settings: &AppSettings,
+    taskbar_attached: bool,
+    shortcut_surfaces_hidden: bool,
+) -> bool {
+    !shortcut_surfaces_hidden
+        && !taskbar_attached
+        && (settings.tray_icon_enabled
+            || settings.tray_hover_display_enabled
+            || settings.tray_market_enabled)
+}
+
+pub(crate) fn set_shortcut_surfaces_hidden(hidden: bool) {
+    SHORTCUT_SURFACES_HIDDEN.store(hidden, Ordering::Release);
+}
+
+pub(crate) fn shortcut_surfaces_hidden() -> bool {
+    SHORTCUT_SURFACES_HIDDEN.load(Ordering::Acquire)
+}
+
+pub(crate) fn set_taskbar_market_attached(attached: bool) {
+    TASKBAR_MARKET_ATTACHED.store(attached, Ordering::Release);
+}
+
+pub(crate) fn taskbar_market_attached() -> bool {
+    TASKBAR_MARKET_ATTACHED.load(Ordering::Acquire)
 }
 
 pub(crate) fn install_hotkey_poll_timer(
@@ -247,6 +281,13 @@ pub(crate) fn install_hotkey_poll_timer(
         if shortcut_manager.borrow().poll_toggle_requested() {
             toggle_widgets_from_shortcut(&widgets, &layouts, &widgets_hidden, &tray);
         }
+        // Explorer may recreate Slint's tray registration after TaskbarCreated even though the
+        // property is still false. Keep the Alt+C hidden state authoritative within one poll.
+        if shortcut_surfaces_hidden() {
+            if let Some(tray) = tray.upgrade() {
+                reconcile_native_tray_icon(&tray, false);
+            }
+        }
     });
     timer
 }
@@ -258,34 +299,32 @@ fn toggle_widgets_from_shortcut(
     tray: &slint::Weak<AppTray>,
 ) {
     let settings = layouts.borrow().settings.clone().normalized();
-    if settings.tray_hover_display_enabled {
+    if shortcut_surfaces_hidden() {
+        set_shortcut_surfaces_hidden(false);
         if let Some(tray) = tray.upgrade() {
-            tray.set_tray_visible(true);
-            restore_native_tray_icon(&tray);
-        }
-        return;
-    }
-
-    if *widgets_hidden.borrow() {
-        if let Some(tray) = tray.upgrade() {
-            let tray_enabled = effective_tray_icon_enabled(&settings);
-            tray.set_tray_visible(tray_enabled);
-            if tray_enabled {
-                restore_native_tray_icon(&tray);
-            }
+            // Taskbar quotes resume asynchronously. Keep the ordinary icon hidden here to avoid
+            // briefly overlapping the injected quote; the controller restores the fallback if
+            // reattachment does not succeed.
+            let tray_enabled =
+                !settings.tray_market_enabled && effective_tray_icon_enabled(&settings);
+            reconcile_native_tray_icon(&tray, tray_enabled);
         }
         show_widgets(widgets, layouts, widgets_hidden);
     } else {
+        set_shortcut_surfaces_hidden(true);
         hide_widgets(widgets, widgets_hidden);
         if let Some(tray) = tray.upgrade() {
-            let tray_enabled = settings.tray_hover_display_enabled;
-            tray.set_tray_visible(tray_enabled);
-            if tray_enabled {
-                restore_native_tray_icon(&tray);
-            } else {
-                remove_native_tray_icon();
-            }
+            reconcile_native_tray_icon(&tray, false);
         }
+    }
+}
+
+pub(crate) fn reconcile_native_tray_icon(tray: &AppTray, visible: bool) {
+    tray.set_tray_visible(visible);
+    if visible {
+        restore_native_tray_icon(tray);
+    } else {
+        remove_native_tray_icon();
     }
 }
 
@@ -742,7 +781,21 @@ mod tests {
             ..AppSettings::default()
         };
 
-        assert!(effective_tray_icon_enabled(&settings));
+        assert!(native_tray_icon_enabled(&settings, false, false));
+        assert!(!native_tray_icon_enabled(&settings, false, true));
+    }
+
+    #[test]
+    fn tray_market_display_forces_tray_icon_available() {
+        let settings = AppSettings {
+            tray_icon_enabled: false,
+            tray_market_enabled: true,
+            ..AppSettings::default()
+        };
+
+        assert!(native_tray_icon_enabled(&settings, false, false));
+        assert!(!native_tray_icon_enabled(&settings, true, false));
+        assert!(!native_tray_icon_enabled(&settings, false, true));
     }
 
     #[cfg(windows)]

@@ -18,9 +18,11 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Exe = Join-Path $RepoRoot "target\release\crypto-hud.exe"
+$TaskbarDll = Join-Path $RepoRoot "target\release\crypto_hud_taskbar.dll"
 $StateRoot = Join-Path $RepoRoot "target\tmp\release-process-state"
 $RuntimeRoot = Join-Path $StateRoot "runtime"
 $RuntimeExe = Join-Path $RuntimeRoot "crypto-hud.exe"
+$RuntimeTaskbarDll = Join-Path $RuntimeRoot "resources\taskbar\crypto_hud_taskbar.dll"
 $ReadmePath = Join-Path $RepoRoot "README.md"
 
 if ([string]::IsNullOrWhiteSpace($ReportPath)) {
@@ -338,12 +340,16 @@ try {
     if (-not $SkipBuild) {
         cargo build --locked --release -p crypto-hud
         if ($LASTEXITCODE -ne 0) {
-            throw "Release build failed with code $LASTEXITCODE"
+            throw "Release application build failed with code $LASTEXITCODE"
         }
+        & (Join-Path $PSScriptRoot "build-taskbar-extension.ps1") -Release
     }
 
     if (-not (Test-Path $Exe)) {
         throw "Release executable not found: $Exe"
+    }
+    if (-not (Test-Path -LiteralPath $TaskbarDll -PathType Leaf)) {
+        throw "Release taskbar extension DLL not found: $TaskbarDll"
     }
 
     New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
@@ -360,6 +366,8 @@ try {
     Copy-Item `
         -LiteralPath (Join-Path $RepoRoot "crates\crypto-hud\ui\icon.ico") `
         -Destination (Join-Path $RuntimeRoot "resources\icon.ico")
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $RuntimeTaskbarDll) | Out-Null
+    Copy-Item -LiteralPath $TaskbarDll -Destination $RuntimeTaskbarDll
 
     $scenarioReports = @()
     foreach ($widgetCount in $scenarioWidgetsToRun) {

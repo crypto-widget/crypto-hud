@@ -5,6 +5,7 @@ members = [
     "crates/crypto-hud-market",
     "crates/crypto-hud-runtime",
     "crates/crypto-hud-shell-state",
+    "crates/crypto-hud-taskbar",
     "crates/crypto-hud",
 ]
 

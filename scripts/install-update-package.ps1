@@ -478,6 +478,7 @@ try {
         "install.ps1",
         "uninstall.ps1",
         "install-update-package.ps1",
+        "resources/taskbar/crypto_hud_taskbar.dll",
         "LICENSE",
         "plugins/README.md",
         "resources/icon.ico",

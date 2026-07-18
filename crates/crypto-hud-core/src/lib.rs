@@ -441,8 +441,12 @@ pub fn format_price(price: f64) -> String {
 }
 
 pub fn format_pair_change(change: f64) -> String {
+    let rounded = format!("{change:.2}");
+    if rounded == "-0.00" {
+        return "+0.00%".to_string();
+    }
     let sign = if change >= 0.0 { "+" } else { "" };
-    format!("{sign}{change:.2}%")
+    format!("{sign}{rounded}%")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -627,6 +631,18 @@ mod tests {
         assert_eq!(format_price(0.00000000123456), "0.000000001235");
         assert_eq!(format_price(0.000000000000123456), "1.235e-13");
         assert_eq!(format_price(-0.0000123456), "-0.00001235");
+    }
+
+    #[test]
+    fn formats_pair_changes_without_negative_zero() {
+        assert_eq!(format_pair_change(1.25), "+1.25%");
+        assert_eq!(format_pair_change(-2.06), "-2.06%");
+        assert_eq!(format_pair_change(0.0), "+0.00%");
+        assert_eq!(format_pair_change(-0.0), "+0.00%");
+        assert_eq!(format_pair_change(0.004), "+0.00%");
+        assert_eq!(format_pair_change(-0.004), "+0.00%");
+        assert_eq!(format_pair_change(0.005), "+0.01%");
+        assert_eq!(format_pair_change(-0.005), "-0.01%");
     }
 
     #[test]

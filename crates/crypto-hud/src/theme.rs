@@ -52,6 +52,10 @@ pub fn resolve_theme(preference: ThemePreference) -> ResolvedTheme {
     }
 }
 
+pub fn resolve_taskbar_theme() -> ResolvedTheme {
+    taskbar_system_theme()
+}
+
 fn dark_palette() -> ThemePalette {
     ThemePalette {
         widget_card_background: rgba(0xf6, 0x0f, 0x17, 0x26),
@@ -126,6 +130,16 @@ const fn rgba(alpha: u8, red: u8, green: u8, blue: u8) -> slint::Color {
 
 #[cfg(windows)]
 fn system_theme() -> ResolvedTheme {
+    registry_theme("AppsUseLightTheme")
+}
+
+#[cfg(windows)]
+fn taskbar_system_theme() -> ResolvedTheme {
+    registry_theme("SystemUsesLightTheme")
+}
+
+#[cfg(windows)]
+fn registry_theme(value_name: &str) -> ResolvedTheme {
     use std::ffi::c_void;
     use windows_sys::Win32::{
         Foundation::ERROR_SUCCESS,
@@ -133,7 +147,7 @@ fn system_theme() -> ResolvedTheme {
     };
 
     let subkey = wide_null("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
-    let value = wide_null("AppsUseLightTheme");
+    let value = wide_null(value_name);
     let mut data = 1_u32;
     let mut data_size = std::mem::size_of::<u32>() as u32;
     let status = unsafe {
@@ -160,6 +174,11 @@ fn system_theme() -> ResolvedTheme {
     ResolvedTheme::Dark
 }
 
+#[cfg(not(windows))]
+fn taskbar_system_theme() -> ResolvedTheme {
+    ResolvedTheme::Dark
+}
+
 #[cfg(windows)]
 fn wide_null(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
@@ -173,6 +192,11 @@ mod tests {
     fn explicit_theme_preference_overrides_system() {
         assert_eq!(resolve_theme(ThemePreference::Light), ResolvedTheme::Light);
         assert_eq!(resolve_theme(ThemePreference::Dark), ResolvedTheme::Dark);
+    }
+
+    #[test]
+    fn taskbar_theme_uses_the_windows_shell_preference() {
+        assert!(include_str!("theme.rs").contains("registry_theme(\"SystemUsesLightTheme\")"));
     }
 
     #[test]

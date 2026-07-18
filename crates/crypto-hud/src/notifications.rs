@@ -42,6 +42,59 @@ impl NotificationThrottle {
     }
 }
 
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrayMenuToggleAction {
+    Open,
+    Close,
+    Ignore,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, Default)]
+struct TrayMenuToggleState {
+    menu_active: bool,
+    suppress_reopen_until_ms: Option<u64>,
+}
+
+#[cfg(any(windows, test))]
+impl TrayMenuToggleState {
+    fn entered_menu_loop(&mut self) {
+        self.menu_active = true;
+        self.suppress_reopen_until_ms = None;
+    }
+
+    fn exited_menu_loop(&mut self, now_ms: u64, suppression_ms: u64, suppress_reopen: bool) {
+        self.menu_active = false;
+        self.suppress_reopen_until_ms =
+            suppress_reopen.then(|| now_ms.saturating_add(suppression_ms));
+    }
+
+    fn toggle_requested(&mut self, now_ms: u64) -> TrayMenuToggleAction {
+        if self.menu_active {
+            return TrayMenuToggleAction::Close;
+        }
+
+        if let Some(deadline_ms) = self.suppress_reopen_until_ms.take() {
+            if now_ms <= deadline_ms {
+                return TrayMenuToggleAction::Ignore;
+            }
+        }
+
+        TrayMenuToggleAction::Open
+    }
+}
+
+#[cfg(windows)]
+pub fn install_tray_menu_toggle() -> bool {
+    windows::install_tray_menu_toggle()
+}
+
+#[cfg(not(windows))]
+pub fn install_tray_menu_toggle() -> bool {
+    true
+}
+
 #[cfg(windows)]
 pub fn restore_tray_icon(tooltip: &str) {
     windows::restore_tray_icon(tooltip);
@@ -78,34 +131,123 @@ pub fn show(_title: &str, _body: &str) {}
 
 #[cfg(windows)]
 mod windows {
-    use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+    use std::{cell::RefCell, ffi::OsStr, os::windows::ffi::OsStrExt};
 
     use windows_sys::Win32::{
-        Foundation::{HWND, POINT, RECT},
+        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        System::SystemInformation::GetTickCount64,
         UI::{
+            Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_RBUTTON},
             Shell::{
-                Shell_NotifyIconGetRect, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE,
-                NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
-                NOTIFYICONIDENTIFIER,
+                DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, Shell_NotifyIconGetRect,
+                Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD,
+                NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, NOTIFYICONIDENTIFIER,
             },
             WindowsAndMessaging::{
-                DestroyIcon, FindWindowExW, GetCursorPos, GetWindowThreadProcessId, LoadImageW,
-                HICON, HWND_MESSAGE, IMAGE_ICON, LR_LOADFROMFILE, WM_APP,
+                ChangeWindowMessageFilterEx, DestroyIcon, EndMenu, FindWindowExW, GetCursorPos,
+                GetWindowThreadProcessId, LoadImageW, HICON, HWND_MESSAGE, IMAGE_ICON,
+                LR_LOADFROMFILE, MSGFLT_ALLOW, WM_APP, WM_CONTEXTMENU, WM_ENTERMENULOOP,
+                WM_EXITMENULOOP, WM_NCDESTROY, WM_RBUTTONUP,
             },
         },
     };
 
+    use super::{TrayMenuToggleAction, TrayMenuToggleState};
+
     const SLINT_TRAY_CLASS: &str = "SlintSystemTrayWindow";
+    const TRAY_MENU_SUBCLASS_ID: usize = 0x4352_5950;
     const TRAY_UID: u32 = 1;
     const WM_TRAYICON: u32 = WM_APP + 1;
+
+    thread_local! {
+        static TRAY_MENU_TOGGLE_STATE: RefCell<TrayMenuToggleState> =
+            RefCell::new(TrayMenuToggleState::default());
+    }
+
+    pub fn install_tray_menu_toggle() -> bool {
+        let Some(hwnd) = find_slint_tray_window() else {
+            return false;
+        };
+        allow_taskbar_context_menu_message(hwnd);
+        (unsafe {
+            SetWindowSubclass(
+                hwnd,
+                Some(tray_menu_subclass_proc),
+                TRAY_MENU_SUBCLASS_ID,
+                0,
+            )
+        }) != 0
+    }
+
+    unsafe extern "system" fn tray_menu_subclass_proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        subclass_id: usize,
+        _refdata: usize,
+    ) -> LRESULT {
+        if message == WM_ENTERMENULOOP && wparam != 0 {
+            TRAY_MENU_TOGGLE_STATE.with(|state| state.borrow_mut().entered_menu_loop());
+        } else if message == WM_EXITMENULOOP && wparam != 0 {
+            let now_ms = unsafe { GetTickCount64() };
+            let suppression_ms = u64::from(unsafe { GetDoubleClickTime() });
+            let right_button_down = unsafe { GetAsyncKeyState(VK_RBUTTON.into()) } < 0;
+            TRAY_MENU_TOGGLE_STATE.with(|state| {
+                state
+                    .borrow_mut()
+                    .exited_menu_loop(now_ms, suppression_ms, right_button_down)
+            });
+        }
+
+        let tray_callback = message == WM_TRAYICON
+            && wparam == TRAY_UID as usize
+            && matches!((lparam as u32) & 0xFFFF, WM_CONTEXTMENU | WM_RBUTTONUP);
+        if tray_callback {
+            let action = TRAY_MENU_TOGGLE_STATE.with(|state| {
+                state
+                    .borrow_mut()
+                    .toggle_requested(unsafe { GetTickCount64() })
+            });
+            match action {
+                TrayMenuToggleAction::Close => {
+                    unsafe {
+                        EndMenu();
+                    }
+                    return 0;
+                }
+                TrayMenuToggleAction::Ignore => return 0,
+                TrayMenuToggleAction::Open => {}
+            }
+        }
+
+        if message == WM_NCDESTROY {
+            TRAY_MENU_TOGGLE_STATE
+                .with(|state| *state.borrow_mut() = TrayMenuToggleState::default());
+            unsafe {
+                RemoveWindowSubclass(hwnd, Some(tray_menu_subclass_proc), subclass_id);
+            }
+        }
+        unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+    }
 
     pub fn remove_tray_icon() {
         let Some(hwnd) = find_slint_tray_window() else {
             return;
         };
+        allow_taskbar_context_menu_message(hwnd);
         let data = tray_icon_data(hwnd, std::ptr::null_mut(), "");
         unsafe {
             Shell_NotifyIconW(NIM_DELETE, &data);
+        }
+    }
+
+    fn allow_taskbar_context_menu_message(hwnd: HWND) {
+        // The taskbar extension runs inside Explorer. If Crypto HUD was started
+        // elevated, UIPI otherwise rejects Explorer's tray callback message.
+        // Scope the exception to the existing Slint tray HWND and message only.
+        unsafe {
+            ChangeWindowMessageFilterEx(hwnd, WM_TRAYICON, MSGFLT_ALLOW, std::ptr::null_mut());
         }
     }
 
@@ -275,5 +417,45 @@ mod tests {
         assert!(!throttle.should_notify("market", "Binance failed", now + Duration::from_secs(30)));
         assert!(throttle.should_notify("market", "OKX failed", now + Duration::from_secs(31)));
         assert!(throttle.should_notify("market", "OKX failed", now + Duration::from_secs(91)));
+    }
+
+    #[test]
+    fn tray_menu_toggle_closes_an_active_menu_without_reopening_it() {
+        let mut state = TrayMenuToggleState::default();
+
+        assert_eq!(state.toggle_requested(1_000), TrayMenuToggleAction::Open);
+        state.entered_menu_loop();
+        assert_eq!(state.toggle_requested(1_100), TrayMenuToggleAction::Close);
+
+        state.exited_menu_loop(1_120, 500, false);
+        assert_eq!(state.toggle_requested(1_150), TrayMenuToggleAction::Open);
+    }
+
+    #[test]
+    fn tray_menu_toggle_suppresses_the_reopen_after_right_click_exits_the_menu_first() {
+        let mut state = TrayMenuToggleState::default();
+        state.entered_menu_loop();
+
+        state.exited_menu_loop(1_120, 500, true);
+        assert_eq!(state.toggle_requested(1_150), TrayMenuToggleAction::Ignore);
+        assert_eq!(state.toggle_requested(1_160), TrayMenuToggleAction::Open);
+    }
+
+    #[test]
+    fn tray_menu_toggle_reopens_normally_after_the_exit_suppression_expires() {
+        let mut state = TrayMenuToggleState::default();
+        state.entered_menu_loop();
+        state.exited_menu_loop(2_000, 500, true);
+
+        assert_eq!(state.toggle_requested(2_501), TrayMenuToggleAction::Open);
+    }
+
+    #[test]
+    fn tray_menu_toggle_does_not_suppress_reopen_after_a_non_right_click_exit() {
+        let mut state = TrayMenuToggleState::default();
+        state.entered_menu_loop();
+        state.exited_menu_loop(3_000, 500, false);
+
+        assert_eq!(state.toggle_requested(3_001), TrayMenuToggleAction::Open);
     }
 }

@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 $PowerShellExe = (Get-Process -Id $PID).Path
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$TaskbarDllSmokeScript = Join-Path $PSScriptRoot "taskbar-dll-smoke.ps1"
 $DistDir = Join-Path $RepoRoot "dist"
 $PackageRoot = Join-Path $DistDir "crypto-hud-$Version-windows-x64-portable"
 $ZipPath = "$PackageRoot.zip"
@@ -75,7 +76,8 @@ try {
         "portable-manifest.json",
         "plugins",
         "resources\previews",
-        "resources\icon.ico"
+        "resources\icon.ico",
+        "resources\taskbar\crypto_hud_taskbar.dll"
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $ExtractRoot $requiredPath))) {
             throw "Portable package is missing $requiredPath"
@@ -94,6 +96,9 @@ try {
         [bool]$manifest.codeSigning.signed) {
         throw "Portable manifest metadata is invalid"
     }
+    if (-not (@($manifest.files).path -contains "resources/taskbar/crypto_hud_taskbar.dll")) {
+        throw "Portable manifest is missing the taskbar extension DLL"
+    }
     foreach ($file in @($manifest.files)) {
         $path = [System.IO.Path]::GetFullPath((Join-Path $ExtractRoot ([string]$file.path)))
         Assert-UnderDirectory -Path $path -Directory $ExtractRoot -Description "extracted portable package"
@@ -104,6 +109,12 @@ try {
         if ($hash -ne [string]$file.sha256) {
             throw "Portable manifest hash mismatch: $($file.path)"
         }
+    }
+
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $TaskbarDllSmokeScript `
+        -DllPath (Join-Path $ExtractRoot "resources\taskbar\crypto_hud_taskbar.dll")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Portable taskbar extension DLL smoke failed with code $LASTEXITCODE"
     }
 
     Write-Host "Portable package smoke passed"

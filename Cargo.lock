@@ -1084,6 +1084,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "crypto-hud-taskbar"
+version = "0.9.9"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "ctor"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

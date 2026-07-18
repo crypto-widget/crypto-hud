@@ -70,6 +70,10 @@ pub const PARKED_WIDGET_Y: i32 = -32_000;
 pub const MIN_SYMBOLS_PER_WIDGET: usize = 1;
 pub const MAX_SYMBOLS_PER_WIDGET: usize = MAX_MARKET_SYMBOLS;
 pub const MINI_TICKER_SYMBOL_LIMIT: usize = 1;
+pub const MAX_TRAY_MARKET_SYMBOLS: usize = 8;
+pub const MIN_TRAY_MARKET_SWITCH_INTERVAL_SECONDS: i32 = 2;
+pub const MAX_TRAY_MARKET_SWITCH_INTERVAL_SECONDS: i32 = 300;
+pub const DEFAULT_TRAY_MARKET_SWITCH_INTERVAL_SECONDS: i32 = 5;
 pub const BUILTIN_QUOTE_BOARD_PLUGIN_ID: &str = "builtin.quote-board";
 pub const BUILTIN_MINI_TICKER_PLUGIN_ID: &str = "builtin.mini-ticker";
 pub const LAYOUT_STATE_FILE_NAME: &str = "layouts.json";
@@ -78,7 +82,8 @@ pub const LEGACY_LAYOUT_STATE_FILE_NAME: &str = "poc-layouts.json";
 // that an older release could ignore and later overwrite. The top-level loader
 // is strict, but nested structures such as AppSettings remain serde-compatible
 // and may otherwise discard fields they do not recognize.
-pub const LAYOUT_STORE_SCHEMA_VERSION: u32 = 1;
+pub const LAYOUT_STORE_SCHEMA_VERSION: u32 = 2;
+const PREVIOUS_LAYOUT_STORE_SCHEMA_VERSION: u32 = 1;
 
 const LAYOUT_STORE_SCHEMA_VERSION_FIELD: &str = "schema_version";
 
@@ -879,6 +884,12 @@ pub struct AppSettings {
     #[serde(default)]
     pub tray_hover_display_enabled: bool,
     #[serde(default)]
+    pub tray_market_enabled: bool,
+    #[serde(default = "default_tray_market_symbols")]
+    pub tray_market_symbols: Vec<String>,
+    #[serde(default = "default_tray_market_switch_interval_seconds")]
+    pub tray_market_switch_interval_seconds: i32,
+    #[serde(default)]
     pub network_proxy_enabled: bool,
     #[serde(default)]
     pub network_proxy_url: String,
@@ -907,6 +918,9 @@ impl Default for AppSettings {
             language: LanguagePreference::default(),
             tray_icon_enabled: default_tray_icon_enabled(),
             tray_hover_display_enabled: false,
+            tray_market_enabled: false,
+            tray_market_symbols: default_tray_market_symbols(),
+            tray_market_switch_interval_seconds: default_tray_market_switch_interval_seconds(),
             network_proxy_enabled: false,
             network_proxy_url: String::new(),
             alert_rules: Vec::new(),
@@ -961,6 +975,11 @@ impl AppSettings {
             language: self.language,
             tray_icon_enabled: self.tray_icon_enabled,
             tray_hover_display_enabled: self.tray_hover_display_enabled,
+            tray_market_enabled: self.tray_market_enabled,
+            tray_market_symbols: normalize_tray_market_symbols(self.tray_market_symbols),
+            tray_market_switch_interval_seconds: clamp_tray_market_switch_interval_seconds(
+                self.tray_market_switch_interval_seconds,
+            ),
             network_proxy_enabled: self.network_proxy_enabled && !proxy_has_userinfo,
             network_proxy_url: if proxy_has_userinfo {
                 String::new()
@@ -1047,6 +1066,29 @@ pub fn enabled_market_sources(settings: &AppSettings) -> Vec<MarketDataSource> {
 
 pub fn default_tray_icon_enabled() -> bool {
     true
+}
+
+pub fn default_tray_market_symbols() -> Vec<String> {
+    default_market_symbols().into_iter().take(1).collect()
+}
+
+pub const fn default_tray_market_switch_interval_seconds() -> i32 {
+    DEFAULT_TRAY_MARKET_SWITCH_INTERVAL_SECONDS
+}
+
+pub fn clamp_tray_market_switch_interval_seconds(value: i32) -> i32 {
+    value.clamp(
+        MIN_TRAY_MARKET_SWITCH_INTERVAL_SECONDS,
+        MAX_TRAY_MARKET_SWITCH_INTERVAL_SECONDS,
+    )
+}
+
+pub fn normalize_tray_market_symbols(symbols: Vec<String>) -> Vec<String> {
+    normalized_symbols_with_limit(
+        symbols,
+        MAX_TRAY_MARKET_SYMBOLS,
+        default_tray_market_symbols(),
+    )
 }
 
 pub fn normalize_network_proxy_url(proxy_url: String) -> String {
@@ -1390,9 +1432,14 @@ fn parse_persisted_layout_store_value(
         let schema_version = schema_value.as_u64().ok_or_else(|| {
             format!("{LAYOUT_STORE_SCHEMA_VERSION_FIELD} must be an unsigned integer")
         })?;
-        if schema_version != u64::from(LAYOUT_STORE_SCHEMA_VERSION) {
+        if ![
+            u64::from(PREVIOUS_LAYOUT_STORE_SCHEMA_VERSION),
+            u64::from(LAYOUT_STORE_SCHEMA_VERSION),
+        ]
+        .contains(&schema_version)
+        {
             return Err(format!(
-                "unsupported layout state schema version {schema_version}; expected {LAYOUT_STORE_SCHEMA_VERSION}"
+                "unsupported layout state schema version {schema_version}; expected {PREVIOUS_LAYOUT_STORE_SCHEMA_VERSION} or {LAYOUT_STORE_SCHEMA_VERSION}"
             ));
         }
         for required_field in [
@@ -1403,7 +1450,7 @@ fn parse_persisted_layout_store_value(
         ] {
             if !object.contains_key(required_field) {
                 return Err(format!(
-                    "layout state schema {LAYOUT_STORE_SCHEMA_VERSION} is missing required field `{required_field}`"
+                    "layout state schema {schema_version} is missing required field `{required_field}`"
                 ));
             }
         }
@@ -1411,7 +1458,7 @@ fn parse_persisted_layout_store_value(
             .map_err(|error| error.to_string())?;
         return Ok(ParsedPersistedLayoutStore {
             store: PersistedLayoutStore::Current(store),
-            requires_schema_migration: false,
+            requires_schema_migration: schema_version != u64::from(LAYOUT_STORE_SCHEMA_VERSION),
         });
     }
 
@@ -3410,6 +3457,12 @@ mod tests {
         assert_eq!(settings.language, LanguagePreference::En);
         assert!(settings.tray_icon_enabled);
         assert!(!settings.tray_hover_display_enabled);
+        assert!(!settings.tray_market_enabled);
+        assert_eq!(settings.tray_market_symbols, default_tray_market_symbols());
+        assert_eq!(
+            settings.tray_market_switch_interval_seconds,
+            DEFAULT_TRAY_MARKET_SWITCH_INTERVAL_SECONDS
+        );
         assert!(!settings.network_proxy_enabled);
         assert!(settings.network_proxy_url.is_empty());
         assert!(settings.alert_rules.is_empty());
@@ -3958,6 +4011,60 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_tray_market_settings_bounds_and_symbols() {
+        let settings = AppSettings {
+            tray_market_enabled: true,
+            tray_market_symbols: vec![
+                "btc".to_string(),
+                "BTCUSDT".to_string(),
+                "eth/usdt".to_string(),
+                "???".to_string(),
+                "sol".to_string(),
+                "bnb".to_string(),
+                "xrp".to_string(),
+                "ada".to_string(),
+                "doge".to_string(),
+                "avax".to_string(),
+                "link".to_string(),
+            ],
+            tray_market_switch_interval_seconds: 1,
+            ..AppSettings::default()
+        }
+        .normalized();
+
+        assert!(settings.tray_market_enabled);
+        assert_eq!(
+            settings.tray_market_symbols,
+            vec![
+                "binance:spot:BTC/USDT",
+                "binance:spot:ETH/USDT",
+                "binance:spot:SOL/USDT",
+                "binance:spot:BNB/USDT",
+                "binance:spot:XRP/USDT",
+                "binance:spot:ADA/USDT",
+                "binance:spot:DOGE/USDT",
+                "binance:spot:AVAX/USDT",
+            ]
+        );
+        assert_eq!(
+            settings.tray_market_switch_interval_seconds,
+            MIN_TRAY_MARKET_SWITCH_INTERVAL_SECONDS
+        );
+
+        let settings = AppSettings {
+            tray_market_symbols: vec!["???".to_string()],
+            tray_market_switch_interval_seconds: i32::MAX,
+            ..AppSettings::default()
+        }
+        .normalized();
+        assert_eq!(settings.tray_market_symbols, default_tray_market_symbols());
+        assert_eq!(
+            settings.tray_market_switch_interval_seconds,
+            MAX_TRAY_MARKET_SWITCH_INTERVAL_SECONDS
+        );
+    }
+
+    #[test]
     fn widget_scale_converts_between_percent_and_size() {
         let default_size = WidgetSize {
             width: QUOTE_BOARD_WIDTH,
@@ -4483,6 +4590,51 @@ mod tests {
         assert_eq!(loaded.source, LayoutStoreLoadSource::Current);
         assert!(loaded.warning.is_none());
         assert_eq!(loaded.store.settings.opacity_percent, 77);
+        let persisted_json =
+            serde_json::from_str::<Value>(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            persisted_json[LAYOUT_STORE_SCHEMA_VERSION_FIELD],
+            LAYOUT_STORE_SCHEMA_VERSION
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn schema_one_state_defaults_tray_market_fields_and_upgrades() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-shell-state-schema-one-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            &path,
+            r#"{
+              "schema_version": 1,
+              "settings": { "opacity_percent": 77 },
+              "selected_widget_id": null,
+              "next_widget_number": 1,
+              "widgets": []
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = load_layout_store_with_diagnostics(&path, 0, &[], (1920, 1080));
+
+        assert_eq!(loaded.source, LayoutStoreLoadSource::Current);
+        assert!(loaded.warning.is_none());
+        assert_eq!(loaded.store.settings.opacity_percent, 77);
+        assert!(!loaded.store.settings.tray_market_enabled);
+        assert_eq!(
+            loaded.store.settings.tray_market_symbols,
+            default_tray_market_symbols()
+        );
+        assert_eq!(
+            loaded.store.settings.tray_market_switch_interval_seconds,
+            DEFAULT_TRAY_MARKET_SWITCH_INTERVAL_SECONDS
+        );
         let persisted_json =
             serde_json::from_str::<Value>(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(

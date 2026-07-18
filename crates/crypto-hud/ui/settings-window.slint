@@ -916,6 +916,9 @@ export component SettingsWindow inherits Window {
     in-out property <int> language-index;
     in-out property <bool> tray-icon-enabled;
     in-out property <bool> tray-hover-display-enabled;
+    in-out property <bool> tray-market-enabled;
+    in-out property <int> tray-market-switch-interval-seconds: 5;
+    in property <bool> tray-market-platform-supported: true;
     in-out property <bool> network-proxy-enabled;
     in-out property <string> network-proxy-url-input-text;
     in-out property <string> network-proxy-error-text;
@@ -966,6 +969,9 @@ export component SettingsWindow inherits Window {
     in property <[string]> alert-condition-options;
     in property <[string]> default-symbol-values;
     in property <[string]> default-symbol-chip-values;
+    in property <[string]> tray-market-symbol-values;
+    in property <[string]> tray-market-symbol-chip-values;
+    in property <int> tray-market-symbol-max: 8;
     in property <[string]> widget-symbol-values;
     in property <[string]> widget-symbol-chip-values;
     in property <[int]> widget-symbol-chip-x;
@@ -1031,6 +1037,17 @@ export component SettingsWindow inherits Window {
     in property <string> shortcut-text;
     in property <string> tray-icon-text;
     in property <string> tray-hover-display-text;
+    in property <string> appearance-laboratory-text;
+    in property <string> tray-market-enabled-text;
+    in property <string> tray-market-enabled-help-text;
+    in property <string> tray-market-switch-interval-text;
+    in property <string> tray-market-switch-interval-help-text;
+    in property <string> tray-market-pairs-text;
+    in property <string> tray-market-pairs-help-text;
+    in property <string> tray-market-add-pair-text;
+    in property <string> tray-market-remove-pair-text;
+    in property <string> tray-market-status-text;
+    in property <string> tray-market-platform-requirement-text;
     in property <string> network-proxy-settings-text;
     in property <string> network-proxy-enabled-text;
     in property <string> network-proxy-url-text;
@@ -1155,6 +1172,8 @@ export component SettingsWindow inherits Window {
     property <bool> can-remove-widget-symbol: root.has-widgets && root.widget-symbol-values.length > root.widget-symbol-min;
     property <bool> can-add-default-symbol: root.default-symbol-values.length < root.default-symbol-max;
     property <bool> can-remove-default-symbol: root.default-symbol-values.length > root.default-symbol-min;
+    property <bool> can-add-tray-market-symbol: root.tray-market-symbol-values.length < root.tray-market-symbol-max;
+    property <bool> can-remove-tray-market-symbol: root.tray-market-symbol-values.length > 1;
     property <bool> can-confirm-symbol-picker: root.symbol-picker-open && root.symbol-picker-candidate-options.length > 0;
     property <image> hovered-plugin-preview-image;
     property <bool> hovered-plugin-preview-visible: false;
@@ -1165,6 +1184,7 @@ export component SettingsWindow inherits Window {
     property <length> hovered-plugin-preview-height: root.hovered-plugin-preview-image.height * 1px * root.hovered-plugin-preview-scale;
 
     callback apply-settings(bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
+    callback apply-tray-market-settings(bool, int);
     callback apply-network-settings(bool, string);
     callback apply-alert-settings(bool, string, int, string);
     callback clear-alert-settings();
@@ -1173,9 +1193,11 @@ export component SettingsWindow inherits Window {
     callback open-widget-symbol-replace-picker(int);
     callback open-default-symbol-picker();
     callback open-default-symbol-replace-picker(int);
+    callback open-tray-market-symbol-picker();
     callback close-symbol-picker();
     callback confirm-symbol-picker(int, int);
     callback remove-default-symbol(int);
+    callback remove-tray-market-symbol(int);
     callback remove-widget-symbol(int, int);
     callback select-widget(int);
     callback add-widget(int);
@@ -1259,6 +1281,13 @@ export component SettingsWindow inherits Window {
         root.apply-network-settings(
             root.network-proxy-enabled,
             root.network-proxy-url-input-text
+        );
+    }
+
+    function apply-current-tray-market-settings() {
+        root.apply-tray-market-settings(
+            root.tray-market-enabled,
+            root.tray-market-switch-interval-seconds
         );
     }
 
@@ -3411,7 +3440,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: 93px;
+                    y: 45px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -3419,7 +3448,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: 138px;
+                    y: 90px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -3549,6 +3578,364 @@ export component SettingsWindow inherits Window {
                     clicked => {
                         root.default-widgets-always-on-top = !root.default-widgets-always-on-top;
                         root.apply-current-settings();
+                    }
+                }
+            }
+
+            laboratory_card := Rectangle {
+                x: 17px;
+                y: 369px;
+                width: appearance_tab.width - 34px;
+                height: root.tray-market-enabled ? 234px : 105px;
+                border-radius: 6px;
+                background: root.settings-surface-background;
+                border-width: 1px;
+                border-color: root.settings-border-color;
+
+                SettingSectionTitle {
+                    rtl-layout: root.rtl-layout;
+                    x: 17px;
+                    y: 13px;
+                    width: parent.width - 34px;
+                    title: root.appearance-laboratory-text;
+                    title-color: root.settings-heading-color;
+                    divider-color: root.settings-divider-color;
+                }
+
+                tray_market_group := Rectangle {
+                    x: 12px;
+                    y: 46px;
+                    width: parent.width - 24px;
+                    height: root.tray-market-enabled ? 175px : 46px;
+                    border-radius: 5px;
+                    background: root.settings-content-background;
+                    border-width: 1px;
+                    border-color: root.settings-border-color;
+                    clip: true;
+
+                    tray_market_header := Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: 45px;
+                        background: tray_market_header_touch.has-hover
+                            ? root.settings-selected-background
+                            : transparent;
+
+                        SettingLabel {
+                            rtl-layout: root.rtl-layout;
+                            x: root.rtl-layout ? parent.width - 537px : 17px;
+                            y: 6px;
+                            width: 520px;
+                            label: root.tray-market-enabled-text;
+                            help: root.tray-market-enabled-help-text;
+                            label-color: root.settings-label-color;
+                            muted-color: root.settings-muted-color;
+                        }
+
+                        Text {
+                            x: root.rtl-layout ? 90px : parent.width - 320px;
+                            y: 14px;
+                            width: 230px;
+                            height: 18px;
+                            text: root.tray-market-status-text;
+                            visible: root.tray-market-enabled && root.tray-market-status-text != "";
+                            color: root.settings-status-color;
+                            font-size: 10px;
+                            font-weight: 600;
+                            horizontal-alignment: root.rtl-layout ? left : right;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            accessible-role: text;
+                            accessible-label: root.tray-market-status-text;
+                        }
+
+                        SettingSwitch {
+                            x: root.rtl-layout ? 17px : parent.width - 54px;
+                            y: (parent.height - self.height) / 2;
+                            checked <=> root.tray-market-enabled;
+                            enabled: root.tray-market-platform-supported || root.tray-market-enabled;
+                            accessible-label-text: root.tray-market-enabled-text;
+                            accent-color: root.settings-accent-color;
+                            track-color: root.settings-track-color;
+                            knob-color: root.settings-knob-color;
+                            toggled => { root.apply-current-tray-market-settings(); }
+                        }
+
+                        tray_market_header_touch := TouchArea {
+                            x: root.rtl-layout ? parent.width - 537px : 17px;
+                            y: 0px;
+                            width: 520px;
+                            height: 42px;
+                            enabled: root.tray-market-platform-supported || root.tray-market-enabled;
+                            mouse-cursor: self.enabled ? pointer : default;
+                            clicked => {
+                                if self.enabled {
+                                    root.tray-market-enabled = !root.tray-market-enabled;
+                                    root.apply-current-tray-market-settings();
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            x: root.rtl-layout ? 62px : parent.width - 81px;
+                            y: 7px;
+                            width: 17px;
+                            height: 17px;
+                            background: transparent;
+                            visible: !root.tray-market-platform-supported;
+
+                            accessible-role: image;
+                            accessible-label: root.tray-market-platform-requirement-text;
+
+                            Path {
+                                width: 17px;
+                                height: 17px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                commands: "M 12 2 L 23 21 H 1 Z";
+                                fill: #f5a524;
+                                stroke: #92400e;
+                                stroke-width: 1.2px;
+                                stroke-line-join: round;
+                            }
+
+                            Rectangle {
+                                x: 7.5px;
+                                y: 5px;
+                                width: 2px;
+                                height: 6px;
+                                border-radius: 1px;
+                                background: #422006;
+                            }
+
+                            Rectangle {
+                                x: 7.5px;
+                                y: 12.5px;
+                                width: 2px;
+                                height: 2px;
+                                border-radius: 1px;
+                                background: #422006;
+                            }
+
+                            Tooltip {
+                                text: @markdown("\{root.tray-market-platform-requirement-text}");
+                            }
+                        }
+                    }
+
+                    tray_market_details := Rectangle {
+                        x: 0px;
+                        y: 45px;
+                        width: parent.width;
+                        height: 130px;
+                        background: transparent;
+                        visible: root.tray-market-enabled;
+
+                        Rectangle {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: 1px;
+                            background: root.settings-divider-color;
+                        }
+
+                        Rectangle {
+                            x: 0px;
+                            y: 48px;
+                            width: parent.width;
+                            height: 1px;
+                            background: root.settings-divider-color;
+                        }
+
+                SettingLabel {
+                    rtl-layout: root.rtl-layout;
+                    x: root.rtl-layout ? parent.width - 537px : 17px;
+                    y: 6px;
+                    width: 520px;
+                    label: root.tray-market-switch-interval-text;
+                    help: root.tray-market-switch-interval-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                PercentStepper {
+                    x: root.rtl-layout ? 17px : parent.width - 207px;
+                    y: 5px;
+                    width: 150px;
+                    height: 34px;
+                    minimum: 2;
+                    maximum: 300;
+                    step-size: 1;
+                    value <=> root.tray-market-switch-interval-seconds;
+                    accessible-label-text: root.tray-market-switch-interval-text;
+                    text-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                    surface-color: root.settings-content-background;
+                    hover-color: root.settings-selected-background;
+                    control-border-color: root.settings-border-color;
+                    edited(_) => { root.apply-current-tray-market-settings(); }
+                }
+
+                Text {
+                    x: root.rtl-layout ? 175px : parent.width - 49px;
+                    y: 5px;
+                    width: 32px;
+                    height: 34px;
+                    text: root.seconds-unit-text;
+                    color: root.settings-muted-color;
+                    font-size: 9px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                SettingLabel {
+                    rtl-layout: root.rtl-layout;
+                    x: 17px;
+                    y: 54px;
+                    width: parent.width - 34px;
+                    label: root.tray-market-pairs-text;
+                    help: root.tray-market-pairs-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                for symbol[index] in root.tray-market-symbol-chip-values : Rectangle {
+                    x: root.rtl-layout ? parent.width - 101px - index * 92px : 17px + index * 92px;
+                    y: 91px;
+                    width: 84px;
+                    height: 30px;
+                    border-radius: 15px;
+                    background: root.settings-selected-background;
+                    border-width: 1px;
+                    border-color: remove_tray_market_symbol_focus.has-focus ? root.settings-accent-color : root.settings-border-color;
+                    forward-focus: remove_tray_market_symbol_focus;
+
+                    accessible-role: button;
+                    accessible-label: root.tray-market-remove-pair-text + " "
+                        + (index < root.tray-market-symbol-values.length ? root.tray-market-symbol-values[index] : symbol);
+                    accessible-enabled: root.can-remove-tray-market-symbol;
+                    accessible-action-default => {
+                        if root.can-remove-tray-market-symbol {
+                            root.remove-tray-market-symbol(index);
+                        }
+                    }
+
+                    Text {
+                        x: root.rtl-layout ? 22px : 11px;
+                        y: 9px;
+                        width: parent.width - 33px;
+                        text: symbol;
+                        color: root.settings-heading-color;
+                        font-size: 10px;
+                        font-weight: 500;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: root.rtl-layout ? 9px : parent.width - 20px;
+                        y: 7px;
+                        width: 11px;
+                        text: "x";
+                        color: root.can-remove-tray-market-symbol ? root.settings-muted-color : root.settings-divider-color;
+                        font-size: 11px;
+                        font-weight: 500;
+                        horizontal-alignment: center;
+                    }
+
+                    TouchArea {
+                        x: root.rtl-layout ? 0px : parent.width - 24px;
+                        width: 24px;
+                        height: parent.height;
+                        mouse-cursor: root.can-remove-tray-market-symbol ? pointer : default;
+                        clicked => {
+                            if root.can-remove-tray-market-symbol {
+                                root.remove-tray-market-symbol(index);
+                            }
+                        }
+                    }
+
+                    remove_tray_market_symbol_focus := FocusScope {
+                        x: 0px;
+                        y: 0px;
+                        width: 0px;
+                        height: 0px;
+                        enabled: root.can-remove-tray-market-symbol;
+
+                        key-pressed(event) => {
+                            if event.text == Key.Space || event.text == Key.Return {
+                                root.remove-tray-market-symbol(index);
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    x: root.rtl-layout
+                        ? parent.width - 125px - root.tray-market-symbol-chip-values.length * 92px
+                        : 17px + root.tray-market-symbol-chip-values.length * 92px;
+                    y: 91px;
+                    width: 108px;
+                    height: 30px;
+                    border-radius: 4px;
+                    background: add_tray_market_symbol_touch.has-hover ? root.settings-selected-background : transparent;
+                    border-width: 1px;
+                    border-color: add_tray_market_symbol_focus.has-focus
+                        ? root.settings-heading-color
+                        : (root.can-add-tray-market-symbol ? root.settings-accent-color : root.settings-divider-color);
+                    visible: root.can-add-tray-market-symbol;
+                    forward-focus: add_tray_market_symbol_focus;
+
+                    accessible-role: button;
+                    accessible-label: root.tray-market-add-pair-text;
+                    accessible-enabled: root.can-add-tray-market-symbol;
+                    accessible-action-default => {
+                        if root.can-add-tray-market-symbol {
+                            root.open-tray-market-symbol-picker();
+                        }
+                    }
+
+                    Text {
+                        x: 0px;
+                        y: 9px;
+                        width: parent.width;
+                        text: "+ " + root.tray-market-add-pair-text;
+                        color: root.can-add-tray-market-symbol ? root.settings-accent-color : root.settings-divider-color;
+                        font-size: 10px;
+                        font-weight: 500;
+                        horizontal-alignment: center;
+                    }
+
+                    add_tray_market_symbol_touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: root.can-add-tray-market-symbol ? pointer : default;
+                        clicked => {
+                            if root.can-add-tray-market-symbol {
+                                root.open-tray-market-symbol-picker();
+                            }
+                        }
+                    }
+
+                    add_tray_market_symbol_focus := FocusScope {
+                        x: 0px;
+                        y: 0px;
+                        width: 0px;
+                        height: 0px;
+                        enabled: root.can-add-tray-market-symbol;
+
+                        key-pressed(event) => {
+                            if event.text == Key.Space || event.text == Key.Return {
+                                root.open-tray-market-symbol-picker();
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+                }
                     }
                 }
             }
