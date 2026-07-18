@@ -2,10 +2,9 @@
 
 All notable changes to Crypto HUD will be documented in this file.
 
-The format is based on Keep a Changelog, and this project follows SemVer while
-it remains in the `0.x` alpha series.
+The format is based on Keep a Changelog, and this project follows SemVer.
 
-## 0.9.9 - Unreleased
+## 1.0.0 - Unreleased
 
 ### Changed
 

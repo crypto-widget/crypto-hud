@@ -11,7 +11,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-version = "0.9.9"
+version = "1.0.0"
 authors = ["Crypto HUD Contributors"]
 license = "MIT"
 repository = "https://github.com/crypto-widget/crypto-hud"

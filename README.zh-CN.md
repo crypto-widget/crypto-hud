@@ -212,15 +212,15 @@ mise run run-app
 
   ```powershell
   # 仅在版本提交已进入默认分支且 CI 通过后执行。
-  git tag -a v0.9.9 -m "Release v0.9.9"
-  git push origin v0.9.9
+  git tag -a v1.0.0 -m "Release v1.0.0"
+  git push origin v1.0.0
   ```
 
   未使用 Authenticode 签名时，Windows 可能显示 SmartScreen 警告。SHA-256
   可以发现下载内容被改动，但不能证明发布者身份。本地可用同一入口生成便携包：
 
   ```powershell
-  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v0.9.9
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v1.0.0
   ```
 
   现有可安装包流程保持独立：它会在 `dist/` 中创建 zip、校验和与已签名的
@@ -237,7 +237,7 @@ mise run run-app
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
   # 先配置 CRYPTO_HUD_SIGN_CERT_PATH（或 CRYPTO_HUD_SIGN_CERT_BASE64）以及
   # CRYPTO_HUD_SIGN_CERT_PASSWORD。正式签名时始终重新构建。
-  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v0.9.9 -Sign
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v1.0.0 -Sign
   ```
 
   首次安装生产包时，应在执行安装脚本中的任何代码前先验证其签名。确认 `Status`
