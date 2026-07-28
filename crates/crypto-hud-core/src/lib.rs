@@ -19,6 +19,7 @@ pub enum MarketDataSource {
     Coinbase,
     Okx,
     Hyperliquid,
+    Bitget,
 }
 
 impl MarketDataSource {
@@ -28,6 +29,7 @@ impl MarketDataSource {
             Self::Coinbase => "coinbase",
             Self::Okx => "okx",
             Self::Hyperliquid => "hyperliquid",
+            Self::Bitget => "bitget",
         }
     }
 
@@ -37,6 +39,7 @@ impl MarketDataSource {
             Self::Coinbase => "Coinbase",
             Self::Okx => "OKX",
             Self::Hyperliquid => "Hyperliquid",
+            Self::Bitget => "Bitget",
         }
     }
 
@@ -46,6 +49,7 @@ impl MarketDataSource {
             "coinbase" | "coin" | "cb" => Some(Self::Coinbase),
             "okx" | "ok" => Some(Self::Okx),
             "hyperliquid" | "hl" | "hyper" => Some(Self::Hyperliquid),
+            "bitget" | "bg" => Some(Self::Bitget),
             _ => None,
         }
     }
@@ -129,6 +133,7 @@ pub fn default_enabled_market_sources() -> Vec<MarketDataSource> {
         MarketDataSource::Coinbase,
         MarketDataSource::Okx,
         MarketDataSource::Hyperliquid,
+        MarketDataSource::Bitget,
     ]
 }
 
@@ -163,6 +168,17 @@ pub fn default_market_symbols() -> Vec<String> {
     DEFAULT_MARKET_SYMBOLS
         .iter()
         .map(|symbol| (*symbol).to_string())
+        .collect()
+}
+
+pub fn default_market_symbols_for_source(source: MarketDataSource) -> Vec<String> {
+    DEFAULT_MARKET_SYMBOLS
+        .iter()
+        .filter_map(|symbol| {
+            let mut pair = parse_market_pair(symbol)?;
+            pair.source = source;
+            Some(pair.key())
+        })
         .collect()
 }
 
@@ -385,6 +401,8 @@ fn market_source_from_display_part(value: &str) -> Option<MarketDataSource> {
         Some(MarketDataSource::Hyperliquid)
     } else if normalized.contains("coinbase") {
         Some(MarketDataSource::Coinbase)
+    } else if normalized.contains("bitget") || normalized == "bg" {
+        Some(MarketDataSource::Bitget)
     } else if normalized.contains("binance") || normalized == "bin" {
         Some(MarketDataSource::Binance)
     } else if normalized.contains("okx") || normalized == "ok" {
@@ -408,16 +426,20 @@ fn market_type_from_display_part(value: &str) -> Option<MarketType> {
 fn default_market_type_for_source(source: MarketDataSource) -> MarketType {
     match source {
         MarketDataSource::Hyperliquid => MarketType::Perp,
-        MarketDataSource::Binance | MarketDataSource::Coinbase | MarketDataSource::Okx => {
-            MarketType::Spot
-        }
+        MarketDataSource::Binance
+        | MarketDataSource::Coinbase
+        | MarketDataSource::Okx
+        | MarketDataSource::Bitget => MarketType::Spot,
     }
 }
 
 fn default_quote_for_source(source: MarketDataSource) -> &'static str {
     match source {
         MarketDataSource::Hyperliquid => "USDC",
-        MarketDataSource::Binance | MarketDataSource::Coinbase | MarketDataSource::Okx => "USDT",
+        MarketDataSource::Binance
+        | MarketDataSource::Coinbase
+        | MarketDataSource::Okx
+        | MarketDataSource::Bitget => "USDT",
     }
 }
 
@@ -618,6 +640,18 @@ mod tests {
         assert_eq!(
             format_market_pair_display("binance:spot:ETH/USDT"),
             "ETH/USDT · Binance"
+        );
+        assert_eq!(
+            normalize_market_pair_key("BTC/USDT · Bitget").as_deref(),
+            Some("bitget:spot:BTC/USDT")
+        );
+        assert_eq!(
+            default_market_symbols_for_source(MarketDataSource::Bitget),
+            vec![
+                "bitget:spot:BTC/USDT",
+                "bitget:spot:ETH/USDT",
+                "bitget:spot:SOL/USDT"
+            ]
         );
     }
 

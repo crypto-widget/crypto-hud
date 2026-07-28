@@ -1163,6 +1163,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
               market_coinbase_enabled,
               market_okx_enabled,
               market_hyperliquid_enabled,
+              market_bitget_enabled,
               auto_start_enabled,
               show_main_window_on_startup,
               shortcut_index,
@@ -1188,6 +1189,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 market_coinbase_enabled,
                 market_okx_enabled,
                 market_hyperliquid_enabled,
+                market_bitget_enabled,
                 refresh_interval_seconds: settings::clamp_refresh_interval(
                     refresh_interval_seconds,
                 ),
@@ -2463,6 +2465,9 @@ fn enabled_market_sources_from_ui(ui: &SettingsWindow) -> Vec<settings::MarketDa
     if ui.get_market_hyperliquid_enabled() {
         sources.push(settings::MarketDataSource::Hyperliquid);
     }
+    if ui.get_market_bitget_enabled() {
+        sources.push(settings::MarketDataSource::Bitget);
+    }
     if sources.is_empty() {
         vec![settings::MarketDataSource::Binance]
     } else {
@@ -3052,6 +3057,7 @@ fn source_rank(symbol: &str) -> usize {
         Some(settings::MarketDataSource::Coinbase) => 1,
         Some(settings::MarketDataSource::Okx) => 2,
         Some(settings::MarketDataSource::Hyperliquid) => 3,
+        Some(settings::MarketDataSource::Bitget) => 4,
         None => usize::MAX,
     }
 }
@@ -3380,6 +3386,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_widget_scale_text(text.widget_scale.into());
     ui.set_red_up_color_text(text.red_up_color.into());
     ui.set_market_provider_text(text.market_provider.into());
+    ui.set_market_bitget_text(text.market_bitget.into());
     ui.set_refresh_interval_text(text.refresh_interval.into());
     ui.set_seconds_unit_text(text.seconds_unit.into());
     ui.set_market_provider_help_text(text.market_provider_help.into());
@@ -3671,6 +3678,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_market_coinbase_enabled(settings.market_coinbase_enabled);
     ui.set_market_okx_enabled(settings.market_okx_enabled);
     ui.set_market_hyperliquid_enabled(settings.market_hyperliquid_enabled);
+    ui.set_market_bitget_enabled(settings.market_bitget_enabled);
     ui.set_refresh_interval_seconds(settings.refresh_interval_seconds);
     ui.set_alert_enabled(primary_alert.map(|rule| rule.enabled).unwrap_or(false));
     let default_symbols = settings.market_default_symbols.clone();
@@ -6162,6 +6170,30 @@ mod tests {
     }
 
     #[test]
+    fn manually_selected_market_source_is_preserved_when_adding_a_widget_pair() {
+        let catalog = plugin::PluginCatalog::builtins();
+        let state_path = temp_state_path("widget-symbol-selected-source");
+        let layouts = Rc::new(RefCell::new(LayoutStore {
+            selected_widget_id: Some("quote-board-1".to_string()),
+            widgets: vec![test_widget(
+                "quote-board-1",
+                WidgetType::QuoteBoard.plugin_id(),
+                vec!["BTC"],
+            )],
+            ..LayoutStore::default()
+        }));
+
+        add_widget_symbol_to_store(&layouts, &state_path, 0, "bitget:spot:ETH/USDT", &catalog)
+            .unwrap();
+
+        assert_eq!(
+            layouts.borrow().widgets[0].symbols,
+            vec!["binance:spot:BTC/USDT", "bitget:spot:ETH/USDT"]
+        );
+        let _ = std::fs::remove_file(state_path);
+    }
+
+    #[test]
     fn tray_market_symbol_actions_persist_deduplicated_nonempty_selection() {
         let state_path = temp_state_path("tray-market-symbol-actions");
         let layouts = Rc::new(RefCell::new(LayoutStore {
@@ -6376,6 +6408,12 @@ mod tests {
                         "USDC",
                     ),
                     catalog_entry(
+                        settings::MarketDataSource::Bitget,
+                        settings::MarketType::Spot,
+                        "BTC",
+                        "USDT",
+                    ),
+                    catalog_entry(
                         settings::MarketDataSource::Binance,
                         settings::MarketType::Spot,
                         "BNB",
@@ -6400,6 +6438,7 @@ mod tests {
                     settings::MarketDataSource::Coinbase,
                     settings::MarketDataSource::Okx,
                     settings::MarketDataSource::Hyperliquid,
+                    settings::MarketDataSource::Bitget,
                 ]),
                 Vec::new()
             ),
@@ -6408,6 +6447,7 @@ mod tests {
                 "coinbase:spot:BTC/USD",
                 "okx:spot:BTC/USDT",
                 "hyperliquid:perp:BTC/USDC",
+                "bitget:spot:BTC/USDT",
                 "binance:spot:BNB/USDT",
                 "okx:spot:OKB/USDT"
             ]
@@ -6435,6 +6475,14 @@ mod tests {
                 Vec::new()
             ),
             vec!["coinbase:spot:BTC/USD"]
+        );
+        assert_eq!(
+            symbol_pick_options(
+                &state,
+                &enabled_sources(&[settings::MarketDataSource::Bitget]),
+                Vec::new()
+            ),
+            vec!["bitget:spot:BTC/USDT"]
         );
     }
 

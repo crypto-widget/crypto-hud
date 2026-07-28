@@ -21,7 +21,9 @@ const BINANCE_BASE_URL: &str = "https://api.binance.com";
 const COINBASE_EXCHANGE_BASE_URL: &str = "https://api.exchange.coinbase.com";
 const OKX_BASE_URL: &str = "https://www.okx.com";
 const HYPERLIQUID_BASE_URL: &str = "https://api.hyperliquid.xyz";
+const BITGET_BASE_URL: &str = "https://api.bitget.com";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+const SOURCE_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_MARKET_RESPONSE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CONCURRENT_PAIR_FETCHES: usize = 4;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -408,6 +410,95 @@ pub fn fetch_symbol_catalog_with_warnings(proxy_url: Option<&str>) -> Result<Sym
     fetch_symbol_catalog_with_agent(&agent)
 }
 
+pub fn select_low_latency_spot_source(
+    proxy_url: Option<&str>,
+    enabled_sources: &[MarketDataSource],
+) -> Result<Option<MarketDataSource>> {
+    let sources = enabled_sources
+        .iter()
+        .copied()
+        .filter(|source| {
+            matches!(
+                source,
+                MarketDataSource::Binance | MarketDataSource::Okx | MarketDataSource::Bitget
+            )
+        })
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        return Ok(None);
+    }
+
+    let agent = build_agent_with_timeout(proxy_url, SOURCE_PROBE_TIMEOUT)?;
+    let probes = thread::scope(|scope| -> Result<Vec<_>> {
+        let handles = sources
+            .into_iter()
+            .map(|source| {
+                let agent = agent.clone();
+                scope.spawn(move || {
+                    let started_at = Instant::now();
+                    let result = probe_default_spot_source(&agent, source);
+                    (source, result.map(|()| started_at.elapsed()))
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut results = Vec::with_capacity(handles.len());
+        for handle in handles {
+            results.push(
+                handle
+                    .join()
+                    .map_err(|_| anyhow!("market source probe worker panicked"))?,
+            );
+        }
+        Ok(results)
+    })?;
+
+    Ok(select_fastest_source(probes))
+}
+
+fn probe_default_spot_source(agent: &ureq::Agent, source: MarketDataSource) -> Result<()> {
+    let pair = MarketPair {
+        source,
+        market_type: MarketType::Spot,
+        base: "BTC".to_string(),
+        quote: "USDT".to_string(),
+    };
+    let mut candle_cache = CandleCache::new();
+    let uninterrupted = || false;
+    match source {
+        MarketDataSource::Binance => {
+            fetch_binance(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Okx => {
+            fetch_okx(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Bitget => {
+            fetch_bitget(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Coinbase | MarketDataSource::Hyperliquid => {
+            bail!(
+                "{} does not support the default USDT spot probe",
+                source.label()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn select_fastest_source(
+    probes: impl IntoIterator<Item = (MarketDataSource, Result<Duration>)>,
+) -> Option<MarketDataSource> {
+    let mut selected = None;
+    for (source, result) in probes {
+        let Ok(latency) = result else {
+            continue;
+        };
+        if selected.is_none_or(|(_, best_latency)| latency < best_latency) {
+            selected = Some((source, latency));
+        }
+    }
+    selected.map(|(source, _)| source)
+}
+
 fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalogFetch> {
     let mut warnings = Vec::new();
     let mut catalogs = Vec::new();
@@ -433,6 +524,12 @@ fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalogF
     collect_symbol_catalog_result(
         MarketDataSource::Hyperliquid,
         fetch_hyperliquid_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Bitget,
+        fetch_bitget_symbol_catalog(agent),
         &mut catalogs,
         &mut warnings,
     );
@@ -719,6 +816,9 @@ fn fetch_pair(
         MarketDataSource::Hyperliquid => {
             fetch_hyperliquid(agent, pair, needs_candles, candle_cache, interrupted)
         }
+        MarketDataSource::Bitget => {
+            fetch_bitget(agent, pair, needs_candles, candle_cache, interrupted)
+        }
     }
 }
 
@@ -828,6 +928,31 @@ fn fetch_hyperliquid(
         needs_candles,
         candle_cache,
         fetch_hyperliquid_candles,
+    ))
+}
+
+fn fetch_bitget(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    needs_candles: bool,
+    candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
+) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
+    ensure_spot_pair(pair)?;
+    let symbol = bitget_symbol(pair);
+    let url = format!("{BITGET_BASE_URL}/api/v2/spot/market/tickers?symbol={symbol}");
+    let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
+    let snapshot = parse_bitget_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
+        snapshot,
+        needs_candles,
+        candle_cache,
+        fetch_bitget_candles,
     ))
 }
 
@@ -1115,6 +1240,15 @@ fn fetch_hyperliquid_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<V
     parse_hyperliquid_candles(&body)
 }
 
+fn fetch_bitget_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
+    let symbol = bitget_symbol(pair);
+    let url = format!(
+        "{BITGET_BASE_URL}/api/v2/spot/market/candles?symbol={symbol}&granularity=5min&limit={CANDLE_LIMIT_24H_5M}"
+    );
+    let body = get_json(agent, &url)?;
+    parse_bitget_candles(&body)
+}
+
 fn unix_epoch_millis() -> Result<u64> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1151,6 +1285,12 @@ fn fetch_hyperliquid_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCat
     parse_hyperliquid_symbol_catalog(&body)
 }
 
+fn fetch_bitget_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalogEntry>> {
+    let url = format!("{BITGET_BASE_URL}/api/v2/spot/public/symbols");
+    let body = get_json(agent, &url)?;
+    parse_bitget_symbol_catalog(&body)
+}
+
 fn combine_symbol_catalogs(catalogs: Vec<Vec<SymbolCatalogEntry>>) -> SymbolCatalog {
     let mut entries = BTreeMap::<String, SymbolCatalogEntry>::new();
     for entry in catalogs.into_iter().flatten() {
@@ -1171,6 +1311,10 @@ fn coinbase_product_id(pair: &MarketPair) -> String {
 
 fn okx_instrument_id(pair: &MarketPair) -> String {
     format!("{}-{}", pair.base, pair.quote)
+}
+
+fn bitget_symbol(pair: &MarketPair) -> String {
+    format!("{}{}", pair.base, pair.quote)
 }
 
 fn catalog_entry(
@@ -1450,6 +1594,120 @@ fn parse_okx_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
         price,
         percent_change(price, open_24h, "OKX 24h change")?,
     )
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetTickerResponse {
+    code: String,
+    msg: String,
+    data: Vec<BitgetTicker>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BitgetTicker {
+    last_pr: String,
+    change_24h: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetCandlesResponse {
+    code: String,
+    msg: String,
+    data: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetSymbolsResponse {
+    code: String,
+    msg: String,
+    data: Vec<BitgetSymbol>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BitgetSymbol {
+    base_coin: String,
+    quote_coin: String,
+    status: String,
+}
+
+fn parse_bitget_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
+    let response = serde_json::from_str::<BitgetSymbolsResponse>(body)
+        .context("failed to parse Bitget symbols")?;
+    if response.code != "00000" {
+        bail!("Bitget returned {}: {}", response.code, response.msg);
+    }
+
+    Ok(unique_catalog_entries(
+        response.data.into_iter().filter_map(|symbol| {
+            (symbol.status.eq_ignore_ascii_case("online") && stable_quote(&symbol.quote_coin))
+                .then(|| {
+                    catalog_entry(
+                        MarketDataSource::Bitget,
+                        MarketType::Spot,
+                        symbol.base_coin,
+                        symbol.quote_coin,
+                    )
+                })
+                .flatten()
+        }),
+    ))
+}
+
+fn parse_bitget_candles(body: &str) -> Result<Vec<MarketCandle>> {
+    let response = serde_json::from_str::<BitgetCandlesResponse>(body)
+        .context("failed to parse Bitget candles")?;
+    if response.code != "00000" {
+        bail!("Bitget returned {}: {}", response.code, response.msg);
+    }
+
+    let mut candles = response
+        .data
+        .iter()
+        .map(|row| {
+            Ok(MarketCandle {
+                open_time_millis: parse_u64(
+                    row.first().map(String::as_str).unwrap_or(""),
+                    "Bitget candle time",
+                )?,
+                open: parse_decimal(
+                    row.get(1).map(String::as_str).unwrap_or(""),
+                    "Bitget candle open",
+                )?,
+                high: parse_decimal(
+                    row.get(2).map(String::as_str).unwrap_or(""),
+                    "Bitget candle high",
+                )?,
+                low: parse_decimal(
+                    row.get(3).map(String::as_str).unwrap_or(""),
+                    "Bitget candle low",
+                )?,
+                close: parse_decimal(
+                    row.get(4).map(String::as_str).unwrap_or(""),
+                    "Bitget candle close",
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
+}
+
+fn parse_bitget_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
+    let response = serde_json::from_str::<BitgetTickerResponse>(body)
+        .context("failed to parse Bitget ticker")?;
+    if response.code != "00000" {
+        bail!("Bitget returned {}: {}", response.code, response.msg);
+    }
+    let ticker = response
+        .data
+        .first()
+        .ok_or_else(|| anyhow!("Bitget response did not include ticker data"))?;
+    let price = parse_positive_decimal(&ticker.last_pr, "Bitget lastPr")?;
+    let change_percent = parse_decimal(&ticker.change_24h, "Bitget change24h")? * 100.0;
+
+    market_snapshot(pair, MarketDataSource::Bitget, price, change_percent)
 }
 
 #[derive(Debug, Deserialize)]
@@ -2306,12 +2564,49 @@ mod tests {
     }
 
     #[test]
+    fn parses_bitget_ticker_and_converts_fractional_24hr_change() {
+        let snapshot = parse_bitget_ticker(
+            &pair("bitget:spot:BTC/USDT"),
+            r#"{"code":"00000","msg":"success","data":[{"lastPr":"106800.12","change24h":"0.01234"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.symbol, "bitget:spot:BTC/USDT");
+        assert_eq!(snapshot.source, MarketDataSource::Bitget);
+        assert_eq!(snapshot.price, 106800.12);
+        assert!((snapshot.change_percent_24h - 1.234).abs() < 0.000001);
+    }
+
+    #[test]
     fn parses_binance_5m_kline_ohlc() {
         let candles = parse_binance_klines(
             r#"[
                 [1499040000000,"100.0","105.0","95.0","101.5","12.0",1499040299999,"0",0,"0","0","0"],
                 [1499040300000,"101.5","106.0","99.0","104.25","10.0",1499040599999,"0",0,"0","0","0"]
             ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_499_040_000_000, 100.0, 105.0, 95.0, 101.5),
+                candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_bitget_5m_candles_oldest_first() {
+        let candles = parse_bitget_candles(
+            r#"{
+                "code":"00000",
+                "msg":"success",
+                "data":[
+                    ["1499040300000","101.5","106.0","99.0","104.25","10.0"],
+                    ["1499040000000","100.0","105.0","95.0","101.5","12.0"]
+                ]
+            }"#,
         )
         .unwrap();
 
@@ -2517,6 +2812,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_bitget_symbol_catalog_for_online_stable_spot_pairs() {
+        let entries = parse_bitget_symbol_catalog(
+            r#"{
+                "code":"00000",
+                "msg":"success",
+                "data":[
+                    {"baseCoin":"BTC","quoteCoin":"USDT","status":"online"},
+                    {"baseCoin":"ETH","quoteCoin":"USDC","status":"online"},
+                    {"baseCoin":"SOL","quoteCoin":"USDT","status":"offline"},
+                    {"baseCoin":"BNB","quoteCoin":"BTC","status":"online"},
+                    {"baseCoin":"btc","quoteCoin":"USDT","status":"online"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bitget:spot:BTC/USDT", "bitget:spot:ETH/USDC"]
+        );
+    }
+
+    #[test]
     fn parses_hyperliquid_catalog_as_usdc_perps() {
         let entries = parse_hyperliquid_symbol_catalog(
             r#"[
@@ -2659,6 +2980,18 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].source, MarketDataSource::Coinbase);
         assert!(warnings[0].message.contains("no supported market pairs"));
+    }
+
+    #[test]
+    fn fastest_source_selection_ignores_failures_and_keeps_first_tie() {
+        assert_eq!(
+            select_fastest_source([
+                (MarketDataSource::Binance, Ok(Duration::from_millis(40))),
+                (MarketDataSource::Okx, Err(anyhow!("timeout"))),
+                (MarketDataSource::Bitget, Ok(Duration::from_millis(40))),
+            ]),
+            Some(MarketDataSource::Binance)
+        );
     }
 
     #[test]

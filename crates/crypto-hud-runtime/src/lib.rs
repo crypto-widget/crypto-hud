@@ -1233,6 +1233,7 @@ pub struct ProviderLabels<'a> {
     pub coinbase: &'a str,
     pub okx: &'a str,
     pub hyperliquid: &'a str,
+    pub bitget: &'a str,
     pub mixed: &'a str,
 }
 
@@ -1243,6 +1244,7 @@ impl Default for ProviderLabels<'static> {
             coinbase: "Coinbase",
             okx: "OKX",
             hyperliquid: "Hyperliquid",
+            bitget: "Bitget",
             mixed: "Mixed",
         }
     }
@@ -1883,6 +1885,7 @@ fn source_display_text(
         MarketDataSource::Coinbase => 1,
         MarketDataSource::Okx => 2,
         MarketDataSource::Hyperliquid => 3,
+        MarketDataSource::Bitget => 4,
     });
 
     match sources.as_slice() {
@@ -1916,6 +1919,7 @@ pub fn provider_display_label(provider: MarketDataSource, labels: ProviderLabels
         MarketDataSource::Coinbase => labels.coinbase,
         MarketDataSource::Okx => labels.okx,
         MarketDataSource::Hyperliquid => labels.hyperliquid,
+        MarketDataSource::Bitget => labels.bitget,
     }
 }
 
@@ -2843,6 +2847,7 @@ mod tests {
                 coinbase: "Coinbase",
                 okx: "OKX",
                 hyperliquid: "Hyperliquid",
+                bitget: "Bitget",
                 mixed: "多个源",
             },
             labels: RuntimeTextLabels {

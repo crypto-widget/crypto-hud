@@ -18,11 +18,11 @@ use serde_json::{Map, Value};
 
 pub use crypto_hud_core::{
     clamp_refresh_interval, default_enabled_market_sources, default_market_symbols,
-    format_market_pair_display, format_market_pair_source, format_market_pair_symbol,
-    market_pair_source, normalize_market_pair_key, normalize_market_symbols,
-    normalize_symbol_token, AlertCondition, AlertRule, MarketDataSource, MarketPair,
-    MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS, MAX_MARKET_SYMBOLS,
-    MAX_REFRESH_INTERVAL_SECONDS, MIN_REFRESH_INTERVAL_SECONDS,
+    default_market_symbols_for_source, format_market_pair_display, format_market_pair_source,
+    format_market_pair_symbol, market_pair_source, normalize_market_pair_key,
+    normalize_market_symbols, normalize_symbol_token, AlertCondition, AlertRule, MarketDataSource,
+    MarketPair, MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS,
+    MAX_MARKET_SYMBOLS, MAX_REFRESH_INTERVAL_SECONDS, MIN_REFRESH_INTERVAL_SECONDS,
 };
 
 pub const MIN_OPACITY_PERCENT: i32 = 20;
@@ -865,6 +865,8 @@ pub struct AppSettings {
     pub market_okx_enabled: bool,
     #[serde(default = "default_market_source_enabled")]
     pub market_hyperliquid_enabled: bool,
+    #[serde(default = "default_market_source_enabled")]
+    pub market_bitget_enabled: bool,
     #[serde(default = "default_refresh_interval_seconds")]
     pub refresh_interval_seconds: i32,
     #[serde(default = "default_market_symbols")]
@@ -909,6 +911,7 @@ impl Default for AppSettings {
             market_coinbase_enabled: default_market_source_enabled(),
             market_okx_enabled: default_market_source_enabled(),
             market_hyperliquid_enabled: default_market_source_enabled(),
+            market_bitget_enabled: default_market_source_enabled(),
             refresh_interval_seconds: default_refresh_interval_seconds(),
             market_default_symbols: default_market_symbols(),
             auto_start_enabled: false,
@@ -943,6 +946,7 @@ impl AppSettings {
                 self.market_coinbase_enabled,
                 self.market_okx_enabled,
                 self.market_hyperliquid_enabled,
+                self.market_bitget_enabled,
                 MarketDataSource::Binance,
             ),
             market_coinbase_enabled: source_enabled_or_default(
@@ -950,6 +954,7 @@ impl AppSettings {
                 self.market_coinbase_enabled,
                 self.market_okx_enabled,
                 self.market_hyperliquid_enabled,
+                self.market_bitget_enabled,
                 MarketDataSource::Coinbase,
             ),
             market_okx_enabled: source_enabled_or_default(
@@ -957,6 +962,7 @@ impl AppSettings {
                 self.market_coinbase_enabled,
                 self.market_okx_enabled,
                 self.market_hyperliquid_enabled,
+                self.market_bitget_enabled,
                 MarketDataSource::Okx,
             ),
             market_hyperliquid_enabled: source_enabled_or_default(
@@ -964,7 +970,16 @@ impl AppSettings {
                 self.market_coinbase_enabled,
                 self.market_okx_enabled,
                 self.market_hyperliquid_enabled,
+                self.market_bitget_enabled,
                 MarketDataSource::Hyperliquid,
+            ),
+            market_bitget_enabled: source_enabled_or_default(
+                self.market_binance_enabled,
+                self.market_coinbase_enabled,
+                self.market_okx_enabled,
+                self.market_hyperliquid_enabled,
+                self.market_bitget_enabled,
+                MarketDataSource::Bitget,
             ),
             refresh_interval_seconds: clamp_refresh_interval(self.refresh_interval_seconds),
             market_default_symbols: normalize_market_symbols(self.market_default_symbols),
@@ -1028,14 +1043,16 @@ fn source_enabled_or_default(
     coinbase_enabled: bool,
     okx_enabled: bool,
     hyperliquid_enabled: bool,
+    bitget_enabled: bool,
     source: MarketDataSource,
 ) -> bool {
-    if binance_enabled || coinbase_enabled || okx_enabled || hyperliquid_enabled {
+    if binance_enabled || coinbase_enabled || okx_enabled || hyperliquid_enabled || bitget_enabled {
         match source {
             MarketDataSource::Binance => binance_enabled,
             MarketDataSource::Coinbase => coinbase_enabled,
             MarketDataSource::Okx => okx_enabled,
             MarketDataSource::Hyperliquid => hyperliquid_enabled,
+            MarketDataSource::Bitget => bitget_enabled,
         }
     } else {
         source == MarketDataSource::Binance
@@ -1056,6 +1073,9 @@ pub fn enabled_market_sources(settings: &AppSettings) -> Vec<MarketDataSource> {
     }
     if settings.market_hyperliquid_enabled {
         sources.push(MarketDataSource::Hyperliquid);
+    }
+    if settings.market_bitget_enabled {
+        sources.push(MarketDataSource::Bitget);
     }
     if sources.is_empty() {
         default_enabled_market_sources()
@@ -3445,6 +3465,7 @@ mod tests {
         assert!(settings.market_coinbase_enabled);
         assert!(settings.market_okx_enabled);
         assert!(settings.market_hyperliquid_enabled);
+        assert!(settings.market_bitget_enabled);
         assert_eq!(
             settings.refresh_interval_seconds,
             DEFAULT_REFRESH_INTERVAL_SECONDS

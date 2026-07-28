@@ -905,6 +905,8 @@ export component SettingsWindow inherits Window {
     in-out property <bool> market-coinbase-enabled;
     in-out property <bool> market-okx-enabled;
     in-out property <bool> market-hyperliquid-enabled;
+    in-out property <bool> market-bitget-enabled;
+    in property <string> market-bitget-text;
     in-out property <int> refresh-interval-seconds;
     in-out property <int> selected-widget-index;
     in property <bool> selected-widget-plugin-missing: false;
@@ -1183,7 +1185,7 @@ export component SettingsWindow inherits Window {
     property <length> hovered-plugin-preview-width: root.hovered-plugin-preview-image.width * 1px * root.hovered-plugin-preview-scale;
     property <length> hovered-plugin-preview-height: root.hovered-plugin-preview-image.height * 1px * root.hovered-plugin-preview-scale;
 
-    callback apply-settings(bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
+    callback apply-settings(bool, bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
     callback apply-tray-market-settings(bool, int);
     callback apply-network-settings(bool, string);
     callback apply-alert-settings(bool, string, int, string);
@@ -1246,6 +1248,7 @@ export component SettingsWindow inherits Window {
             root.market-coinbase-enabled,
             root.market-okx-enabled,
             root.market-hyperliquid-enabled,
+            root.market-bitget-enabled,
             root.auto-start-enabled,
             root.show-main-window-on-startup,
             root.shortcut-index,
@@ -3118,7 +3121,7 @@ export component SettingsWindow inherits Window {
                 x: 17px;
                 y: 66px;
                 width: market_tab.width - 34px;
-                height: 135px;
+                height: 165px;
                 border-radius: 6px;
                 background: root.settings-surface-background;
                 border-width: 1px;
@@ -3126,7 +3129,7 @@ export component SettingsWindow inherits Window {
 
                 Rectangle {
                     x: 0px;
-                    y: 90px;
+                    y: 114px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -3243,10 +3246,35 @@ export component SettingsWindow inherits Window {
                     overflow: elide;
                 }
 
+                SettingSwitch {
+                    x: 17px;
+                    y: 88px;
+                    checked <=> root.market-bitget-enabled;
+                    accessible-label-text: root.market-bitget-text;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => {
+                        root.apply-current-settings();
+                        root.refresh-symbol-picker-candidates();
+                    }
+                }
+
+                Text {
+                    x: 63px;
+                    y: 93px;
+                    width: 60px;
+                    text: root.market-bitget-text;
+                    color: root.settings-label-color;
+                    font-size: 9px;
+                    font-weight: 750;
+                    overflow: elide;
+                }
+
                 SettingLabel {
                     rtl-layout: root.rtl-layout;
                     x: 17px;
-                    y: 96px;
+                    y: 120px;
                     width: 301px;
                     label: root.refresh-interval-text;
                     help: root.refresh-interval-help-text;
@@ -3256,7 +3284,7 @@ export component SettingsWindow inherits Window {
 
                 PercentStepper {
                     x: parent.width - 207px;
-                    y: 96px;
+                    y: 120px;
                     width: 150px;
                     height: 34px;
                     enabled: true;
@@ -3275,7 +3303,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 49px;
-                    y: 96px;
+                    y: 120px;
                     width: 32px;
                     height: 34px;
                     text: root.seconds-unit-text;
@@ -3290,7 +3318,7 @@ export component SettingsWindow inherits Window {
 
             Rectangle {
                 x: 17px;
-                y: 215px;
+                y: 245px;
                 width: market_tab.width - 34px;
                 height: 104px;
                 border-radius: 6px;
