@@ -1164,6 +1164,10 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
               market_okx_enabled,
               market_hyperliquid_enabled,
               market_bitget_enabled,
+              market_coinex_enabled,
+              market_gate_enabled,
+              market_mexc_enabled,
+              market_bybit_enabled,
               auto_start_enabled,
               show_main_window_on_startup,
               shortcut_index,
@@ -1190,6 +1194,10 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 market_okx_enabled,
                 market_hyperliquid_enabled,
                 market_bitget_enabled,
+                market_coinex_enabled,
+                market_gate_enabled,
+                market_mexc_enabled,
+                market_bybit_enabled,
                 refresh_interval_seconds: settings::clamp_refresh_interval(
                     refresh_interval_seconds,
                 ),
@@ -2468,6 +2476,18 @@ fn enabled_market_sources_from_ui(ui: &SettingsWindow) -> Vec<settings::MarketDa
     if ui.get_market_bitget_enabled() {
         sources.push(settings::MarketDataSource::Bitget);
     }
+    if ui.get_market_coinex_enabled() {
+        sources.push(settings::MarketDataSource::Coinex);
+    }
+    if ui.get_market_gate_enabled() {
+        sources.push(settings::MarketDataSource::Gate);
+    }
+    if ui.get_market_mexc_enabled() {
+        sources.push(settings::MarketDataSource::Mexc);
+    }
+    if ui.get_market_bybit_enabled() {
+        sources.push(settings::MarketDataSource::Bybit);
+    }
     if sources.is_empty() {
         vec![settings::MarketDataSource::Binance]
     } else {
@@ -3058,6 +3078,10 @@ fn source_rank(symbol: &str) -> usize {
         Some(settings::MarketDataSource::Okx) => 2,
         Some(settings::MarketDataSource::Hyperliquid) => 3,
         Some(settings::MarketDataSource::Bitget) => 4,
+        Some(settings::MarketDataSource::Coinex) => 5,
+        Some(settings::MarketDataSource::Gate) => 6,
+        Some(settings::MarketDataSource::Mexc) => 7,
+        Some(settings::MarketDataSource::Bybit) => 8,
         None => usize::MAX,
     }
 }
@@ -3387,6 +3411,10 @@ pub(crate) fn refresh_settings_window(
     ui.set_red_up_color_text(text.red_up_color.into());
     ui.set_market_provider_text(text.market_provider.into());
     ui.set_market_bitget_text(text.market_bitget.into());
+    ui.set_market_coinex_text(text.market_coinex.into());
+    ui.set_market_gate_text(text.market_gate.into());
+    ui.set_market_mexc_text(text.market_mexc.into());
+    ui.set_market_bybit_text(text.market_bybit.into());
     ui.set_refresh_interval_text(text.refresh_interval.into());
     ui.set_seconds_unit_text(text.seconds_unit.into());
     ui.set_market_provider_help_text(text.market_provider_help.into());
@@ -3679,6 +3707,10 @@ pub(crate) fn refresh_settings_window(
     ui.set_market_okx_enabled(settings.market_okx_enabled);
     ui.set_market_hyperliquid_enabled(settings.market_hyperliquid_enabled);
     ui.set_market_bitget_enabled(settings.market_bitget_enabled);
+    ui.set_market_coinex_enabled(settings.market_coinex_enabled);
+    ui.set_market_gate_enabled(settings.market_gate_enabled);
+    ui.set_market_mexc_enabled(settings.market_mexc_enabled);
+    ui.set_market_bybit_enabled(settings.market_bybit_enabled);
     ui.set_refresh_interval_seconds(settings.refresh_interval_seconds);
     ui.set_alert_enabled(primary_alert.map(|rule| rule.enabled).unwrap_or(false));
     let default_symbols = settings.market_default_symbols.clone();

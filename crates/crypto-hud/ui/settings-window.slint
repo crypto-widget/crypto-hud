@@ -906,7 +906,15 @@ export component SettingsWindow inherits Window {
     in-out property <bool> market-okx-enabled;
     in-out property <bool> market-hyperliquid-enabled;
     in-out property <bool> market-bitget-enabled;
+    in-out property <bool> market-coinex-enabled;
+    in-out property <bool> market-gate-enabled;
+    in-out property <bool> market-mexc-enabled;
+    in-out property <bool> market-bybit-enabled;
     in property <string> market-bitget-text;
+    in property <string> market-coinex-text;
+    in property <string> market-gate-text;
+    in property <string> market-mexc-text;
+    in property <string> market-bybit-text;
     in-out property <int> refresh-interval-seconds;
     in-out property <int> selected-widget-index;
     in property <bool> selected-widget-plugin-missing: false;
@@ -1185,7 +1193,7 @@ export component SettingsWindow inherits Window {
     property <length> hovered-plugin-preview-width: root.hovered-plugin-preview-image.width * 1px * root.hovered-plugin-preview-scale;
     property <length> hovered-plugin-preview-height: root.hovered-plugin-preview-image.height * 1px * root.hovered-plugin-preview-scale;
 
-    callback apply-settings(bool, bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
+    callback apply-settings(bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
     callback apply-tray-market-settings(bool, int);
     callback apply-network-settings(bool, string);
     callback apply-alert-settings(bool, string, int, string);
@@ -1249,6 +1257,10 @@ export component SettingsWindow inherits Window {
             root.market-okx-enabled,
             root.market-hyperliquid-enabled,
             root.market-bitget-enabled,
+            root.market-coinex-enabled,
+            root.market-gate-enabled,
+            root.market-mexc-enabled,
+            root.market-bybit-enabled,
             root.auto-start-enabled,
             root.show-main-window-on-startup,
             root.shortcut-index,
@@ -3247,10 +3259,35 @@ export component SettingsWindow inherits Window {
                 }
 
                 SettingSwitch {
-                    x: 17px;
-                    y: 88px;
+                    x: 535px;
+                    y: 58px;
                     checked <=> root.market-bitget-enabled;
                     accessible-label-text: root.market-bitget-text;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => {
+                        root.apply-current-settings();
+                        root.refresh-symbol-picker-candidates();
+                    }
+                }
+
+                Text {
+                    x: 581px;
+                    y: 63px;
+                    width: 60px;
+                    text: root.market-bitget-text;
+                    color: root.settings-label-color;
+                    font-size: 9px;
+                    font-weight: 750;
+                    overflow: elide;
+                }
+
+                SettingSwitch {
+                    x: 17px;
+                    y: 88px;
+                    checked <=> root.market-coinex-enabled;
+                    accessible-label-text: root.market-coinex-text;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3264,7 +3301,82 @@ export component SettingsWindow inherits Window {
                     x: 63px;
                     y: 93px;
                     width: 60px;
-                    text: root.market-bitget-text;
+                    text: root.market-coinex-text;
+                    color: root.settings-label-color;
+                    font-size: 9px;
+                    font-weight: 750;
+                    overflow: elide;
+                }
+
+                SettingSwitch {
+                    x: 180px;
+                    y: 88px;
+                    checked <=> root.market-gate-enabled;
+                    accessible-label-text: root.market-gate-text;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => {
+                        root.apply-current-settings();
+                        root.refresh-symbol-picker-candidates();
+                    }
+                }
+
+                Text {
+                    x: 226px;
+                    y: 93px;
+                    width: 60px;
+                    text: root.market-gate-text;
+                    color: root.settings-label-color;
+                    font-size: 9px;
+                    font-weight: 750;
+                    overflow: elide;
+                }
+
+                SettingSwitch {
+                    x: 343px;
+                    y: 88px;
+                    checked <=> root.market-mexc-enabled;
+                    accessible-label-text: root.market-mexc-text;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => {
+                        root.apply-current-settings();
+                        root.refresh-symbol-picker-candidates();
+                    }
+                }
+
+                Text {
+                    x: 389px;
+                    y: 93px;
+                    width: 60px;
+                    text: root.market-mexc-text;
+                    color: root.settings-label-color;
+                    font-size: 9px;
+                    font-weight: 750;
+                    overflow: elide;
+                }
+
+                SettingSwitch {
+                    x: 506px;
+                    y: 88px;
+                    checked <=> root.market-bybit-enabled;
+                    accessible-label-text: root.market-bybit-text;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => {
+                        root.apply-current-settings();
+                        root.refresh-symbol-picker-candidates();
+                    }
+                }
+
+                Text {
+                    x: 552px;
+                    y: 93px;
+                    width: 60px;
+                    text: root.market-bybit-text;
                     color: root.settings-label-color;
                     font-size: 9px;
                     font-weight: 750;

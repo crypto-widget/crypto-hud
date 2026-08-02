@@ -20,6 +20,10 @@ pub enum MarketDataSource {
     Okx,
     Hyperliquid,
     Bitget,
+    Coinex,
+    Gate,
+    Mexc,
+    Bybit,
 }
 
 impl MarketDataSource {
@@ -30,6 +34,10 @@ impl MarketDataSource {
             Self::Okx => "okx",
             Self::Hyperliquid => "hyperliquid",
             Self::Bitget => "bitget",
+            Self::Coinex => "coinex",
+            Self::Gate => "gate",
+            Self::Mexc => "mexc",
+            Self::Bybit => "bybit",
         }
     }
 
@@ -40,6 +48,10 @@ impl MarketDataSource {
             Self::Okx => "OKX",
             Self::Hyperliquid => "Hyperliquid",
             Self::Bitget => "Bitget",
+            Self::Coinex => "CoinEx",
+            Self::Gate => "Gate.io",
+            Self::Mexc => "MEXC",
+            Self::Bybit => "Bybit",
         }
     }
 
@@ -50,6 +62,10 @@ impl MarketDataSource {
             "okx" | "ok" => Some(Self::Okx),
             "hyperliquid" | "hl" | "hyper" => Some(Self::Hyperliquid),
             "bitget" | "bg" => Some(Self::Bitget),
+            "coinex" | "ce" => Some(Self::Coinex),
+            "gate" | "gateio" | "gt" => Some(Self::Gate),
+            "mexc" | "mx" => Some(Self::Mexc),
+            "bybit" | "bb" => Some(Self::Bybit),
             _ => None,
         }
     }
@@ -134,6 +150,10 @@ pub fn default_enabled_market_sources() -> Vec<MarketDataSource> {
         MarketDataSource::Okx,
         MarketDataSource::Hyperliquid,
         MarketDataSource::Bitget,
+        MarketDataSource::Coinex,
+        MarketDataSource::Gate,
+        MarketDataSource::Mexc,
+        MarketDataSource::Bybit,
     ]
 }
 
@@ -403,6 +423,14 @@ fn market_source_from_display_part(value: &str) -> Option<MarketDataSource> {
         Some(MarketDataSource::Coinbase)
     } else if normalized.contains("bitget") || normalized == "bg" {
         Some(MarketDataSource::Bitget)
+    } else if normalized.contains("coinex") || normalized == "ce" {
+        Some(MarketDataSource::Coinex)
+    } else if normalized.contains("gateio") || normalized == "gate" || normalized == "gt" {
+        Some(MarketDataSource::Gate)
+    } else if normalized.contains("mexc") || normalized == "mx" {
+        Some(MarketDataSource::Mexc)
+    } else if normalized.contains("bybit") || normalized == "bb" {
+        Some(MarketDataSource::Bybit)
     } else if normalized.contains("binance") || normalized == "bin" {
         Some(MarketDataSource::Binance)
     } else if normalized.contains("okx") || normalized == "ok" {
@@ -429,7 +457,11 @@ fn default_market_type_for_source(source: MarketDataSource) -> MarketType {
         MarketDataSource::Binance
         | MarketDataSource::Coinbase
         | MarketDataSource::Okx
-        | MarketDataSource::Bitget => MarketType::Spot,
+        | MarketDataSource::Bitget
+        | MarketDataSource::Coinex
+        | MarketDataSource::Gate
+        | MarketDataSource::Mexc
+        | MarketDataSource::Bybit => MarketType::Spot,
     }
 }
 
@@ -439,7 +471,11 @@ fn default_quote_for_source(source: MarketDataSource) -> &'static str {
         MarketDataSource::Binance
         | MarketDataSource::Coinbase
         | MarketDataSource::Okx
-        | MarketDataSource::Bitget => "USDT",
+        | MarketDataSource::Bitget
+        | MarketDataSource::Coinex
+        | MarketDataSource::Gate
+        | MarketDataSource::Mexc
+        | MarketDataSource::Bybit => "USDT",
     }
 }
 
@@ -644,6 +680,18 @@ mod tests {
         assert_eq!(
             normalize_market_pair_key("BTC/USDT · Bitget").as_deref(),
             Some("bitget:spot:BTC/USDT")
+        );
+        assert_eq!(
+            normalize_market_pair_key("BTC/USDT · Gate.io").as_deref(),
+            Some("gate:spot:BTC/USDT")
+        );
+        assert_eq!(
+            normalize_market_pair_key("mexc:BTC/USDT").as_deref(),
+            Some("mexc:spot:BTC/USDT")
+        );
+        assert_eq!(
+            normalize_market_pair_key("BTC/USDT · Bybit").as_deref(),
+            Some("bybit:spot:BTC/USDT")
         );
         assert_eq!(
             default_market_symbols_for_source(MarketDataSource::Bitget),
