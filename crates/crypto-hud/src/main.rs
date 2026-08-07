@@ -34,6 +34,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use crypto_hud_core::{parse_market_pair, MarketDataSource, MarketType};
 use crypto_hud_market as market;
 use crypto_hud_runtime::QuoteCache;
 use crypto_hud_shell_state as settings;
@@ -332,6 +333,10 @@ fn main() -> Result<()> {
         requested_widget_count,
         &plugin_definitions,
     );
+    let is_first_run = matches!(
+        loaded_layout_store.source,
+        settings::LayoutStoreLoadSource::Missing
+    );
     let state_load_warning = loaded_layout_store
         .warning
         .as_ref()
@@ -340,14 +345,36 @@ fn main() -> Result<()> {
         eprintln!("layout state recovery warning: {warning}");
     }
     let mut layout_store = loaded_layout_store.store;
-    seed_each_widget_on_empty_start(
+    let mut state_changed = seed_each_widget_on_empty_start(
         &mut layout_store,
         launch_options.each_widget,
         &plugin_catalog,
     );
+    if is_first_run
+        && !offline_gui_smoke
+        && layout_store.settings.market_provider == settings::MarketProviderPreference::Auto
+    {
+        let probe_settings = layout_store.settings.clone().normalized();
+        let proxy_url = settings::effective_network_proxy_url(&probe_settings);
+        match market::select_low_latency_spot_source(
+            proxy_url.as_deref(),
+            &settings::enabled_market_sources(&probe_settings),
+        ) {
+            Ok(Some(source)) => {
+                state_changed |= apply_first_run_market_source(&mut layout_store, source);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("market source auto-selection skipped: {error:#}");
+            }
+        }
+    }
     if apply_dynamic_widget_auto_sizes_to_store(&mut layout_store, &plugin_catalog) {
+        state_changed = true;
+    }
+    if state_changed {
         if let Err(error) = save_layout_store(&state_path, &layout_store) {
-            eprintln!("failed to save migrated dynamic widget layout: {error:#}");
+            eprintln!("failed to save updated initial widget layout: {error:#}");
         }
     }
     let layouts = Rc::new(RefCell::new(layout_store));
@@ -584,6 +611,57 @@ fn seed_each_widget_on_empty_start(
     store.selected_widget_id = store.widgets.first().map(|widget| widget.id.clone());
     normalize_store_with_catalog(store, 0, Some(plugin_catalog));
     true
+}
+
+fn apply_first_run_market_source(
+    store: &mut settings::LayoutStore,
+    source: MarketDataSource,
+) -> bool {
+    let default_symbols = settings::default_market_symbols_for_source(source);
+    let mut changed = false;
+    if store.settings.market_default_symbols != default_symbols {
+        store.settings.market_default_symbols = default_symbols;
+        changed = true;
+    }
+
+    for widget in &mut store.widgets {
+        let symbols = widget
+            .symbols
+            .iter()
+            .map(|symbol| retarget_default_spot_symbol(symbol, source))
+            .collect::<Vec<_>>();
+        if widget.symbols != symbols {
+            widget.symbols = symbols;
+            changed = true;
+        }
+    }
+
+    let tray_symbols = store
+        .settings
+        .tray_market_symbols
+        .iter()
+        .map(|symbol| retarget_default_spot_symbol(symbol, source))
+        .collect::<Vec<_>>();
+    if store.settings.tray_market_symbols != tray_symbols {
+        store.settings.tray_market_symbols = tray_symbols;
+        changed = true;
+    }
+
+    changed
+}
+
+fn retarget_default_spot_symbol(symbol: &str, source: MarketDataSource) -> String {
+    let Some(mut pair) = parse_market_pair(symbol) else {
+        return symbol.to_string();
+    };
+    if pair.source != MarketDataSource::Binance
+        || pair.market_type != MarketType::Spot
+        || pair.quote != "USDT"
+    {
+        return symbol.to_string();
+    }
+    pair.source = source;
+    pair.key()
 }
 
 #[cfg(test)]
@@ -1374,6 +1452,45 @@ mod tests {
         assert_eq!(store.widgets[0].id, "quote-board-1");
         assert_eq!(store.selected_widget_id.as_deref(), Some("quote-board-1"));
         assert_eq!(store.widgets[0].symbols, default_symbols());
+    }
+
+    #[test]
+    fn first_run_source_selection_retargets_default_spot_symbols() {
+        let mut store = LayoutStore {
+            settings: AppSettings::default(),
+            widgets: vec![WidgetInstance {
+                id: "quote-board-1".to_string(),
+                plugin_id: WidgetType::QuoteBoard.plugin_id().to_string(),
+                legacy_widget_type: None,
+                name: "Quote Board 1".to_string(),
+                visible: true,
+                layout: WidgetLayout::default(),
+                symbols: default_symbols(),
+                config: default_widget_config(),
+            }],
+            ..LayoutStore::default()
+        };
+
+        assert!(apply_first_run_market_source(
+            &mut store,
+            MarketDataSource::Bitget
+        ));
+        assert_eq!(
+            store.settings.market_default_symbols,
+            settings::default_market_symbols_for_source(MarketDataSource::Bitget)
+        );
+        assert_eq!(
+            store.widgets[0].symbols,
+            vec![
+                "bitget:spot:BTC/USDT",
+                "bitget:spot:ETH/USDT",
+                "bitget:spot:SOL/USDT"
+            ]
+        );
+        assert_eq!(
+            store.settings.tray_market_symbols,
+            vec!["bitget:spot:BTC/USDT"]
+        );
     }
 
     #[test]

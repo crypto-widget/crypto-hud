@@ -1233,6 +1233,11 @@ pub struct ProviderLabels<'a> {
     pub coinbase: &'a str,
     pub okx: &'a str,
     pub hyperliquid: &'a str,
+    pub bitget: &'a str,
+    pub coinex: &'a str,
+    pub gate: &'a str,
+    pub mexc: &'a str,
+    pub bybit: &'a str,
     pub mixed: &'a str,
 }
 
@@ -1243,6 +1248,11 @@ impl Default for ProviderLabels<'static> {
             coinbase: "Coinbase",
             okx: "OKX",
             hyperliquid: "Hyperliquid",
+            bitget: "Bitget",
+            coinex: "CoinEx",
+            gate: "Gate.io",
+            mexc: "MEXC",
+            bybit: "Bybit",
             mixed: "Mixed",
         }
     }
@@ -1883,6 +1893,11 @@ fn source_display_text(
         MarketDataSource::Coinbase => 1,
         MarketDataSource::Okx => 2,
         MarketDataSource::Hyperliquid => 3,
+        MarketDataSource::Bitget => 4,
+        MarketDataSource::Coinex => 5,
+        MarketDataSource::Gate => 6,
+        MarketDataSource::Mexc => 7,
+        MarketDataSource::Bybit => 8,
     });
 
     match sources.as_slice() {
@@ -1916,6 +1931,11 @@ pub fn provider_display_label(provider: MarketDataSource, labels: ProviderLabels
         MarketDataSource::Coinbase => labels.coinbase,
         MarketDataSource::Okx => labels.okx,
         MarketDataSource::Hyperliquid => labels.hyperliquid,
+        MarketDataSource::Bitget => labels.bitget,
+        MarketDataSource::Coinex => labels.coinex,
+        MarketDataSource::Gate => labels.gate,
+        MarketDataSource::Mexc => labels.mexc,
+        MarketDataSource::Bybit => labels.bybit,
     }
 }
 
@@ -2843,6 +2863,11 @@ mod tests {
                 coinbase: "Coinbase",
                 okx: "OKX",
                 hyperliquid: "Hyperliquid",
+                bitget: "Bitget",
+                coinex: "CoinEx",
+                gate: "Gate.io",
+                mexc: "MEXC",
+                bybit: "Bybit",
                 mixed: "多个源",
             },
             labels: RuntimeTextLabels {

@@ -18,11 +18,11 @@ use serde_json::{Map, Value};
 
 pub use crypto_hud_core::{
     clamp_refresh_interval, default_enabled_market_sources, default_market_symbols,
-    format_market_pair_display, format_market_pair_source, format_market_pair_symbol,
-    market_pair_source, normalize_market_pair_key, normalize_market_symbols,
-    normalize_symbol_token, AlertCondition, AlertRule, MarketDataSource, MarketPair,
-    MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS, MAX_MARKET_SYMBOLS,
-    MAX_REFRESH_INTERVAL_SECONDS, MIN_REFRESH_INTERVAL_SECONDS,
+    default_market_symbols_for_source, format_market_pair_display, format_market_pair_source,
+    format_market_pair_symbol, market_pair_source, normalize_market_pair_key,
+    normalize_market_symbols, normalize_symbol_token, AlertCondition, AlertRule, MarketDataSource,
+    MarketPair, MarketProviderPreference, MarketType, DEFAULT_REFRESH_INTERVAL_SECONDS,
+    MAX_MARKET_SYMBOLS, MAX_REFRESH_INTERVAL_SECONDS, MIN_REFRESH_INTERVAL_SECONDS,
 };
 
 pub const MIN_OPACITY_PERCENT: i32 = 20;
@@ -865,6 +865,16 @@ pub struct AppSettings {
     pub market_okx_enabled: bool,
     #[serde(default = "default_market_source_enabled")]
     pub market_hyperliquid_enabled: bool,
+    #[serde(default = "default_market_source_enabled")]
+    pub market_bitget_enabled: bool,
+    #[serde(default = "default_market_source_enabled")]
+    pub market_coinex_enabled: bool,
+    #[serde(default = "default_market_source_enabled")]
+    pub market_gate_enabled: bool,
+    #[serde(default = "default_market_source_enabled")]
+    pub market_mexc_enabled: bool,
+    #[serde(default = "default_market_source_enabled")]
+    pub market_bybit_enabled: bool,
     #[serde(default = "default_refresh_interval_seconds")]
     pub refresh_interval_seconds: i32,
     #[serde(default = "default_market_symbols")]
@@ -909,6 +919,11 @@ impl Default for AppSettings {
             market_coinbase_enabled: default_market_source_enabled(),
             market_okx_enabled: default_market_source_enabled(),
             market_hyperliquid_enabled: default_market_source_enabled(),
+            market_bitget_enabled: default_market_source_enabled(),
+            market_coinex_enabled: default_market_source_enabled(),
+            market_gate_enabled: default_market_source_enabled(),
+            market_mexc_enabled: default_market_source_enabled(),
+            market_bybit_enabled: default_market_source_enabled(),
             refresh_interval_seconds: default_refresh_interval_seconds(),
             market_default_symbols: default_market_symbols(),
             auto_start_enabled: false,
@@ -932,6 +947,15 @@ impl AppSettings {
     pub fn normalized(self) -> Self {
         let network_proxy_url = normalize_network_proxy_url(self.network_proxy_url);
         let proxy_has_userinfo = network_proxy_url_has_userinfo(&network_proxy_url);
+        let any_market_source_enabled = self.market_binance_enabled
+            || self.market_coinbase_enabled
+            || self.market_okx_enabled
+            || self.market_hyperliquid_enabled
+            || self.market_bitget_enabled
+            || self.market_coinex_enabled
+            || self.market_gate_enabled
+            || self.market_mexc_enabled
+            || self.market_bybit_enabled;
         Self {
             widgets_always_on_top: self.widgets_always_on_top,
             opacity_percent: clamp_opacity(self.opacity_percent),
@@ -940,31 +964,48 @@ impl AppSettings {
             market_provider: self.market_provider,
             market_binance_enabled: source_enabled_or_default(
                 self.market_binance_enabled,
-                self.market_coinbase_enabled,
-                self.market_okx_enabled,
-                self.market_hyperliquid_enabled,
+                any_market_source_enabled,
                 MarketDataSource::Binance,
             ),
             market_coinbase_enabled: source_enabled_or_default(
-                self.market_binance_enabled,
                 self.market_coinbase_enabled,
-                self.market_okx_enabled,
-                self.market_hyperliquid_enabled,
+                any_market_source_enabled,
                 MarketDataSource::Coinbase,
             ),
             market_okx_enabled: source_enabled_or_default(
-                self.market_binance_enabled,
-                self.market_coinbase_enabled,
                 self.market_okx_enabled,
-                self.market_hyperliquid_enabled,
+                any_market_source_enabled,
                 MarketDataSource::Okx,
             ),
             market_hyperliquid_enabled: source_enabled_or_default(
-                self.market_binance_enabled,
-                self.market_coinbase_enabled,
-                self.market_okx_enabled,
                 self.market_hyperliquid_enabled,
+                any_market_source_enabled,
                 MarketDataSource::Hyperliquid,
+            ),
+            market_bitget_enabled: source_enabled_or_default(
+                self.market_bitget_enabled,
+                any_market_source_enabled,
+                MarketDataSource::Bitget,
+            ),
+            market_coinex_enabled: source_enabled_or_default(
+                self.market_coinex_enabled,
+                any_market_source_enabled,
+                MarketDataSource::Coinex,
+            ),
+            market_gate_enabled: source_enabled_or_default(
+                self.market_gate_enabled,
+                any_market_source_enabled,
+                MarketDataSource::Gate,
+            ),
+            market_mexc_enabled: source_enabled_or_default(
+                self.market_mexc_enabled,
+                any_market_source_enabled,
+                MarketDataSource::Mexc,
+            ),
+            market_bybit_enabled: source_enabled_or_default(
+                self.market_bybit_enabled,
+                any_market_source_enabled,
+                MarketDataSource::Bybit,
             ),
             refresh_interval_seconds: clamp_refresh_interval(self.refresh_interval_seconds),
             market_default_symbols: normalize_market_symbols(self.market_default_symbols),
@@ -1024,22 +1065,11 @@ pub fn default_market_source_enabled() -> bool {
 }
 
 fn source_enabled_or_default(
-    binance_enabled: bool,
-    coinbase_enabled: bool,
-    okx_enabled: bool,
-    hyperliquid_enabled: bool,
+    source_enabled: bool,
+    any_source_enabled: bool,
     source: MarketDataSource,
 ) -> bool {
-    if binance_enabled || coinbase_enabled || okx_enabled || hyperliquid_enabled {
-        match source {
-            MarketDataSource::Binance => binance_enabled,
-            MarketDataSource::Coinbase => coinbase_enabled,
-            MarketDataSource::Okx => okx_enabled,
-            MarketDataSource::Hyperliquid => hyperliquid_enabled,
-        }
-    } else {
-        source == MarketDataSource::Binance
-    }
+    source_enabled || (!any_source_enabled && source == MarketDataSource::Binance)
 }
 
 pub fn enabled_market_sources(settings: &AppSettings) -> Vec<MarketDataSource> {
@@ -1056,6 +1086,21 @@ pub fn enabled_market_sources(settings: &AppSettings) -> Vec<MarketDataSource> {
     }
     if settings.market_hyperliquid_enabled {
         sources.push(MarketDataSource::Hyperliquid);
+    }
+    if settings.market_bitget_enabled {
+        sources.push(MarketDataSource::Bitget);
+    }
+    if settings.market_coinex_enabled {
+        sources.push(MarketDataSource::Coinex);
+    }
+    if settings.market_gate_enabled {
+        sources.push(MarketDataSource::Gate);
+    }
+    if settings.market_mexc_enabled {
+        sources.push(MarketDataSource::Mexc);
+    }
+    if settings.market_bybit_enabled {
+        sources.push(MarketDataSource::Bybit);
     }
     if sources.is_empty() {
         default_enabled_market_sources()
@@ -3445,6 +3490,11 @@ mod tests {
         assert!(settings.market_coinbase_enabled);
         assert!(settings.market_okx_enabled);
         assert!(settings.market_hyperliquid_enabled);
+        assert!(settings.market_bitget_enabled);
+        assert!(settings.market_coinex_enabled);
+        assert!(settings.market_gate_enabled);
+        assert!(settings.market_mexc_enabled);
+        assert!(settings.market_bybit_enabled);
         assert_eq!(
             settings.refresh_interval_seconds,
             DEFAULT_REFRESH_INTERVAL_SECONDS
@@ -4007,6 +4057,32 @@ mod tests {
         assert_eq!(
             low_scale_settings.widget_scale_percent,
             MIN_WIDGET_SCALE_PERCENT
+        );
+    }
+
+    #[test]
+    fn new_market_sources_can_be_enabled_without_legacy_sources() {
+        let settings = AppSettings {
+            market_binance_enabled: false,
+            market_coinbase_enabled: false,
+            market_okx_enabled: false,
+            market_hyperliquid_enabled: false,
+            market_bitget_enabled: false,
+            market_coinex_enabled: true,
+            market_gate_enabled: true,
+            market_mexc_enabled: true,
+            market_bybit_enabled: true,
+            ..AppSettings::default()
+        };
+
+        assert_eq!(
+            enabled_market_sources(&settings),
+            vec![
+                MarketDataSource::Coinex,
+                MarketDataSource::Gate,
+                MarketDataSource::Mexc,
+                MarketDataSource::Bybit,
+            ]
         );
     }
 

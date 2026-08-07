@@ -21,7 +21,13 @@ const BINANCE_BASE_URL: &str = "https://api.binance.com";
 const COINBASE_EXCHANGE_BASE_URL: &str = "https://api.exchange.coinbase.com";
 const OKX_BASE_URL: &str = "https://www.okx.com";
 const HYPERLIQUID_BASE_URL: &str = "https://api.hyperliquid.xyz";
+const BITGET_BASE_URL: &str = "https://api.bitget.com";
+const COINEX_BASE_URL: &str = "https://api.coinex.com/v2";
+const GATE_BASE_URL: &str = "https://api.gateio.ws/api/v4";
+const MEXC_BASE_URL: &str = "https://api.mexc.com";
+const BYBIT_BASE_URL: &str = "https://api.bybit.com";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+const SOURCE_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_MARKET_RESPONSE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CONCURRENT_PAIR_FETCHES: usize = 4;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -408,6 +414,113 @@ pub fn fetch_symbol_catalog_with_warnings(proxy_url: Option<&str>) -> Result<Sym
     fetch_symbol_catalog_with_agent(&agent)
 }
 
+pub fn select_low_latency_spot_source(
+    proxy_url: Option<&str>,
+    enabled_sources: &[MarketDataSource],
+) -> Result<Option<MarketDataSource>> {
+    let sources = enabled_sources
+        .iter()
+        .copied()
+        .filter(|source| {
+            matches!(
+                source,
+                MarketDataSource::Binance
+                    | MarketDataSource::Okx
+                    | MarketDataSource::Bitget
+                    | MarketDataSource::Coinex
+                    | MarketDataSource::Gate
+                    | MarketDataSource::Mexc
+                    | MarketDataSource::Bybit
+            )
+        })
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        return Ok(None);
+    }
+
+    let agent = build_agent_with_timeout(proxy_url, SOURCE_PROBE_TIMEOUT)?;
+    let probes = thread::scope(|scope| -> Result<Vec<_>> {
+        let handles = sources
+            .into_iter()
+            .map(|source| {
+                let agent = agent.clone();
+                scope.spawn(move || {
+                    let started_at = Instant::now();
+                    let result = probe_default_spot_source(&agent, source);
+                    (source, result.map(|()| started_at.elapsed()))
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut results = Vec::with_capacity(handles.len());
+        for handle in handles {
+            results.push(
+                handle
+                    .join()
+                    .map_err(|_| anyhow!("market source probe worker panicked"))?,
+            );
+        }
+        Ok(results)
+    })?;
+
+    Ok(select_fastest_source(probes))
+}
+
+fn probe_default_spot_source(agent: &ureq::Agent, source: MarketDataSource) -> Result<()> {
+    let pair = MarketPair {
+        source,
+        market_type: MarketType::Spot,
+        base: "BTC".to_string(),
+        quote: "USDT".to_string(),
+    };
+    let mut candle_cache = CandleCache::new();
+    let uninterrupted = || false;
+    match source {
+        MarketDataSource::Binance => {
+            fetch_binance(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Okx => {
+            fetch_okx(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Bitget => {
+            fetch_bitget(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Coinex => {
+            fetch_coinex(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Gate => {
+            fetch_gate(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Mexc => {
+            fetch_mexc(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Bybit => {
+            fetch_bybit(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Coinbase | MarketDataSource::Hyperliquid => {
+            bail!(
+                "{} does not support the default USDT spot probe",
+                source.label()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn select_fastest_source(
+    probes: impl IntoIterator<Item = (MarketDataSource, Result<Duration>)>,
+) -> Option<MarketDataSource> {
+    let mut selected = None;
+    for (source, result) in probes {
+        let Ok(latency) = result else {
+            continue;
+        };
+        if selected.is_none_or(|(_, best_latency)| latency < best_latency) {
+            selected = Some((source, latency));
+        }
+    }
+    selected.map(|(source, _)| source)
+}
+
 fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalogFetch> {
     let mut warnings = Vec::new();
     let mut catalogs = Vec::new();
@@ -433,6 +546,36 @@ fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalogF
     collect_symbol_catalog_result(
         MarketDataSource::Hyperliquid,
         fetch_hyperliquid_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Bitget,
+        fetch_bitget_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Coinex,
+        fetch_coinex_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Gate,
+        fetch_gate_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Mexc,
+        fetch_mexc_symbol_catalog(agent),
+        &mut catalogs,
+        &mut warnings,
+    );
+    collect_symbol_catalog_result(
+        MarketDataSource::Bybit,
+        fetch_bybit_symbol_catalog(agent),
         &mut catalogs,
         &mut warnings,
     );
@@ -719,6 +862,17 @@ fn fetch_pair(
         MarketDataSource::Hyperliquid => {
             fetch_hyperliquid(agent, pair, needs_candles, candle_cache, interrupted)
         }
+        MarketDataSource::Bitget => {
+            fetch_bitget(agent, pair, needs_candles, candle_cache, interrupted)
+        }
+        MarketDataSource::Coinex => {
+            fetch_coinex(agent, pair, needs_candles, candle_cache, interrupted)
+        }
+        MarketDataSource::Gate => fetch_gate(agent, pair, needs_candles, candle_cache, interrupted),
+        MarketDataSource::Mexc => fetch_mexc(agent, pair, needs_candles, candle_cache, interrupted),
+        MarketDataSource::Bybit => {
+            fetch_bybit(agent, pair, needs_candles, candle_cache, interrupted)
+        }
     }
 }
 
@@ -828,6 +982,131 @@ fn fetch_hyperliquid(
         needs_candles,
         candle_cache,
         fetch_hyperliquid_candles,
+    ))
+}
+
+fn fetch_bitget(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    needs_candles: bool,
+    candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
+) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
+    ensure_spot_pair(pair)?;
+    let symbol = bitget_symbol(pair);
+    let url = format!("{BITGET_BASE_URL}/api/v2/spot/market/tickers?symbol={symbol}");
+    let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
+    let snapshot = parse_bitget_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
+        snapshot,
+        needs_candles,
+        candle_cache,
+        fetch_bitget_candles,
+    ))
+}
+
+fn fetch_coinex(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    needs_candles: bool,
+    candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
+) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
+    ensure_spot_pair(pair)?;
+    let symbol = coinex_symbol(pair);
+    let url = format!("{COINEX_BASE_URL}/spot/ticker?market={symbol}");
+    let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
+    let snapshot = parse_coinex_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
+        snapshot,
+        needs_candles,
+        candle_cache,
+        fetch_coinex_candles,
+    ))
+}
+
+fn fetch_gate(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    needs_candles: bool,
+    candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
+) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
+    ensure_spot_pair(pair)?;
+    let currency_pair = gate_currency_pair(pair);
+    let url = format!("{GATE_BASE_URL}/spot/tickers?currency_pair={currency_pair}");
+    let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
+    let snapshot = parse_gate_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
+        snapshot,
+        needs_candles,
+        candle_cache,
+        fetch_gate_candles,
+    ))
+}
+
+fn fetch_mexc(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    needs_candles: bool,
+    candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
+) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
+    ensure_spot_pair(pair)?;
+    let symbol = mexc_symbol(pair);
+    let url = format!("{MEXC_BASE_URL}/api/v3/ticker/24hr?symbol={symbol}");
+    let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
+    let snapshot = parse_mexc_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
+        snapshot,
+        needs_candles,
+        candle_cache,
+        fetch_mexc_candles,
+    ))
+}
+
+fn fetch_bybit(
+    agent: &ureq::Agent,
+    pair: &MarketPair,
+    needs_candles: bool,
+    candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
+) -> Result<MarketFetchOutcome> {
+    ensure_fetch_active(interrupted)?;
+    ensure_spot_pair(pair)?;
+    let symbol = bybit_symbol(pair);
+    let url = format!("{BYBIT_BASE_URL}/v5/market/tickers?category=spot&symbol={symbol}");
+    let body = get_json(agent, &url)?;
+    ensure_fetch_active(interrupted)?;
+    let snapshot = parse_bybit_ticker(pair, &body)?;
+    ensure_fetch_active(interrupted)?;
+    Ok(snapshot_with_optional_candles(
+        agent,
+        pair,
+        snapshot,
+        needs_candles,
+        candle_cache,
+        fetch_bybit_candles,
     ))
 }
 
@@ -1115,6 +1394,51 @@ fn fetch_hyperliquid_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<V
     parse_hyperliquid_candles(&body)
 }
 
+fn fetch_bitget_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
+    let symbol = bitget_symbol(pair);
+    let url = format!(
+        "{BITGET_BASE_URL}/api/v2/spot/market/candles?symbol={symbol}&granularity=5min&limit={CANDLE_LIMIT_24H_5M}"
+    );
+    let body = get_json(agent, &url)?;
+    parse_bitget_candles(&body)
+}
+
+fn fetch_coinex_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
+    let symbol = coinex_symbol(pair);
+    let url = format!(
+        "{COINEX_BASE_URL}/spot/kline?market={symbol}&period=5min&limit={CANDLE_LIMIT_24H_5M}"
+    );
+    let body = get_json(agent, &url)?;
+    parse_coinex_candles(&body)
+}
+
+fn fetch_gate_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
+    let currency_pair = gate_currency_pair(pair);
+    let url = format!(
+        "{GATE_BASE_URL}/spot/candlesticks?currency_pair={currency_pair}&interval=5m&limit={CANDLE_LIMIT_24H_5M}"
+    );
+    let body = get_json(agent, &url)?;
+    parse_gate_candles(&body)
+}
+
+fn fetch_mexc_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
+    let symbol = mexc_symbol(pair);
+    let url = format!(
+        "{MEXC_BASE_URL}/api/v3/klines?symbol={symbol}&interval=5m&limit={CANDLE_LIMIT_24H_5M}"
+    );
+    let body = get_json(agent, &url)?;
+    parse_mexc_candles(&body)
+}
+
+fn fetch_bybit_candles(agent: &ureq::Agent, pair: &MarketPair) -> Result<Vec<MarketCandle>> {
+    let symbol = bybit_symbol(pair);
+    let url = format!(
+        "{BYBIT_BASE_URL}/v5/market/kline?category=spot&symbol={symbol}&interval=5&limit={CANDLE_LIMIT_24H_5M}"
+    );
+    let body = get_json(agent, &url)?;
+    parse_bybit_candles(&body)
+}
+
 fn unix_epoch_millis() -> Result<u64> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1151,6 +1475,36 @@ fn fetch_hyperliquid_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCat
     parse_hyperliquid_symbol_catalog(&body)
 }
 
+fn fetch_bitget_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalogEntry>> {
+    let url = format!("{BITGET_BASE_URL}/api/v2/spot/public/symbols");
+    let body = get_json(agent, &url)?;
+    parse_bitget_symbol_catalog(&body)
+}
+
+fn fetch_coinex_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalogEntry>> {
+    let url = format!("{COINEX_BASE_URL}/spot/market");
+    let body = get_json(agent, &url)?;
+    parse_coinex_symbol_catalog(&body)
+}
+
+fn fetch_gate_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalogEntry>> {
+    let url = format!("{GATE_BASE_URL}/spot/currency_pairs");
+    let body = get_json(agent, &url)?;
+    parse_gate_symbol_catalog(&body)
+}
+
+fn fetch_mexc_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalogEntry>> {
+    let url = format!("{MEXC_BASE_URL}/api/v3/exchangeInfo");
+    let body = get_json(agent, &url)?;
+    parse_mexc_symbol_catalog(&body)
+}
+
+fn fetch_bybit_symbol_catalog(agent: &ureq::Agent) -> Result<Vec<SymbolCatalogEntry>> {
+    let url = format!("{BYBIT_BASE_URL}/v5/market/instruments-info?category=spot");
+    let body = get_json(agent, &url)?;
+    parse_bybit_symbol_catalog(&body)
+}
+
 fn combine_symbol_catalogs(catalogs: Vec<Vec<SymbolCatalogEntry>>) -> SymbolCatalog {
     let mut entries = BTreeMap::<String, SymbolCatalogEntry>::new();
     for entry in catalogs.into_iter().flatten() {
@@ -1171,6 +1525,26 @@ fn coinbase_product_id(pair: &MarketPair) -> String {
 
 fn okx_instrument_id(pair: &MarketPair) -> String {
     format!("{}-{}", pair.base, pair.quote)
+}
+
+fn bitget_symbol(pair: &MarketPair) -> String {
+    format!("{}{}", pair.base, pair.quote)
+}
+
+fn coinex_symbol(pair: &MarketPair) -> String {
+    format!("{}{}", pair.base, pair.quote)
+}
+
+fn gate_currency_pair(pair: &MarketPair) -> String {
+    format!("{}_{}", pair.base, pair.quote)
+}
+
+fn mexc_symbol(pair: &MarketPair) -> String {
+    format!("{}{}", pair.base, pair.quote)
+}
+
+fn bybit_symbol(pair: &MarketPair) -> String {
+    format!("{}{}", pair.base, pair.quote)
 }
 
 fn catalog_entry(
@@ -1449,6 +1823,525 @@ fn parse_okx_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
         MarketDataSource::Okx,
         price,
         percent_change(price, open_24h, "OKX 24h change")?,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetTickerResponse {
+    code: String,
+    msg: String,
+    data: Vec<BitgetTicker>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BitgetTicker {
+    last_pr: String,
+    change_24h: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetCandlesResponse {
+    code: String,
+    msg: String,
+    data: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BitgetSymbolsResponse {
+    code: String,
+    msg: String,
+    data: Vec<BitgetSymbol>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BitgetSymbol {
+    base_coin: String,
+    quote_coin: String,
+    status: String,
+}
+
+fn parse_bitget_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
+    let response = serde_json::from_str::<BitgetSymbolsResponse>(body)
+        .context("failed to parse Bitget symbols")?;
+    if response.code != "00000" {
+        bail!("Bitget returned {}: {}", response.code, response.msg);
+    }
+
+    Ok(unique_catalog_entries(
+        response.data.into_iter().filter_map(|symbol| {
+            (symbol.status.eq_ignore_ascii_case("online") && stable_quote(&symbol.quote_coin))
+                .then(|| {
+                    catalog_entry(
+                        MarketDataSource::Bitget,
+                        MarketType::Spot,
+                        symbol.base_coin,
+                        symbol.quote_coin,
+                    )
+                })
+                .flatten()
+        }),
+    ))
+}
+
+fn parse_bitget_candles(body: &str) -> Result<Vec<MarketCandle>> {
+    let response = serde_json::from_str::<BitgetCandlesResponse>(body)
+        .context("failed to parse Bitget candles")?;
+    if response.code != "00000" {
+        bail!("Bitget returned {}: {}", response.code, response.msg);
+    }
+
+    let mut candles = response
+        .data
+        .iter()
+        .map(|row| {
+            Ok(MarketCandle {
+                open_time_millis: parse_u64(
+                    row.first().map(String::as_str).unwrap_or(""),
+                    "Bitget candle time",
+                )?,
+                open: parse_decimal(
+                    row.get(1).map(String::as_str).unwrap_or(""),
+                    "Bitget candle open",
+                )?,
+                high: parse_decimal(
+                    row.get(2).map(String::as_str).unwrap_or(""),
+                    "Bitget candle high",
+                )?,
+                low: parse_decimal(
+                    row.get(3).map(String::as_str).unwrap_or(""),
+                    "Bitget candle low",
+                )?,
+                close: parse_decimal(
+                    row.get(4).map(String::as_str).unwrap_or(""),
+                    "Bitget candle close",
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
+}
+
+fn parse_bitget_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
+    let response = serde_json::from_str::<BitgetTickerResponse>(body)
+        .context("failed to parse Bitget ticker")?;
+    if response.code != "00000" {
+        bail!("Bitget returned {}: {}", response.code, response.msg);
+    }
+    let ticker = response
+        .data
+        .first()
+        .ok_or_else(|| anyhow!("Bitget response did not include ticker data"))?;
+    let price = parse_positive_decimal(&ticker.last_pr, "Bitget lastPr")?;
+    let change_percent = parse_decimal(&ticker.change_24h, "Bitget change24h")? * 100.0;
+
+    market_snapshot(pair, MarketDataSource::Bitget, price, change_percent)
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinexTickerResponse {
+    code: i64,
+    message: String,
+    data: Vec<CoinexTicker>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinexTicker {
+    last: String,
+    open: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinexCandlesResponse {
+    code: i64,
+    message: String,
+    data: Vec<CoinexCandle>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinexCandle {
+    created_at: u64,
+    open: String,
+    close: String,
+    high: String,
+    low: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinexMarketsResponse {
+    code: i64,
+    message: String,
+    data: Vec<CoinexMarket>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinexMarket {
+    base_ccy: String,
+    quote_ccy: String,
+    status: String,
+    #[serde(default)]
+    is_api_trading_available: bool,
+}
+
+fn parse_coinex_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
+    let response = serde_json::from_str::<CoinexMarketsResponse>(body)
+        .context("failed to parse CoinEx markets")?;
+    if response.code != 0 {
+        bail!("CoinEx returned {}: {}", response.code, response.message);
+    }
+
+    Ok(unique_catalog_entries(
+        response.data.into_iter().filter_map(|market| {
+            (market.status.eq_ignore_ascii_case("online")
+                && market.is_api_trading_available
+                && stable_quote(&market.quote_ccy))
+            .then(|| {
+                catalog_entry(
+                    MarketDataSource::Coinex,
+                    MarketType::Spot,
+                    market.base_ccy,
+                    market.quote_ccy,
+                )
+            })
+            .flatten()
+        }),
+    ))
+}
+
+fn parse_coinex_candles(body: &str) -> Result<Vec<MarketCandle>> {
+    let response = serde_json::from_str::<CoinexCandlesResponse>(body)
+        .context("failed to parse CoinEx candles")?;
+    if response.code != 0 {
+        bail!("CoinEx returned {}: {}", response.code, response.message);
+    }
+
+    let mut candles = response
+        .data
+        .iter()
+        .map(|candle| {
+            Ok(MarketCandle {
+                open_time_millis: candle.created_at,
+                open: parse_decimal(&candle.open, "CoinEx candle open")?,
+                high: parse_decimal(&candle.high, "CoinEx candle high")?,
+                low: parse_decimal(&candle.low, "CoinEx candle low")?,
+                close: parse_decimal(&candle.close, "CoinEx candle close")?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
+}
+
+fn parse_coinex_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
+    let response = serde_json::from_str::<CoinexTickerResponse>(body)
+        .context("failed to parse CoinEx ticker")?;
+    if response.code != 0 {
+        bail!("CoinEx returned {}: {}", response.code, response.message);
+    }
+    let ticker = response
+        .data
+        .first()
+        .ok_or_else(|| anyhow!("CoinEx response did not include ticker data"))?;
+    let price = parse_positive_decimal(&ticker.last, "CoinEx last")?;
+    let open_24h = parse_positive_decimal(&ticker.open, "CoinEx open")?;
+
+    market_snapshot(
+        pair,
+        MarketDataSource::Coinex,
+        price,
+        percent_change(price, open_24h, "CoinEx 24h change")?,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct GateTicker {
+    last: String,
+    change_percentage: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GateCurrencyPair {
+    base: String,
+    quote: String,
+    trade_status: String,
+}
+
+fn parse_gate_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
+    let pairs = serde_json::from_str::<Vec<GateCurrencyPair>>(body)
+        .context("failed to parse Gate.io currency pairs")?;
+    Ok(unique_catalog_entries(pairs.into_iter().filter_map(
+        |pair| {
+            (pair.trade_status.eq_ignore_ascii_case("tradable") && stable_quote(&pair.quote))
+                .then(|| {
+                    catalog_entry(
+                        MarketDataSource::Gate,
+                        MarketType::Spot,
+                        pair.base,
+                        pair.quote,
+                    )
+                })
+                .flatten()
+        },
+    )))
+}
+
+fn parse_gate_candles(body: &str) -> Result<Vec<MarketCandle>> {
+    let rows = serde_json::from_str::<Vec<Vec<serde_json::Value>>>(body)
+        .context("failed to parse Gate.io candles")?;
+    let mut candles = rows
+        .iter()
+        .map(|row| {
+            Ok(MarketCandle {
+                open_time_millis: parse_json_u64(row.first(), "Gate.io candle time")?
+                    .checked_mul(1_000)
+                    .ok_or_else(|| anyhow!("Gate.io candle time overflow"))?,
+                close: parse_json_decimal(row.get(2), "Gate.io candle close")?,
+                high: parse_json_decimal(row.get(3), "Gate.io candle high")?,
+                low: parse_json_decimal(row.get(4), "Gate.io candle low")?,
+                open: parse_json_decimal(row.get(5), "Gate.io candle open")?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
+}
+
+fn parse_gate_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
+    let tickers =
+        serde_json::from_str::<Vec<GateTicker>>(body).context("failed to parse Gate.io tickers")?;
+    let ticker = tickers
+        .first()
+        .ok_or_else(|| anyhow!("Gate.io response did not include ticker data"))?;
+
+    market_snapshot(
+        pair,
+        MarketDataSource::Gate,
+        parse_positive_decimal(&ticker.last, "Gate.io last")?,
+        parse_decimal(&ticker.change_percentage, "Gate.io change_percentage")?,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MexcTicker {
+    last_price: String,
+    price_change_percent: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MexcExchangeInfo {
+    symbols: Vec<MexcSymbol>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MexcSymbol {
+    status: String,
+    base_asset: String,
+    quote_asset: String,
+    #[serde(default)]
+    is_spot_trading_allowed: Option<bool>,
+}
+
+fn parse_mexc_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
+    let response = serde_json::from_str::<MexcExchangeInfo>(body)
+        .context("failed to parse MEXC exchangeInfo")?;
+    Ok(unique_catalog_entries(
+        response.symbols.into_iter().filter_map(|symbol| {
+            (mexc_symbol_is_trading(&symbol.status)
+                && symbol.is_spot_trading_allowed.unwrap_or(true)
+                && stable_quote(&symbol.quote_asset))
+            .then(|| {
+                catalog_entry(
+                    MarketDataSource::Mexc,
+                    MarketType::Spot,
+                    symbol.base_asset,
+                    symbol.quote_asset,
+                )
+            })
+            .flatten()
+        }),
+    ))
+}
+
+fn mexc_symbol_is_trading(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_uppercase().as_str(),
+        "1" | "TRADING" | "ENABLED"
+    )
+}
+
+fn parse_mexc_candles(body: &str) -> Result<Vec<MarketCandle>> {
+    let rows = serde_json::from_str::<Vec<Vec<serde_json::Value>>>(body)
+        .context("failed to parse MEXC klines")?;
+    let mut candles = rows
+        .iter()
+        .map(|row| {
+            Ok(MarketCandle {
+                open_time_millis: parse_json_u64(row.first(), "MEXC kline open time")?,
+                open: parse_json_decimal(row.get(1), "MEXC kline open")?,
+                high: parse_json_decimal(row.get(2), "MEXC kline high")?,
+                low: parse_json_decimal(row.get(3), "MEXC kline low")?,
+                close: parse_json_decimal(row.get(4), "MEXC kline close")?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
+}
+
+fn parse_mexc_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
+    let ticker = serde_json::from_str::<MexcTicker>(body).context("failed to parse MEXC ticker")?;
+    market_snapshot(
+        pair,
+        MarketDataSource::Mexc,
+        parse_positive_decimal(&ticker.last_price, "MEXC lastPrice")?,
+        parse_decimal(&ticker.price_change_percent, "MEXC priceChangePercent")?,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct BybitTickerResponse {
+    #[serde(rename = "retCode")]
+    ret_code: i64,
+    #[serde(rename = "retMsg")]
+    ret_msg: String,
+    result: BybitTickerResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct BybitTickerResult {
+    list: Vec<BybitTicker>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BybitTicker {
+    last_price: String,
+    prev_price_24h: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BybitCandlesResponse {
+    #[serde(rename = "retCode")]
+    ret_code: i64,
+    #[serde(rename = "retMsg")]
+    ret_msg: String,
+    result: BybitCandlesResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct BybitCandlesResult {
+    list: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BybitInstrumentsResponse {
+    #[serde(rename = "retCode")]
+    ret_code: i64,
+    #[serde(rename = "retMsg")]
+    ret_msg: String,
+    result: BybitInstrumentsResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct BybitInstrumentsResult {
+    list: Vec<BybitInstrument>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BybitInstrument {
+    base_coin: String,
+    quote_coin: String,
+    status: String,
+}
+
+fn parse_bybit_symbol_catalog(body: &str) -> Result<Vec<SymbolCatalogEntry>> {
+    let response = serde_json::from_str::<BybitInstrumentsResponse>(body)
+        .context("failed to parse Bybit instruments")?;
+    if response.ret_code != 0 {
+        bail!("Bybit returned {}: {}", response.ret_code, response.ret_msg);
+    }
+
+    Ok(unique_catalog_entries(
+        response.result.list.into_iter().filter_map(|instrument| {
+            (instrument.status.eq_ignore_ascii_case("trading")
+                && stable_quote(&instrument.quote_coin))
+            .then(|| {
+                catalog_entry(
+                    MarketDataSource::Bybit,
+                    MarketType::Spot,
+                    instrument.base_coin,
+                    instrument.quote_coin,
+                )
+            })
+            .flatten()
+        }),
+    ))
+}
+
+fn parse_bybit_candles(body: &str) -> Result<Vec<MarketCandle>> {
+    let response = serde_json::from_str::<BybitCandlesResponse>(body)
+        .context("failed to parse Bybit candles")?;
+    if response.ret_code != 0 {
+        bail!("Bybit returned {}: {}", response.ret_code, response.ret_msg);
+    }
+
+    let mut candles = response
+        .result
+        .list
+        .iter()
+        .map(|row| {
+            Ok(MarketCandle {
+                open_time_millis: parse_u64(
+                    row.first().map(String::as_str).unwrap_or(""),
+                    "Bybit candle time",
+                )?,
+                open: parse_decimal(
+                    row.get(1).map(String::as_str).unwrap_or(""),
+                    "Bybit candle open",
+                )?,
+                high: parse_decimal(
+                    row.get(2).map(String::as_str).unwrap_or(""),
+                    "Bybit candle high",
+                )?,
+                low: parse_decimal(
+                    row.get(3).map(String::as_str).unwrap_or(""),
+                    "Bybit candle low",
+                )?,
+                close: parse_decimal(
+                    row.get(4).map(String::as_str).unwrap_or(""),
+                    "Bybit candle close",
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    candles.sort_by_key(|candle| candle.open_time_millis);
+    Ok(candles)
+}
+
+fn parse_bybit_ticker(pair: &MarketPair, body: &str) -> Result<MarketSnapshot> {
+    let response = serde_json::from_str::<BybitTickerResponse>(body)
+        .context("failed to parse Bybit ticker")?;
+    if response.ret_code != 0 {
+        bail!("Bybit returned {}: {}", response.ret_code, response.ret_msg);
+    }
+    let ticker = response
+        .result
+        .list
+        .first()
+        .ok_or_else(|| anyhow!("Bybit response did not include ticker data"))?;
+    let price = parse_positive_decimal(&ticker.last_price, "Bybit lastPrice")?;
+    let previous_price = parse_positive_decimal(&ticker.prev_price_24h, "Bybit prevPrice24h")?;
+
+    market_snapshot(
+        pair,
+        MarketDataSource::Bybit,
+        price,
+        percent_change(price, previous_price, "Bybit 24h change")?,
     )
 }
 
@@ -2306,12 +3199,189 @@ mod tests {
     }
 
     #[test]
+    fn parses_bitget_ticker_and_converts_fractional_24hr_change() {
+        let snapshot = parse_bitget_ticker(
+            &pair("bitget:spot:BTC/USDT"),
+            r#"{"code":"00000","msg":"success","data":[{"lastPr":"106800.12","change24h":"0.01234"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.symbol, "bitget:spot:BTC/USDT");
+        assert_eq!(snapshot.source, MarketDataSource::Bitget);
+        assert_eq!(snapshot.price, 106800.12);
+        assert!((snapshot.change_percent_24h - 1.234).abs() < 0.000001);
+    }
+
+    #[test]
+    fn parses_coinex_ticker_and_derives_24hr_change() {
+        let snapshot = parse_coinex_ticker(
+            &pair("coinex:spot:BTC/USDT"),
+            r#"{"code":0,"message":"OK","data":[{"last":"106800.12","open":"105500.00"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.symbol, "coinex:spot:BTC/USDT");
+        assert_eq!(snapshot.source, MarketDataSource::Coinex);
+        assert_eq!(snapshot.price, 106800.12);
+        assert!((snapshot.change_percent_24h - 1.232341232).abs() < 0.000001);
+    }
+
+    #[test]
+    fn parses_gate_ticker() {
+        let snapshot = parse_gate_ticker(
+            &pair("gate:spot:BTC/USDT"),
+            r#"[{"currency_pair":"BTC_USDT","last":"106800.12","change_percentage":"1.234"}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.symbol, "gate:spot:BTC/USDT");
+        assert_eq!(snapshot.source, MarketDataSource::Gate);
+        assert_eq!(snapshot.price, 106800.12);
+        assert_eq!(snapshot.change_percent_24h, 1.234);
+    }
+
+    #[test]
+    fn parses_mexc_ticker() {
+        let snapshot = parse_mexc_ticker(
+            &pair("mexc:spot:BTC/USDT"),
+            r#"{"lastPrice":"106800.12","priceChangePercent":"1.234"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.symbol, "mexc:spot:BTC/USDT");
+        assert_eq!(snapshot.source, MarketDataSource::Mexc);
+        assert_eq!(snapshot.price, 106800.12);
+        assert_eq!(snapshot.change_percent_24h, 1.234);
+    }
+
+    #[test]
+    fn parses_bybit_ticker_and_derives_24hr_change() {
+        let snapshot = parse_bybit_ticker(
+            &pair("bybit:spot:BTC/USDT"),
+            r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"lastPrice":"106800.12","prevPrice24h":"105500.00"}]}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.symbol, "bybit:spot:BTC/USDT");
+        assert_eq!(snapshot.source, MarketDataSource::Bybit);
+        assert_eq!(snapshot.price, 106800.12);
+        assert!((snapshot.change_percent_24h - 1.232341232).abs() < 0.000001);
+    }
+
+    #[test]
     fn parses_binance_5m_kline_ohlc() {
         let candles = parse_binance_klines(
             r#"[
                 [1499040000000,"100.0","105.0","95.0","101.5","12.0",1499040299999,"0",0,"0","0","0"],
                 [1499040300000,"101.5","106.0","99.0","104.25","10.0",1499040599999,"0",0,"0","0","0"]
             ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_499_040_000_000, 100.0, 105.0, 95.0, 101.5),
+                candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_bitget_5m_candles_oldest_first() {
+        let candles = parse_bitget_candles(
+            r#"{
+                "code":"00000",
+                "msg":"success",
+                "data":[
+                    ["1499040300000","101.5","106.0","99.0","104.25","10.0"],
+                    ["1499040000000","100.0","105.0","95.0","101.5","12.0"]
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_499_040_000_000, 100.0, 105.0, 95.0, 101.5),
+                candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_coinex_5m_candles_oldest_first() {
+        let candles = parse_coinex_candles(
+            r#"{
+                "code":0,
+                "message":"OK",
+                "data":[
+                    {"created_at":1499040300000,"open":"101.5","high":"106.0","low":"99.0","close":"104.25"},
+                    {"created_at":1499040000000,"open":"100.0","high":"105.0","low":"95.0","close":"101.5"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_499_040_000_000, 100.0, 105.0, 95.0, 101.5),
+                candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_gate_5m_candles_oldest_first() {
+        let candles = parse_gate_candles(
+            r#"[
+                [1499040300,"10.0","104.25","106.0","99.0","101.5","0",true],
+                [1499040000,"12.0","101.5","105.0","95.0","100.0","0",true]
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_499_040_000_000, 100.0, 105.0, 95.0, 101.5),
+                candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_mexc_5m_candles_oldest_first() {
+        let candles = parse_mexc_candles(
+            r#"[
+                [1499040300000,"101.5","106.0","99.0","104.25","10.0"],
+                [1499040000000,"100.0","105.0","95.0","101.5","12.0"]
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            candles,
+            vec![
+                candle(1_499_040_000_000, 100.0, 105.0, 95.0, 101.5),
+                candle(1_499_040_300_000, 101.5, 106.0, 99.0, 104.25),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_bybit_5m_candles_oldest_first() {
+        let candles = parse_bybit_candles(
+            r#"{
+                "retCode":0,
+                "retMsg":"OK",
+                "result":{"list":[
+                    ["1499040300000","101.5","106.0","99.0","104.25","10.0","0"],
+                    ["1499040000000","100.0","105.0","95.0","101.5","12.0","0"]
+                ]}
+            }"#,
         )
         .unwrap();
 
@@ -2517,6 +3587,128 @@ mod tests {
     }
 
     #[test]
+    fn parses_bitget_symbol_catalog_for_online_stable_spot_pairs() {
+        let entries = parse_bitget_symbol_catalog(
+            r#"{
+                "code":"00000",
+                "msg":"success",
+                "data":[
+                    {"baseCoin":"BTC","quoteCoin":"USDT","status":"online"},
+                    {"baseCoin":"ETH","quoteCoin":"USDC","status":"online"},
+                    {"baseCoin":"SOL","quoteCoin":"USDT","status":"offline"},
+                    {"baseCoin":"BNB","quoteCoin":"BTC","status":"online"},
+                    {"baseCoin":"btc","quoteCoin":"USDT","status":"online"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bitget:spot:BTC/USDT", "bitget:spot:ETH/USDC"]
+        );
+    }
+
+    #[test]
+    fn parses_coinex_symbol_catalog_for_online_stable_spot_pairs() {
+        let entries = parse_coinex_symbol_catalog(
+            r#"{
+                "code":0,
+                "message":"OK",
+                "data":[
+                    {"base_ccy":"BTC","quote_ccy":"USDT","status":"online","is_api_trading_available":true},
+                    {"base_ccy":"ETH","quote_ccy":"USDC","status":"online","is_api_trading_available":true},
+                    {"base_ccy":"SOL","quote_ccy":"USDT","status":"offline","is_api_trading_available":true},
+                    {"base_ccy":"BNB","quote_ccy":"BTC","status":"online","is_api_trading_available":true},
+                    {"base_ccy":"DOGE","quote_ccy":"USDT","status":"online","is_api_trading_available":false}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["coinex:spot:BTC/USDT", "coinex:spot:ETH/USDC"]
+        );
+    }
+
+    #[test]
+    fn parses_gate_symbol_catalog_for_tradable_stable_spot_pairs() {
+        let entries = parse_gate_symbol_catalog(
+            r#"[
+                {"id":"BTC_USDT","base":"BTC","quote":"USDT","trade_status":"tradable"},
+                {"id":"ETH_USDC","base":"ETH","quote":"USDC","trade_status":"tradable"},
+                {"id":"SOL_USDT","base":"SOL","quote":"USDT","trade_status":"untradable"},
+                {"id":"BNB_BTC","base":"BNB","quote":"BTC","trade_status":"tradable"}
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gate:spot:BTC/USDT", "gate:spot:ETH/USDC"]
+        );
+    }
+
+    #[test]
+    fn parses_mexc_symbol_catalog_for_trading_stable_spot_pairs() {
+        let entries = parse_mexc_symbol_catalog(
+            r#"{
+                "symbols":[
+                    {"symbol":"BTCUSDT","status":"1","baseAsset":"BTC","quoteAsset":"USDT","isSpotTradingAllowed":true},
+                    {"symbol":"ETHUSDC","status":"TRADING","baseAsset":"ETH","quoteAsset":"USDC","isSpotTradingAllowed":true},
+                    {"symbol":"SOLUSDT","status":"0","baseAsset":"SOL","quoteAsset":"USDT","isSpotTradingAllowed":true},
+                    {"symbol":"BNBBTC","status":"1","baseAsset":"BNB","quoteAsset":"BTC","isSpotTradingAllowed":true},
+                    {"symbol":"DOGEUSDT","status":"1","baseAsset":"DOGE","quoteAsset":"USDT","isSpotTradingAllowed":false}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["mexc:spot:BTC/USDT", "mexc:spot:ETH/USDC"]
+        );
+    }
+
+    #[test]
+    fn parses_bybit_symbol_catalog_for_trading_stable_spot_pairs() {
+        let entries = parse_bybit_symbol_catalog(
+            r#"{
+                "retCode":0,
+                "retMsg":"OK",
+                "result":{"list":[
+                    {"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","status":"Trading"},
+                    {"symbol":"ETHUSDC","baseCoin":"ETH","quoteCoin":"USDC","status":"Trading"},
+                    {"symbol":"SOLUSDT","baseCoin":"SOL","quoteCoin":"USDT","status":"PreLaunch"},
+                    {"symbol":"BNBBTC","baseCoin":"BNB","quoteCoin":"BTC","status":"Trading"}
+                ]}
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bybit:spot:BTC/USDT", "bybit:spot:ETH/USDC"]
+        );
+    }
+
+    #[test]
     fn parses_hyperliquid_catalog_as_usdc_perps() {
         let entries = parse_hyperliquid_symbol_catalog(
             r#"[
@@ -2659,6 +3851,18 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].source, MarketDataSource::Coinbase);
         assert!(warnings[0].message.contains("no supported market pairs"));
+    }
+
+    #[test]
+    fn fastest_source_selection_ignores_failures_and_keeps_first_tie() {
+        assert_eq!(
+            select_fastest_source([
+                (MarketDataSource::Binance, Ok(Duration::from_millis(40))),
+                (MarketDataSource::Okx, Err(anyhow!("timeout"))),
+                (MarketDataSource::Bitget, Ok(Duration::from_millis(40))),
+            ]),
+            Some(MarketDataSource::Binance)
+        );
     }
 
     #[test]

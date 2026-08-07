@@ -1244,6 +1244,11 @@ fn provider_labels(locale: i18n::Locale) -> ProviderLabels<'static> {
         coinbase: "Coinbase",
         okx: "OKX",
         hyperliquid: "Hyperliquid",
+        bitget: "Bitget",
+        coinex: "CoinEx",
+        gate: "Gate.io",
+        mexc: "MEXC",
+        bybit: "Bybit",
         mixed: i18n::provider_mixed_label(locale),
     }
 }
