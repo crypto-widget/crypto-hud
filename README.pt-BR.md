@@ -57,7 +57,8 @@ for mais confortável, continue trabalhando e olhe o mercado apenas quando preci
 - **Informação em um olhar**: widgets móveis e sempre visíveis mantêm os números importantes por perto.
 - **Local primeiro**: layout e preferências ficam no seu computador; sem conta ou API Key.
 - **Silencioso quando quiser**: oculte ou restaure tudo com <kbd>Alt</kbd> + <kbd>C</kbd>.
-- **Quatro fontes públicas**: Binance, Coinbase, OKX e Hyperliquid.
+- **Nove fontes públicas**: Binance, Coinbase, OKX, Hyperliquid, Bitget, CoinEx, Gate.io, MEXC e Bybit.
+- **Troca automática durante a execução**: ativada por padrão; primeiro repete falhas breves e, se a fonte continuar indisponível, os pares spot ativos usam temporariamente uma fonte compatível habilitada sem alterar as configurações salvas de widgets, bandeja ou alertas.
 - **Visual flexível**: vários estilos, temas claro e escuro, opacidade e cores configuráveis.
 
 > [!IMPORTANT]

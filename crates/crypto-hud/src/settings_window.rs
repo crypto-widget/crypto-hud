@@ -1159,6 +1159,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         let tray_hover_state = tray_hover_state.clone();
         let weak = ui.as_weak();
         move |red_up_enabled,
+              market_auto_failover_enabled,
               market_binance_enabled,
               market_coinbase_enabled,
               market_okx_enabled,
@@ -1189,6 +1190,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 ),
                 red_up_enabled,
                 market_provider: previous.market_provider,
+                market_auto_failover_enabled,
                 market_binance_enabled,
                 market_coinbase_enabled,
                 market_okx_enabled,
@@ -3410,6 +3412,8 @@ pub(crate) fn refresh_settings_window(
     ui.set_widget_scale_text(text.widget_scale.into());
     ui.set_red_up_color_text(text.red_up_color.into());
     ui.set_market_provider_text(text.market_provider.into());
+    ui.set_market_auto_failover_text(text.market_auto_failover.into());
+    ui.set_market_auto_failover_help_text(text.market_auto_failover_help.into());
     ui.set_market_bitget_text(text.market_bitget.into());
     ui.set_market_coinex_text(text.market_coinex.into());
     ui.set_market_gate_text(text.market_gate.into());
@@ -3702,6 +3706,7 @@ pub(crate) fn refresh_settings_window(
     ui.set_default_widget_scale_percent(settings.widget_scale_percent);
     ui.set_red_up_enabled(settings.red_up_enabled);
     ui.set_provider_index(settings.market_provider.index());
+    ui.set_market_auto_failover_enabled(settings.market_auto_failover_enabled);
     ui.set_market_binance_enabled(settings.market_binance_enabled);
     ui.set_market_coinbase_enabled(settings.market_coinbase_enabled);
     ui.set_market_okx_enabled(settings.market_okx_enabled);

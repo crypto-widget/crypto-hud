@@ -57,7 +57,8 @@ Letakkan widget di posisi yang nyaman, lanjutkan pekerjaan, dan lihat pasar saat
 - **Sekilas langsung paham**: widget dapat digeser dan selalu di atas agar angka penting tetap terlihat.
 - **Lokal lebih dulu**: tata letak dan preferensi tersimpan di komputer; tanpa akun atau API Key.
 - **Sembunyikan kapan saja**: tekan <kbd>Alt</kbd> + <kbd>C</kbd> untuk menyembunyikan atau memulihkan semua widget.
-- **Empat sumber publik**: Binance, Coinbase, OKX, dan Hyperliquid.
+- **Sembilan sumber publik**: Binance, Coinbase, OKX, Hyperliquid, Bitget, CoinEx, Gate.io, MEXC, dan Bybit.
+- **Failover otomatis saat berjalan**: aktif secara default; kegagalan singkat dicoba lagi terlebih dahulu, lalu pair spot aktif memakai sementara sumber kompatibel yang telah diaktifkan tanpa mengubah pengaturan widget, tray, atau notifikasi yang tersimpan.
 - **Tampilan fleksibel**: beragam gaya, tema terang/gelap, opasitas, dan warna pasar yang dapat diatur.
 
 > [!IMPORTANT]

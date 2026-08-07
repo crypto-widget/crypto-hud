@@ -1261,6 +1261,7 @@ fn update_market_feed_config(
     if let Ok(mut config) = market_feed_config.lock() {
         config.provider = settings.market_provider;
         config.refresh_interval_seconds = settings.refresh_interval_seconds;
+        config.auto_failover_enabled = settings.market_auto_failover_enabled;
         config.enabled_sources = settings::enabled_market_sources(&settings);
         config.proxy_url = settings::effective_network_proxy_url(&settings);
         config.subscriptions = normalized_feed_subscriptions(subscriptions);

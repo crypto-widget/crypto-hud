@@ -32,12 +32,24 @@ const MAX_MARKET_RESPONSE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CONCURRENT_PAIR_FETCHES: usize = 4;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(60);
+const SOURCE_FAILOVER_FAILURE_THRESHOLD: u32 = 2;
+const SOURCE_FAILOVER_PROBE_COOLDOWN: Duration = Duration::from_secs(30);
 const CANDLE_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const MAX_CANDLE_FAILURE_BACKOFF: Duration = Duration::from_secs(60 * 60);
 const CANDLE_LIMIT_24H_5M: usize = 24 * 60 / 5;
 const HYPERLIQUID_CANDLE_INTERVAL: &str = "5m";
 const HYPERLIQUID_24H_MILLIS: u64 = 24 * 60 * 60 * 1000;
 const USER_AGENT: &str = concat!("crypto-hud/", env!("CARGO_PKG_VERSION"));
+const SPOT_FAILOVER_SOURCES: [MarketDataSource; 8] = [
+    MarketDataSource::Binance,
+    MarketDataSource::Coinbase,
+    MarketDataSource::Okx,
+    MarketDataSource::Bitget,
+    MarketDataSource::Coinex,
+    MarketDataSource::Gate,
+    MarketDataSource::Mexc,
+    MarketDataSource::Bybit,
+];
 
 #[derive(Debug, Clone)]
 pub struct MarketSnapshot {
@@ -71,6 +83,7 @@ pub struct MarketFeedConfig {
     pub subscriptions: Vec<MarketSubscription>,
     pub provider: MarketProviderPreference,
     pub refresh_interval_seconds: i32,
+    pub auto_failover_enabled: bool,
     pub enabled_sources: Vec<MarketDataSource>,
     pub proxy_url: Option<String>,
 }
@@ -137,9 +150,41 @@ struct MarketFetchOutcome {
     warning: Option<String>,
 }
 
+#[derive(Debug)]
 struct MarketBatch {
     snapshots: Vec<MarketSnapshot>,
     errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RoutedMarketSubscription {
+    requested_symbol: String,
+    fetch_symbol: String,
+    needs_candles: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct MarketSourceStatus {
+    attempts: usize,
+    successes: usize,
+}
+
+#[derive(Debug)]
+struct MarketFetchCycle {
+    batch: Result<MarketBatch>,
+    source_statuses: HashMap<MarketDataSource, MarketSourceStatus>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeSourceRoute {
+    active_source: MarketDataSource,
+    consecutive_failures: u32,
+    next_probe_at: Option<Instant>,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeSourceFailover {
+    routes: HashMap<MarketDataSource, RuntimeSourceRoute>,
 }
 
 enum MarketFeedControl {
@@ -235,6 +280,7 @@ fn run_market_feed(
     let mut agent_proxy_url: Option<String> = None;
     let mut candle_cache = CandleCache::new();
     let mut consecutive_failures = 0_u32;
+    let mut source_failover = RuntimeSourceFailover::default();
 
     'feed: loop {
         if market_feed_stop_requested(&control, &cancelled) {
@@ -252,12 +298,18 @@ fn run_market_feed(
                 })
             })
             .collect::<Vec<_>>();
+        source_failover.sync(
+            config.auto_failover_enabled,
+            &config.enabled_sources,
+            &subscriptions,
+        );
+        let routed_subscriptions = source_failover.route_subscriptions(&subscriptions);
 
         let agent_error = if agent_proxy_url != proxy_url {
             match build_agent(proxy_url.as_deref()) {
                 Ok(next_agent) => {
                     agent = next_agent;
-                    agent_proxy_url = proxy_url;
+                    agent_proxy_url = proxy_url.clone();
                     candle_cache.clear();
                     None
                 }
@@ -267,6 +319,7 @@ fn run_market_feed(
             None
         };
 
+        let mut failover_sources = Vec::new();
         let cycle_succeeded = if let Some(error) = agent_error {
             send_market_error(&sender, error.to_string())
         } else {
@@ -274,9 +327,9 @@ fn run_market_feed(
                 cancelled.load(Ordering::Acquire)
                     || market_feed_config_snapshot(&shared_config) != config
             };
-            let fetch = fetch_subscriptions_interruptible(
+            let fetch = fetch_routed_subscriptions_interruptible(
                 &agent,
-                &subscriptions,
+                &routed_subscriptions,
                 &mut candle_cache,
                 &interrupted,
             );
@@ -290,12 +343,48 @@ fn run_market_feed(
             let Some(fetch) = fetch else {
                 continue 'feed;
             };
-            send_market_batch(&sender, fetch)
+            failover_sources =
+                source_failover.observe_source_statuses(&fetch.source_statuses, Instant::now());
+            send_market_batch(&sender, fetch.batch)
         };
 
         let Some(cycle_succeeded) = cycle_succeeded else {
             return;
         };
+        let mut source_changed = false;
+        for preferred_source in failover_sources {
+            let Some(current_source) = source_failover.active_source(preferred_source) else {
+                continue;
+            };
+            let preferred_subscriptions = subscriptions
+                .iter()
+                .filter(|subscription| {
+                    market_pair_source(&subscription.symbol) == Some(preferred_source)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let interrupted = || {
+                cancelled.load(Ordering::Acquire)
+                    || market_feed_config_snapshot(&shared_config) != config
+            };
+            let next_source = select_runtime_fallback_source(
+                proxy_url.as_deref(),
+                &config.enabled_sources,
+                current_source,
+                &preferred_subscriptions,
+                &interrupted,
+            )
+            .ok()
+            .flatten();
+            if let Some(next_source) = next_source {
+                source_changed |= source_failover.switch_source(preferred_source, next_source);
+            }
+        }
+        if source_changed {
+            consecutive_failures = 0;
+            candle_cache.clear();
+            continue 'feed;
+        }
         if cycle_succeeded {
             consecutive_failures = 0;
         } else {
@@ -405,6 +494,215 @@ fn failure_backoff(refresh_interval: Duration, consecutive_failures: u32) -> Dur
         .min(MAX_FAILURE_BACKOFF)
 }
 
+impl RuntimeSourceFailover {
+    fn sync(
+        &mut self,
+        enabled: bool,
+        enabled_sources: &[MarketDataSource],
+        subscriptions: &[MarketSubscription],
+    ) {
+        if !enabled {
+            self.routes.clear();
+            return;
+        }
+
+        self.routes.retain(|preferred_source, route| {
+            source_is_enabled(enabled_sources, *preferred_source)
+                && source_is_enabled(enabled_sources, route.active_source)
+                && subscriptions.iter().any(|subscription| {
+                    market_pair_source(&subscription.symbol) == Some(*preferred_source)
+                })
+        });
+
+        for subscription in subscriptions {
+            let Some(pair) = parse_market_pair(&subscription.symbol) else {
+                continue;
+            };
+            let route = self
+                .routes
+                .entry(pair.source)
+                .or_insert(RuntimeSourceRoute {
+                    active_source: pair.source,
+                    consecutive_failures: 0,
+                    next_probe_at: None,
+                });
+            if route.active_source != pair.source
+                && !subscriptions
+                    .iter()
+                    .filter_map(|subscription| parse_market_pair(&subscription.symbol))
+                    .filter(|candidate| candidate.source == pair.source)
+                    .all(|candidate| can_route_pair_to_source(&candidate, route.active_source))
+            {
+                *route = RuntimeSourceRoute {
+                    active_source: pair.source,
+                    consecutive_failures: 0,
+                    next_probe_at: None,
+                };
+            }
+        }
+    }
+
+    fn route_subscriptions(
+        &self,
+        subscriptions: &[MarketSubscription],
+    ) -> Vec<RoutedMarketSubscription> {
+        subscriptions
+            .iter()
+            .map(|subscription| {
+                let fetch_symbol = parse_market_pair(&subscription.symbol)
+                    .and_then(|mut pair| {
+                        let route = self.routes.get(&pair.source)?;
+                        if route.active_source != pair.source
+                            && can_route_pair_to_source(&pair, route.active_source)
+                        {
+                            pair.source = route.active_source;
+                        }
+                        Some(pair.key())
+                    })
+                    .unwrap_or_else(|| subscription.symbol.clone());
+                RoutedMarketSubscription {
+                    requested_symbol: subscription.symbol.clone(),
+                    fetch_symbol,
+                    needs_candles: subscription.needs_candles,
+                }
+            })
+            .collect()
+    }
+
+    fn active_source(&self, preferred_source: MarketDataSource) -> Option<MarketDataSource> {
+        self.routes
+            .get(&preferred_source)
+            .map(|route| route.active_source)
+    }
+
+    fn observe_source_statuses(
+        &mut self,
+        statuses: &HashMap<MarketDataSource, MarketSourceStatus>,
+        now: Instant,
+    ) -> Vec<MarketDataSource> {
+        let mut probes = Vec::new();
+        for (preferred_source, status) in statuses {
+            let Some(route) = self.routes.get_mut(preferred_source) else {
+                continue;
+            };
+            if status.successes > 0 {
+                route.consecutive_failures = 0;
+                route.next_probe_at = None;
+                continue;
+            }
+            if status.attempts == 0 {
+                continue;
+            }
+            route.consecutive_failures = route.consecutive_failures.saturating_add(1);
+            if route.consecutive_failures < SOURCE_FAILOVER_FAILURE_THRESHOLD
+                || route.next_probe_at.is_some_and(|retry_at| retry_at > now)
+            {
+                continue;
+            }
+            route.next_probe_at = Some(now + SOURCE_FAILOVER_PROBE_COOLDOWN);
+            probes.push(*preferred_source);
+        }
+        probes
+    }
+
+    fn switch_source(
+        &mut self,
+        preferred_source: MarketDataSource,
+        next_source: MarketDataSource,
+    ) -> bool {
+        let Some(route) = self.routes.get_mut(&preferred_source) else {
+            return false;
+        };
+        if route.active_source == next_source {
+            return false;
+        }
+        route.active_source = next_source;
+        route.consecutive_failures = 0;
+        route.next_probe_at = None;
+        true
+    }
+}
+
+fn source_is_enabled(enabled_sources: &[MarketDataSource], source: MarketDataSource) -> bool {
+    enabled_sources.is_empty() || enabled_sources.contains(&source)
+}
+
+fn can_route_pair_to_source(pair: &MarketPair, source: MarketDataSource) -> bool {
+    pair.market_type == MarketType::Spot && SPOT_FAILOVER_SOURCES.contains(&source)
+}
+
+fn select_runtime_fallback_source(
+    proxy_url: Option<&str>,
+    enabled_sources: &[MarketDataSource],
+    current_source: MarketDataSource,
+    subscriptions: &[MarketSubscription],
+    interrupted: &(dyn Fn() -> bool + Sync),
+) -> Result<Option<MarketDataSource>> {
+    let pairs = subscriptions
+        .iter()
+        .filter_map(|subscription| parse_market_pair(&subscription.symbol))
+        .collect::<Vec<_>>();
+    if pairs.is_empty()
+        || pairs
+            .iter()
+            .any(|pair| !can_route_pair_to_source(pair, current_source))
+    {
+        return Ok(None);
+    }
+
+    let candidates = SPOT_FAILOVER_SOURCES
+        .into_iter()
+        .filter(|source| *source != current_source && source_is_enabled(enabled_sources, *source))
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+
+    let agent = build_agent_with_timeout(proxy_url, SOURCE_PROBE_TIMEOUT)?;
+    let probes = thread::scope(|scope| -> Result<Vec<_>> {
+        let handles = candidates
+            .into_iter()
+            .map(|source| {
+                let agent = agent.clone();
+                let pairs = pairs.clone();
+                scope.spawn(move || {
+                    let started_at = Instant::now();
+                    let result = ensure_fetch_active(interrupted).and_then(|()| {
+                        let entries = fetch_source_symbol_catalog(&agent, source)?;
+                        ensure_fetch_active(interrupted)?;
+                        if source_catalog_supports_pairs(&entries, &pairs) {
+                            Ok(())
+                        } else {
+                            bail!("{} does not support every active pair", source.label())
+                        }
+                    });
+                    (source, result.map(|()| started_at.elapsed()))
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| anyhow!("market source failover probe worker panicked"))
+            })
+            .collect()
+    })?;
+
+    Ok(select_fastest_source(probes))
+}
+
+fn source_catalog_supports_pairs(entries: &[SymbolCatalogEntry], pairs: &[MarketPair]) -> bool {
+    pairs.iter().all(|pair| {
+        entries.iter().any(|entry| {
+            entry.market_type == pair.market_type
+                && entry.base == pair.base
+                && entry.quote == pair.quote
+        })
+    })
+}
+
 pub fn fetch_symbol_catalog(proxy_url: Option<&str>) -> Result<SymbolCatalog> {
     Ok(fetch_symbol_catalog_with_warnings(proxy_url)?.catalog)
 }
@@ -418,24 +716,23 @@ pub fn select_low_latency_spot_source(
     proxy_url: Option<&str>,
     enabled_sources: &[MarketDataSource],
 ) -> Result<Option<MarketDataSource>> {
+    Ok(select_fastest_source(probe_spot_sources(
+        proxy_url,
+        enabled_sources,
+    )?))
+}
+
+fn probe_spot_sources(
+    proxy_url: Option<&str>,
+    enabled_sources: &[MarketDataSource],
+) -> Result<Vec<(MarketDataSource, Result<Duration>)>> {
     let sources = enabled_sources
         .iter()
         .copied()
-        .filter(|source| {
-            matches!(
-                source,
-                MarketDataSource::Binance
-                    | MarketDataSource::Okx
-                    | MarketDataSource::Bitget
-                    | MarketDataSource::Coinex
-                    | MarketDataSource::Gate
-                    | MarketDataSource::Mexc
-                    | MarketDataSource::Bybit
-            )
-        })
+        .filter(|source| supports_default_usdt_spot_probe(*source))
         .collect::<Vec<_>>();
     if sources.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     let agent = build_agent_with_timeout(proxy_url, SOURCE_PROBE_TIMEOUT)?;
@@ -462,7 +759,21 @@ pub fn select_low_latency_spot_source(
         Ok(results)
     })?;
 
-    Ok(select_fastest_source(probes))
+    Ok(probes)
+}
+
+fn supports_default_usdt_spot_probe(source: MarketDataSource) -> bool {
+    matches!(
+        source,
+        MarketDataSource::Binance
+            | MarketDataSource::Coinbase
+            | MarketDataSource::Okx
+            | MarketDataSource::Bitget
+            | MarketDataSource::Coinex
+            | MarketDataSource::Gate
+            | MarketDataSource::Mexc
+            | MarketDataSource::Bybit
+    )
 }
 
 fn probe_default_spot_source(agent: &ureq::Agent, source: MarketDataSource) -> Result<()> {
@@ -477,6 +788,9 @@ fn probe_default_spot_source(agent: &ureq::Agent, source: MarketDataSource) -> R
     match source {
         MarketDataSource::Binance => {
             fetch_binance(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
+        }
+        MarketDataSource::Coinbase => {
+            fetch_coinbase(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
         }
         MarketDataSource::Okx => {
             fetch_okx(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
@@ -496,7 +810,7 @@ fn probe_default_spot_source(agent: &ureq::Agent, source: MarketDataSource) -> R
         MarketDataSource::Bybit => {
             fetch_bybit(agent, &pair, false, &mut candle_cache, &uninterrupted)?;
         }
-        MarketDataSource::Coinbase | MarketDataSource::Hyperliquid => {
+        MarketDataSource::Hyperliquid => {
             bail!(
                 "{} does not support the default USDT spot probe",
                 source.label()
@@ -581,6 +895,23 @@ fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalogF
     );
 
     finish_symbol_catalog_fetch(catalogs, warnings)
+}
+
+fn fetch_source_symbol_catalog(
+    agent: &ureq::Agent,
+    source: MarketDataSource,
+) -> Result<Vec<SymbolCatalogEntry>> {
+    match source {
+        MarketDataSource::Binance => fetch_binance_symbol_catalog(agent),
+        MarketDataSource::Coinbase => fetch_coinbase_symbol_catalog(agent),
+        MarketDataSource::Okx => fetch_okx_symbol_catalog(agent),
+        MarketDataSource::Hyperliquid => fetch_hyperliquid_symbol_catalog(agent),
+        MarketDataSource::Bitget => fetch_bitget_symbol_catalog(agent),
+        MarketDataSource::Coinex => fetch_coinex_symbol_catalog(agent),
+        MarketDataSource::Gate => fetch_gate_symbol_catalog(agent),
+        MarketDataSource::Mexc => fetch_mexc_symbol_catalog(agent),
+        MarketDataSource::Bybit => fetch_bybit_symbol_catalog(agent),
+    }
 }
 
 fn collect_symbol_catalog_result(
@@ -715,13 +1046,13 @@ fn merged_market_subscriptions(subscriptions: Vec<MarketSubscription>) -> Vec<Ma
     )
 }
 
-fn fetch_subscriptions_interruptible(
+fn fetch_routed_subscriptions_interruptible(
     agent: &ureq::Agent,
-    subscriptions: &[MarketSubscription],
+    subscriptions: &[RoutedMarketSubscription],
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
-) -> Option<Result<MarketBatch>> {
-    fetch_subscriptions_interruptible_with(
+) -> Option<MarketFetchCycle> {
+    fetch_routed_subscriptions_interruptible_with(
         agent,
         subscriptions,
         candle_cache,
@@ -730,6 +1061,7 @@ fn fetch_subscriptions_interruptible(
     )
 }
 
+#[cfg(test)]
 fn fetch_subscriptions_interruptible_with<F>(
     agent: &ureq::Agent,
     subscriptions: &[MarketSubscription],
@@ -747,25 +1079,76 @@ where
         ) -> Result<MarketFetchOutcome>
         + Sync,
 {
+    let subscriptions = subscriptions
+        .iter()
+        .map(|subscription| RoutedMarketSubscription {
+            requested_symbol: subscription.symbol.clone(),
+            fetch_symbol: subscription.symbol.clone(),
+            needs_candles: subscription.needs_candles,
+        })
+        .collect::<Vec<_>>();
+    fetch_routed_subscriptions_interruptible_with(
+        agent,
+        &subscriptions,
+        candle_cache,
+        interrupted,
+        fetch,
+    )
+    .map(|cycle| cycle.batch)
+}
+
+fn fetch_routed_subscriptions_interruptible_with<F>(
+    agent: &ureq::Agent,
+    subscriptions: &[RoutedMarketSubscription],
+    candle_cache: &mut CandleCache,
+    interrupted: &(dyn Fn() -> bool + Sync),
+    fetch: F,
+) -> Option<MarketFetchCycle>
+where
+    F: Fn(
+            &ureq::Agent,
+            &MarketPair,
+            bool,
+            &mut CandleCache,
+            &(dyn Fn() -> bool + Sync),
+        ) -> Result<MarketFetchOutcome>
+        + Sync,
+{
     if interrupted() {
         return None;
     }
     candle_cache.retain(|key, _| {
         subscriptions
             .iter()
-            .any(|subscription| subscription.needs_candles && subscription.symbol == *key)
+            .any(|subscription| subscription.needs_candles && subscription.fetch_symbol == *key)
     });
     if subscriptions.is_empty() {
-        return Some(Err(anyhow!("no market pairs configured")));
+        return Some(MarketFetchCycle {
+            batch: Err(anyhow!("no market pairs configured")),
+            source_statuses: HashMap::new(),
+        });
     }
 
     let mut snapshots = Vec::new();
     let mut errors = Vec::new();
     let mut pairs = Vec::new();
+    let mut source_statuses = HashMap::<MarketDataSource, MarketSourceStatus>::new();
     for subscription in subscriptions {
-        match parse_market_pair(&subscription.symbol) {
-            Some(pair) => pairs.push((subscription.clone(), pair)),
-            None => errors.push(format!("{}: invalid market pair", subscription.symbol)),
+        match (
+            parse_market_pair(&subscription.requested_symbol),
+            parse_market_pair(&subscription.fetch_symbol),
+        ) {
+            (Some(requested_pair), Some(fetch_pair)) => {
+                source_statuses
+                    .entry(requested_pair.source)
+                    .or_default()
+                    .attempts += 1;
+                pairs.push((subscription.clone(), fetch_pair, requested_pair.source));
+            }
+            _ => errors.push(format!(
+                "{}: invalid market pair",
+                subscription.requested_symbol
+            )),
         }
     }
 
@@ -777,10 +1160,11 @@ where
         let results = thread::scope(|scope| {
             let handles = chunk
                 .iter()
-                .map(|(subscription, pair)| {
+                .map(|(subscription, pair, preferred_source)| {
                     let agent = agent.clone();
                     let subscription = subscription.clone();
                     let pair = pair.clone();
+                    let preferred_source = *preferred_source;
                     let cached_entry = subscription
                         .needs_candles
                         .then(|| candle_cache.get(&pair.key()).cloned())
@@ -798,7 +1182,12 @@ where
                             &mut local_cache,
                             interrupted,
                         );
-                        (subscription, result, local_cache.remove(&key))
+                        (
+                            subscription,
+                            preferred_source,
+                            result,
+                            local_cache.remove(&key),
+                        )
                     })
                 })
                 .collect::<Vec<_>>();
@@ -810,23 +1199,28 @@ where
         });
 
         for result in results {
-            let Ok((subscription, result, cached_entry)) = result else {
+            let Ok((subscription, preferred_source, result, cached_entry)) = result else {
                 errors.push("market pair worker panicked".to_string());
                 continue;
             };
             if subscription.needs_candles {
                 if let Some(entry) = cached_entry {
-                    candle_cache.insert(subscription.symbol.clone(), entry);
+                    candle_cache.insert(subscription.fetch_symbol.clone(), entry);
                 }
             }
             match result {
-                Ok(outcome) => {
+                Ok(mut outcome) => {
+                    source_statuses
+                        .entry(preferred_source)
+                        .or_default()
+                        .successes += 1;
+                    outcome.snapshot.symbol = subscription.requested_symbol.clone();
                     snapshots.push(outcome.snapshot);
                     if let Some(warning) = outcome.warning {
-                        errors.push(format!("{}: {warning}", subscription.symbol));
+                        errors.push(format!("{}: {warning}", subscription.requested_symbol));
                     }
                 }
-                Err(error) => errors.push(format!("{}: {error}", subscription.symbol)),
+                Err(error) => errors.push(format!("{}: {error}", subscription.requested_symbol)),
             }
         }
         if interrupted() {
@@ -834,7 +1228,10 @@ where
         }
     }
 
-    Some(market_batch(snapshots, errors))
+    Some(MarketFetchCycle {
+        batch: market_batch(snapshots, errors),
+        source_statuses,
+    })
 }
 
 fn market_batch(snapshots: Vec<MarketSnapshot>, errors: Vec<String>) -> Result<MarketBatch> {
@@ -2674,6 +3071,7 @@ mod tests {
             subscriptions: vec![subscription("binance:spot:BTC/USDT", false)],
             provider: MarketProviderPreference::Auto,
             refresh_interval_seconds: DEFAULT_REFRESH_INTERVAL_SECONDS,
+            auto_failover_enabled: true,
             enabled_sources: default_enabled_market_sources(),
             proxy_url: None,
         }
@@ -2862,6 +3260,137 @@ mod tests {
             subscriptions,
             vec![subscription("binance:spot:BTC/USDT", true)]
         );
+    }
+
+    #[test]
+    fn runtime_failover_waits_for_two_consecutive_source_failures() {
+        let subscriptions = vec![subscription("binance:spot:BTC/USDT", false)];
+        let enabled_sources = vec![MarketDataSource::Binance, MarketDataSource::Okx];
+        let mut failover = RuntimeSourceFailover::default();
+        failover.sync(true, &enabled_sources, &subscriptions);
+        let failed = HashMap::from([(
+            MarketDataSource::Binance,
+            MarketSourceStatus {
+                attempts: 1,
+                successes: 0,
+            },
+        )]);
+        let now = Instant::now();
+
+        assert!(failover.observe_source_statuses(&failed, now).is_empty());
+        assert_eq!(
+            failover.observe_source_statuses(&failed, now + Duration::from_secs(1)),
+            vec![MarketDataSource::Binance]
+        );
+        assert_eq!(
+            failover.active_source(MarketDataSource::Binance),
+            Some(MarketDataSource::Binance)
+        );
+    }
+
+    #[test]
+    fn runtime_failover_success_resets_failures_and_probe_cooldown() {
+        let subscriptions = vec![subscription("binance:spot:BTC/USDT", false)];
+        let enabled_sources = vec![MarketDataSource::Binance, MarketDataSource::Okx];
+        let mut failover = RuntimeSourceFailover::default();
+        failover.sync(true, &enabled_sources, &subscriptions);
+        let failed = HashMap::from([(
+            MarketDataSource::Binance,
+            MarketSourceStatus {
+                attempts: 1,
+                successes: 0,
+            },
+        )]);
+        let succeeded = HashMap::from([(
+            MarketDataSource::Binance,
+            MarketSourceStatus {
+                attempts: 1,
+                successes: 1,
+            },
+        )]);
+        let now = Instant::now();
+
+        assert!(failover.observe_source_statuses(&failed, now).is_empty());
+        assert_eq!(
+            failover.observe_source_statuses(&failed, now + Duration::from_secs(1)),
+            vec![MarketDataSource::Binance]
+        );
+        assert!(failover
+            .observe_source_statuses(&succeeded, now + Duration::from_secs(2))
+            .is_empty());
+        assert!(failover
+            .observe_source_statuses(&failed, now + Duration::from_secs(3))
+            .is_empty());
+    }
+
+    #[test]
+    fn runtime_failover_keeps_requested_symbols_while_fetching_from_temporary_source() {
+        let subscriptions = vec![subscription("binance:spot:BTC/USDT", false)];
+        let enabled_sources = vec![MarketDataSource::Binance, MarketDataSource::Okx];
+        let mut failover = RuntimeSourceFailover::default();
+        failover.sync(true, &enabled_sources, &subscriptions);
+        assert!(failover.switch_source(MarketDataSource::Binance, MarketDataSource::Okx));
+        let routed = failover.route_subscriptions(&subscriptions);
+        assert_eq!(routed[0].requested_symbol, "binance:spot:BTC/USDT");
+        assert_eq!(routed[0].fetch_symbol, "okx:spot:BTC/USDT");
+
+        let agent = build_agent(None).unwrap();
+        let mut candle_cache = CandleCache::new();
+        let cycle = fetch_routed_subscriptions_interruptible_with(
+            &agent,
+            &routed,
+            &mut candle_cache,
+            &|| false,
+            |_, pair, _, _, _| {
+                let mut actual = snapshot(&pair.key());
+                actual.source = pair.source;
+                Ok(MarketFetchOutcome {
+                    snapshot: actual,
+                    warning: None,
+                })
+            },
+        )
+        .unwrap();
+        let batch = cycle.batch.unwrap();
+
+        assert_eq!(batch.snapshots[0].symbol, "binance:spot:BTC/USDT");
+        assert_eq!(batch.snapshots[0].source, MarketDataSource::Okx);
+        assert_eq!(
+            cycle.source_statuses[&MarketDataSource::Binance],
+            MarketSourceStatus {
+                attempts: 1,
+                successes: 1
+            }
+        );
+    }
+
+    #[test]
+    fn disabling_runtime_failover_restores_preferred_sources() {
+        let subscriptions = vec![subscription("binance:spot:BTC/USDT", false)];
+        let enabled_sources = vec![MarketDataSource::Binance, MarketDataSource::Okx];
+        let mut failover = RuntimeSourceFailover::default();
+        failover.sync(true, &enabled_sources, &subscriptions);
+        assert!(failover.switch_source(MarketDataSource::Binance, MarketDataSource::Okx));
+
+        failover.sync(false, &enabled_sources, &subscriptions);
+        let routed = failover.route_subscriptions(&subscriptions);
+
+        assert!(failover.routes.is_empty());
+        assert_eq!(routed[0].fetch_symbol, "binance:spot:BTC/USDT");
+    }
+
+    #[test]
+    fn fallback_catalog_must_cover_every_active_pair() {
+        let pairs = vec![pair("binance:spot:BTC/USDT"), pair("binance:spot:ETH/USDT")];
+        let btc_only =
+            vec![catalog_entry(MarketDataSource::Okx, MarketType::Spot, "BTC", "USDT").unwrap()];
+        let all_pairs = vec![
+            btc_only[0].clone(),
+            catalog_entry(MarketDataSource::Okx, MarketType::Spot, "ETH", "USDT").unwrap(),
+        ];
+
+        assert!(!source_catalog_supports_pairs(&btc_only, &pairs));
+        assert!(source_catalog_supports_pairs(&all_pairs, &pairs));
     }
 
     #[test]
@@ -3863,6 +4392,16 @@ mod tests {
             ]),
             Some(MarketDataSource::Binance)
         );
+    }
+
+    #[test]
+    fn spot_probe_includes_compatible_sources_and_excludes_perpetuals() {
+        assert!(supports_default_usdt_spot_probe(MarketDataSource::Binance));
+        assert!(supports_default_usdt_spot_probe(MarketDataSource::Coinbase));
+        assert!(supports_default_usdt_spot_probe(MarketDataSource::Okx));
+        assert!(!supports_default_usdt_spot_probe(
+            MarketDataSource::Hyperliquid
+        ));
     }
 
     #[test]

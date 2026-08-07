@@ -857,6 +857,8 @@ pub struct AppSettings {
     pub red_up_enabled: bool,
     #[serde(default)]
     pub market_provider: MarketProviderPreference,
+    #[serde(default = "default_market_auto_failover_enabled")]
+    pub market_auto_failover_enabled: bool,
     #[serde(default = "default_market_source_enabled")]
     pub market_binance_enabled: bool,
     #[serde(default = "default_market_source_enabled")]
@@ -915,6 +917,7 @@ impl Default for AppSettings {
             widget_scale_percent: default_widget_scale_percent(),
             red_up_enabled: false,
             market_provider: MarketProviderPreference::default(),
+            market_auto_failover_enabled: default_market_auto_failover_enabled(),
             market_binance_enabled: default_market_source_enabled(),
             market_coinbase_enabled: default_market_source_enabled(),
             market_okx_enabled: default_market_source_enabled(),
@@ -962,6 +965,7 @@ impl AppSettings {
             widget_scale_percent: clamp_default_widget_scale_percent(self.widget_scale_percent),
             red_up_enabled: self.red_up_enabled,
             market_provider: self.market_provider,
+            market_auto_failover_enabled: self.market_auto_failover_enabled,
             market_binance_enabled: source_enabled_or_default(
                 self.market_binance_enabled,
                 any_market_source_enabled,
@@ -1061,6 +1065,10 @@ pub fn default_refresh_interval_seconds() -> i32 {
 }
 
 pub fn default_market_source_enabled() -> bool {
+    true
+}
+
+pub fn default_market_auto_failover_enabled() -> bool {
     true
 }
 
@@ -3486,6 +3494,7 @@ mod tests {
         assert_eq!(settings.widget_scale_percent, DEFAULT_WIDGET_SCALE_PERCENT);
         assert!(!settings.red_up_enabled);
         assert_eq!(settings.market_provider, MarketProviderPreference::Auto);
+        assert!(settings.market_auto_failover_enabled);
         assert!(settings.market_binance_enabled);
         assert!(settings.market_coinbase_enabled);
         assert!(settings.market_okx_enabled);
@@ -4058,6 +4067,19 @@ mod tests {
             low_scale_settings.widget_scale_percent,
             MIN_WIDGET_SCALE_PERCENT
         );
+    }
+
+    #[test]
+    fn market_auto_failover_can_be_disabled_and_round_trips() {
+        let settings = AppSettings {
+            market_auto_failover_enabled: false,
+            ..AppSettings::default()
+        };
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        let restored = serde_json::from_str::<AppSettings>(&serialized).unwrap();
+
+        assert!(!restored.market_auto_failover_enabled);
     }
 
     #[test]
