@@ -2,6 +2,58 @@ import { Button, ComboBox, LineEdit, ListView, Palette, ScrollView, SpinBox } fr
 import { PluginMarketItem } from "models.slint";
 import { PanelTitle, SettingLabel, SettingSectionTitle, SettingsNavItem, SettingSwitch } from "shared-controls.slint";
 
+component MarketSourceToggle inherits Rectangle {
+    in-out property <bool> checked;
+    in property <string> label;
+    in property <bool> rtl-layout: false;
+    in property <color> label-color;
+    in property <color> accent-color;
+    in property <color> track-color;
+    in property <color> knob-color;
+    callback toggled();
+
+    width: 120px;
+    height: 26px;
+    background: transparent;
+    forward-focus: source_switch;
+
+    source_touch := TouchArea {
+        x: root.rtl-layout ? 0px : 45px;
+        width: parent.width - 45px;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+
+    Text {
+        x: root.rtl-layout ? 0px : 45px;
+        y: 3px;
+        width: parent.width - 45px;
+        height: 20px;
+        text: root.label;
+        color: root.label-color;
+        font-size: 10px;
+        font-weight: 600;
+        horizontal-alignment: root.rtl-layout ? right : left;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    source_switch := SettingSwitch {
+        x: root.rtl-layout ? parent.width - 37px : 0px;
+        y: 3px;
+        checked <=> root.checked;
+        accessible-label-text: root.label;
+        accent-color: root.accent-color;
+        track-color: root.track-color;
+        knob-color: root.knob-color;
+        toggled => { root.toggled(); }
+    }
+}
+
 component OpacitySlider inherits Rectangle {
     in-out property <int> value;
     in property <bool> enabled: true;
@@ -3158,11 +3210,13 @@ export component SettingsWindow inherits Window {
                     muted-color: root.settings-muted-color;
                 }
 
-                SettingSwitch {
-                    x: 17px;
-                    y: 58px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 770px : 17px;
+                    y: 54px;
                     checked <=> root.market-binance-enabled;
-                    accessible-label-text: "Binance";
+                    label: "Binance";
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3172,22 +3226,13 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                Text {
-                    x: 63px;
-                    y: 63px;
-                    width: 60px;
-                    text: "Binance";
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
-                }
-
-                SettingSwitch {
-                    x: 139px;
-                    y: 58px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 638px : 149px;
+                    y: 54px;
                     checked <=> root.market-coinbase-enabled;
-                    accessible-label-text: "Coinbase";
+                    label: "Coinbase";
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3197,22 +3242,13 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                Text {
-                    x: 185px;
-                    y: 63px;
-                    width: 72px;
-                    text: "Coinbase";
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
-                }
-
-                SettingSwitch {
-                    x: 281px;
-                    y: 58px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 506px : 281px;
+                    y: 54px;
                     checked <=> root.market-okx-enabled;
-                    accessible-label-text: "OKX";
+                    label: "OKX";
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3222,22 +3258,13 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                Text {
-                    x: 327px;
-                    y: 63px;
-                    width: 40px;
-                    text: "OKX";
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
-                }
-
-                SettingSwitch {
-                    x: 379px;
-                    y: 58px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 374px : 413px;
+                    y: 54px;
                     checked <=> root.market-hyperliquid-enabled;
-                    accessible-label-text: "Hyperliquid";
+                    label: "Hyperliquid";
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3247,22 +3274,13 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                Text {
-                    x: 425px;
-                    y: 63px;
-                    width: 82px;
-                    text: "Hyperliquid";
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
-                }
-
-                SettingSwitch {
-                    x: 535px;
-                    y: 58px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 242px : 545px;
+                    y: 54px;
                     checked <=> root.market-bitget-enabled;
-                    accessible-label-text: root.market-bitget-text;
+                    label: root.market-bitget-text;
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3272,22 +3290,13 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                Text {
-                    x: 581px;
-                    y: 63px;
-                    width: 60px;
-                    text: root.market-bitget-text;
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
-                }
-
-                SettingSwitch {
-                    x: 17px;
-                    y: 88px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 770px : 17px;
+                    y: 84px;
                     checked <=> root.market-coinex-enabled;
-                    accessible-label-text: root.market-coinex-text;
+                    label: root.market-coinex-text;
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3297,22 +3306,13 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                Text {
-                    x: 63px;
-                    y: 93px;
-                    width: 60px;
-                    text: root.market-coinex-text;
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
-                }
-
-                SettingSwitch {
-                    x: 180px;
-                    y: 88px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 638px : 149px;
+                    y: 84px;
                     checked <=> root.market-gate-enabled;
-                    accessible-label-text: root.market-gate-text;
+                    label: root.market-gate-text;
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3322,22 +3322,13 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                Text {
-                    x: 226px;
-                    y: 93px;
-                    width: 60px;
-                    text: root.market-gate-text;
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
-                }
-
-                SettingSwitch {
-                    x: 343px;
-                    y: 88px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 506px : 281px;
+                    y: 84px;
                     checked <=> root.market-mexc-enabled;
-                    accessible-label-text: root.market-mexc-text;
+                    label: root.market-mexc-text;
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3347,22 +3338,13 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                Text {
-                    x: 389px;
-                    y: 93px;
-                    width: 60px;
-                    text: root.market-mexc-text;
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
-                }
-
-                SettingSwitch {
-                    x: 506px;
-                    y: 88px;
+                MarketSourceToggle {
+                    x: root.rtl-layout ? 374px : 413px;
+                    y: 84px;
                     checked <=> root.market-bybit-enabled;
-                    accessible-label-text: root.market-bybit-text;
+                    label: root.market-bybit-text;
+                    rtl-layout: root.rtl-layout;
+                    label-color: root.settings-label-color;
                     accent-color: root.settings-accent-color;
                     track-color: root.settings-track-color;
                     knob-color: root.settings-knob-color;
@@ -3370,17 +3352,6 @@ export component SettingsWindow inherits Window {
                         root.apply-current-settings();
                         root.refresh-symbol-picker-candidates();
                     }
-                }
-
-                Text {
-                    x: 552px;
-                    y: 93px;
-                    width: 60px;
-                    text: root.market-bybit-text;
-                    color: root.settings-label-color;
-                    font-size: 9px;
-                    font-weight: 750;
-                    overflow: elide;
                 }
 
                 SettingLabel {
