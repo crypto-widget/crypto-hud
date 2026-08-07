@@ -77,6 +77,8 @@ pub struct UiText {
     pub widget_scale: &'static str,
     pub red_up_color: &'static str,
     pub market_provider: &'static str,
+    pub market_auto_failover: &'static str,
+    pub market_auto_failover_help: &'static str,
     pub market_bitget: &'static str,
     pub market_coinex: &'static str,
     pub market_gate: &'static str,
@@ -233,6 +235,9 @@ const EN_TEXT: UiText = UiText {
     widget_scale: "Scale",
     red_up_color: "Red for gains",
     market_provider: "Enabled sources",
+    market_auto_failover: "Switch sources when market data stops",
+    market_auto_failover_help:
+        "Retries brief failures, then temporarily uses an enabled source that supports the active pairs without changing saved settings.",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -391,6 +396,9 @@ const ZH_HANS_TEXT: UiText = UiText {
     widget_scale: "缩放",
     red_up_color: "红涨绿跌",
     market_provider: "启用数据源",
+    market_auto_failover: "数据源不可用时自动探测",
+    market_auto_failover_help:
+        "短暂故障会先重试；持续不可用时临时使用支持当前交易对的已启用数据源，不修改已保存设置。",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -548,6 +556,9 @@ const ZH_HANT_TEXT: UiText = UiText {
     widget_scale: "縮放",
     red_up_color: "紅漲綠跌",
     market_provider: "啟用資料源",
+    market_auto_failover: "行情中斷時自動切換資料源",
+    market_auto_failover_help:
+        "短暫故障會先重試；持續無法使用時暫時採用支援目前交易對的已啟用資料源，不變更已儲存設定。",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -705,6 +716,9 @@ const ES_419_TEXT: UiText = UiText {
     widget_scale: "Escala",
     red_up_color: "Rojo para subidas",
     market_provider: "Fuentes activas",
+    market_auto_failover: "Cambiar la fuente si se interrumpen los datos",
+    market_auto_failover_help:
+        "Primero reintenta fallas breves; si continúan, usa temporalmente una fuente activa compatible con los pares actuales sin cambiar la configuración guardada.",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -862,6 +876,9 @@ const PT_BR_TEXT: UiText = UiText {
     widget_scale: "Escala",
     red_up_color: "Vermelho para altas",
     market_provider: "Fontes ativas",
+    market_auto_failover: "Trocar a fonte se os dados forem interrompidos",
+    market_auto_failover_help:
+        "Primeiro tenta novamente após falhas breves; se persistirem, usa temporariamente uma fonte ativa compatível com os pares atuais sem alterar as configurações salvas.",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -1019,6 +1036,9 @@ const VI_TEXT: UiText = UiText {
     widget_scale: "Tỉ lệ",
     red_up_color: "Đỏ khi tăng",
     market_provider: "Nguồn đang bật",
+    market_auto_failover: "Tự động đổi nguồn khi dữ liệu bị gián đoạn",
+    market_auto_failover_help:
+        "Ứng dụng sẽ thử lại lỗi ngắn hạn trước; nếu lỗi tiếp diễn, ứng dụng tạm dùng nguồn đã bật hỗ trợ các cặp hiện tại mà không đổi cài đặt đã lưu.",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -1176,6 +1196,9 @@ const ID_TEXT: UiText = UiText {
     widget_scale: "Skala",
     red_up_color: "Merah untuk naik",
     market_provider: "Sumber aktif",
+    market_auto_failover: "Ganti sumber otomatis saat data terputus",
+    market_auto_failover_help:
+        "Kegagalan singkat akan dicoba lagi terlebih dahulu; jika berlanjut, gunakan sementara sumber aktif yang mendukung pair saat ini tanpa mengubah pengaturan tersimpan.",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -1333,6 +1356,9 @@ const TR_TEXT: UiText = UiText {
     widget_scale: "Ölçek",
     red_up_color: "Yükselişler kırmızı",
     market_provider: "Etkin kaynaklar",
+    market_auto_failover: "Veri kesilirse kaynağı otomatik değiştir",
+    market_auto_failover_help:
+        "Kısa süreli hatalar önce yeniden denenir; sorun sürerse kayıtlı ayarlar değiştirilmeden mevcut pariteleri destekleyen etkin bir kaynak geçici olarak kullanılır.",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -1493,6 +1519,9 @@ const KO_TEXT: UiText = UiText {
     widget_scale: "크기",
     red_up_color: "상승 빨간색",
     market_provider: "활성 소스",
+    market_auto_failover: "시세가 중단되면 데이터 소스 자동 전환",
+    market_auto_failover_help:
+        "일시적인 오류는 먼저 재시도하고, 계속 사용할 수 없으면 저장된 설정을 바꾸지 않고 현재 페어를 지원하는 활성 소스를 임시로 사용합니다.",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -1650,6 +1679,9 @@ const JA_TEXT: UiText = UiText {
     widget_scale: "スケール",
     red_up_color: "上昇を赤で表示",
     market_provider: "有効なソース",
+    market_auto_failover: "相場データが途切れたらソースを自動切り替え",
+    market_auto_failover_help:
+        "一時的な障害は先に再試行し、利用できない状態が続く場合は、保存済み設定を変更せず現在のペアに対応する有効なソースを一時的に使用します。",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -1807,6 +1839,9 @@ const RU_TEXT: UiText = UiText {
     widget_scale: "Масштаб",
     red_up_color: "Рост красным",
     market_provider: "Активные источники",
+    market_auto_failover: "Автоматически менять источник при сбое данных",
+    market_auto_failover_help:
+        "Кратковременные сбои сначала повторяются; если источник остаётся недоступен, временно используется включённый источник с поддержкой текущих пар без изменения сохранённых настроек.",
     market_bitget: "Bitget",
     market_coinex: "CoinEx",
     market_gate: "Gate.io",
@@ -1964,6 +1999,9 @@ const AR_TEXT: UiText = UiText {
     widget_scale: "الحجم",
     red_up_color: "الأحمر للصعود",
     market_provider: "المصادر المفعلة",
+    market_auto_failover: "التبديل التلقائي للمصدر عند انقطاع بيانات السوق",
+    market_auto_failover_help:
+        "تُعاد محاولة الأعطال القصيرة أولاً؛ وإذا استمر الانقطاع، يُستخدم مؤقتًا مصدر مفعّل يدعم الأزواج الحالية من دون تغيير الإعدادات المحفوظة.",
     market_bitget: "\u{2066}Bitget\u{2069}",
     market_coinex: "\u{2066}CoinEx\u{2069}",
     market_gate: "\u{2066}Gate.io\u{2069}",
@@ -5579,6 +5617,7 @@ mod tests {
     fn localized_settings_help_fields(text: &'static UiText) -> Vec<(&'static str, &'static str)> {
         vec![
             ("market_provider_help", text.market_provider_help),
+            ("market_auto_failover_help", text.market_auto_failover_help),
             ("refresh_interval_help", text.refresh_interval_help),
             ("symbols_help", text.symbols_help),
             ("network_proxy_help", text.network_proxy_help),
@@ -5657,6 +5696,7 @@ mod tests {
             ("widget_scale", text.widget_scale),
             ("red_up_color", text.red_up_color),
             ("market_provider", text.market_provider),
+            ("market_auto_failover", text.market_auto_failover),
             ("refresh_interval", text.refresh_interval),
             ("default_symbols", text.default_symbols),
             ("alert_settings", text.alert_settings),

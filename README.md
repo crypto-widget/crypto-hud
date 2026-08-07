@@ -123,7 +123,8 @@ widgets use the same plugin contract available to custom widgets.
 
 - **Real desktop widgets** — move them freely, keep them always on top, and
   restore the same layout next time.
-- **Four public market sources** — Binance, Coinbase, OKX, and Hyperliquid.
+- **Nine public market sources** — Binance, Coinbase, OKX, Hyperliquid, Bitget, CoinEx, Gate.io, MEXC, and Bybit.
+- **Automatic runtime failover** — enabled by default; brief source failures are retried, then active spot pairs temporarily use a compatible enabled source without changing saved widget, tray, or alert settings.
 - **Flexible appearance** — multiple widget styles, light and dark themes,
   opacity controls, and configurable market colors.
 - **Global focus switch** — press <kbd>Alt</kbd> + <kbd>C</kbd> to hide or show

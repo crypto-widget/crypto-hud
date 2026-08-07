@@ -953,6 +953,7 @@ export component SettingsWindow inherits Window {
     in-out property <int> default-widget-scale-percent;
     in-out property <bool> red-up-enabled;
     in-out property <int> provider-index;
+    in-out property <bool> market-auto-failover-enabled;
     in-out property <bool> market-binance-enabled;
     in-out property <bool> market-coinbase-enabled;
     in-out property <bool> market-okx-enabled;
@@ -1074,6 +1075,8 @@ export component SettingsWindow inherits Window {
     in property <string> widget-scale-text;
     in property <string> red-up-color-text;
     in property <string> market-provider-text;
+    in property <string> market-auto-failover-text;
+    in property <string> market-auto-failover-help-text;
     in property <string> refresh-interval-text;
     in property <string> seconds-unit-text;
     in property <string> market-provider-help-text;
@@ -1245,7 +1248,7 @@ export component SettingsWindow inherits Window {
     property <length> hovered-plugin-preview-width: root.hovered-plugin-preview-image.width * 1px * root.hovered-plugin-preview-scale;
     property <length> hovered-plugin-preview-height: root.hovered-plugin-preview-image.height * 1px * root.hovered-plugin-preview-scale;
 
-    callback apply-settings(bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
+    callback apply-settings(bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, bool, int, int, int, bool, int, int, int, bool, bool);
     callback apply-tray-market-settings(bool, int);
     callback apply-network-settings(bool, string);
     callback apply-alert-settings(bool, string, int, string);
@@ -1304,6 +1307,7 @@ export component SettingsWindow inherits Window {
     function apply-current-settings() {
         root.apply-settings(
             root.red-up-enabled,
+            root.market-auto-failover-enabled,
             root.market-binance-enabled,
             root.market-coinbase-enabled,
             root.market-okx-enabled,
@@ -3185,7 +3189,7 @@ export component SettingsWindow inherits Window {
                 x: 17px;
                 y: 66px;
                 width: market_tab.width - 34px;
-                height: 165px;
+                height: 211px;
                 border-radius: 6px;
                 background: root.settings-surface-background;
                 border-width: 1px;
@@ -3194,6 +3198,14 @@ export component SettingsWindow inherits Window {
                 Rectangle {
                     x: 0px;
                     y: 114px;
+                    width: parent.width;
+                    height: 1px;
+                    background: root.settings-divider-color;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 159px;
                     width: parent.width;
                     height: 1px;
                     background: root.settings-divider-color;
@@ -3358,6 +3370,39 @@ export component SettingsWindow inherits Window {
                     rtl-layout: root.rtl-layout;
                     x: 17px;
                     y: 120px;
+                    width: parent.width - 88px;
+                    label: root.market-auto-failover-text;
+                    help: root.market-auto-failover-help-text;
+                    label-color: root.settings-label-color;
+                    muted-color: root.settings-muted-color;
+                }
+
+                SettingSwitch {
+                    x: root.rtl-layout ? 17px : parent.width - 54px;
+                    y: 126px;
+                    checked <=> root.market-auto-failover-enabled;
+                    accessible-label-text: root.market-auto-failover-text;
+                    accent-color: root.settings-accent-color;
+                    track-color: root.settings-track-color;
+                    knob-color: root.settings-knob-color;
+                    toggled => { root.apply-current-settings(); }
+                }
+
+                TouchArea {
+                    x: 17px;
+                    y: 115px;
+                    width: parent.width - 34px;
+                    height: 44px;
+                    clicked => {
+                        root.market-auto-failover-enabled = !root.market-auto-failover-enabled;
+                        root.apply-current-settings();
+                    }
+                }
+
+                SettingLabel {
+                    rtl-layout: root.rtl-layout;
+                    x: 17px;
+                    y: 166px;
                     width: 301px;
                     label: root.refresh-interval-text;
                     help: root.refresh-interval-help-text;
@@ -3367,7 +3412,7 @@ export component SettingsWindow inherits Window {
 
                 PercentStepper {
                     x: parent.width - 207px;
-                    y: 120px;
+                    y: 166px;
                     width: 150px;
                     height: 34px;
                     enabled: true;
@@ -3386,7 +3431,7 @@ export component SettingsWindow inherits Window {
 
                 Text {
                     x: parent.width - 49px;
-                    y: 120px;
+                    y: 166px;
                     width: 32px;
                     height: 34px;
                     text: root.seconds-unit-text;
@@ -3401,7 +3446,7 @@ export component SettingsWindow inherits Window {
 
             Rectangle {
                 x: 17px;
-                y: 245px;
+                y: 291px;
                 width: market_tab.width - 34px;
                 height: 104px;
                 border-radius: 6px;

@@ -57,7 +57,8 @@ uygun bir yere koyun, işinize devam edin ve yalnızca gerektiğinde göz atın.
 - **Tek bakışta bilgi**: taşınabilir ve her zaman üstte kalan widget'lar önemli rakamları görünür tutar.
 - **Önce yerel**: düzen ve tercihler bilgisayarınızda kalır; hesap veya API Key gerekmez.
 - **İstediğinizde gizleyin**: tüm widget'ları <kbd>Alt</kbd> + <kbd>C</kbd> ile gizleyin veya geri getirin.
-- **Dört genel veri kaynağı**: Binance, Coinbase, OKX ve Hyperliquid.
+- **Dokuz genel veri kaynağı**: Binance, Coinbase, OKX, Hyperliquid, Bitget, CoinEx, Gate.io, MEXC ve Bybit.
+- **Çalışma sırasında otomatik kaynak geçişi**: varsayılan olarak etkindir; kısa süreli hataları önce yeniden dener, kaynak kullanılamaz durumda kalırsa etkin spot çiftleri kayıtlı widget, tepsi veya uyarı ayarlarını değiştirmeden geçici olarak etkin ve uyumlu bir kaynak kullanır.
 - **Esnek görünüm**: farklı stiller, açık/koyu temalar, saydamlık ve ayarlanabilir piyasa renkleri.
 
 > [!IMPORTANT]

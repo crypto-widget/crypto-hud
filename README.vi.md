@@ -57,7 +57,8 @@ widget ở vị trí thuận mắt, tiếp tục công việc và chỉ liếc n
 - **Nắm bắt trong một ánh nhìn**: widget có thể kéo, luôn nổi và giữ số liệu quan trọng trong tầm mắt.
 - **Ưu tiên cục bộ**: bố cục và tùy chọn nằm trên máy của bạn; không cần tài khoản hay API Key.
 - **Ẩn khi cần tập trung**: nhấn <kbd>Alt</kbd> + <kbd>C</kbd> để ẩn hoặc khôi phục mọi widget.
-- **Bốn nguồn công khai**: Binance, Coinbase, OKX và Hyperliquid.
+- **Chín nguồn công khai**: Binance, Coinbase, OKX, Hyperliquid, Bitget, CoinEx, Gate.io, MEXC và Bybit.
+- **Tự động chuyển nguồn khi đang chạy**: được bật mặc định; lỗi ngắn sẽ được thử lại trước, sau đó các cặp spot đang hoạt động sẽ tạm dùng một nguồn tương thích đã bật nếu nguồn hiện tại vẫn không khả dụng, mà không thay đổi cài đặt widget, khay hệ thống hay cảnh báo đã lưu.
 - **Giao diện linh hoạt**: nhiều kiểu widget, chủ đề sáng/tối, độ trong suốt và màu tăng giảm tùy chỉnh.
 
 > [!IMPORTANT]
