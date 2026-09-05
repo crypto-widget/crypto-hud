@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     io::Read,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, RecvTimeoutError, TryRecvError},
         Arc, Mutex,
     },
@@ -56,6 +56,8 @@ pub struct MarketSnapshot {
     pub symbol: String,
     pub price: f64,
     pub change_percent_24h: f64,
+    /// Time the ticker was parsed, before any optional candle requests or delivery delay.
+    pub updated_at: Instant,
     pub chart_closes_24h: Vec<f64>,
     pub chart_candles_24h: Vec<MarketCandle>,
     pub chart_updated_at: Option<Instant>,
@@ -76,6 +78,8 @@ pub struct MarketCandle {
 pub enum MarketEvent {
     Snapshot(MarketSnapshot),
     Error(String),
+    /// A complete fetch cycle finished without ticker or chart errors.
+    Healthy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,6 +337,14 @@ fn run_market_feed(
                 &routed_subscriptions,
                 &mut candle_cache,
                 &interrupted,
+                &mut |snapshot| {
+                    if sender
+                        .send(MarketEvent::Snapshot(snapshot.clone()))
+                        .is_err()
+                    {
+                        cancelled.store(true, Ordering::Release);
+                    }
+                },
             );
             if cancelled.load(Ordering::Acquire) {
                 return;
@@ -346,7 +358,7 @@ fn run_market_feed(
             };
             failover_sources =
                 source_failover.observe_source_statuses(&fetch.source_statuses, Instant::now());
-            send_market_batch(&sender, fetch.batch)
+            send_market_batch_status(&sender, fetch.batch)
         };
 
         let Some(cycle_succeeded) = cycle_succeeded else {
@@ -406,21 +418,18 @@ fn run_market_feed(
     }
 }
 
-fn send_market_batch(
+fn send_market_batch_status(
     sender: &mpsc::Sender<MarketEvent>,
     result: Result<MarketBatch>,
 ) -> Option<bool> {
     match result {
         Ok(MarketBatch { snapshots, errors }) => {
-            for snapshot in snapshots {
-                if sender.send(MarketEvent::Snapshot(snapshot)).is_err() {
-                    return None;
-                }
-            }
-            if !errors.is_empty() && sender.send(MarketEvent::Error(errors.join("; "))).is_err() {
-                return None;
-            }
-            Some(true)
+            let status = if errors.is_empty() {
+                MarketEvent::Healthy
+            } else {
+                MarketEvent::Error(errors.join("; "))
+            };
+            sender.send(status).ok().map(|()| !snapshots.is_empty())
         }
         Err(error) => send_market_error(sender, error.to_string()),
     }
@@ -1059,6 +1068,7 @@ fn fetch_routed_subscriptions_interruptible(
     subscriptions: &[RoutedMarketSubscription],
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
+    on_snapshot: &mut dyn FnMut(&MarketSnapshot),
 ) -> Option<MarketFetchCycle> {
     fetch_routed_subscriptions_interruptible_with(
         agent,
@@ -1066,6 +1076,7 @@ fn fetch_routed_subscriptions_interruptible(
         candle_cache,
         interrupted,
         fetch_pair,
+        on_snapshot,
     )
 }
 
@@ -1101,6 +1112,7 @@ where
         candle_cache,
         interrupted,
         fetch,
+        &mut |_| {},
     )
     .map(|cycle| cycle.batch)
 }
@@ -1111,6 +1123,7 @@ fn fetch_routed_subscriptions_interruptible_with<F>(
     candle_cache: &mut CandleCache,
     interrupted: &(dyn Fn() -> bool + Sync),
     fetch: F,
+    on_snapshot: &mut dyn FnMut(&MarketSnapshot),
 ) -> Option<MarketFetchCycle>
 where
     F: Fn(
@@ -1151,7 +1164,16 @@ where
                     .entry(requested_pair.source)
                     .or_default()
                     .attempts += 1;
-                pairs.push((subscription.clone(), fetch_pair, requested_pair.source));
+                let cached_entry = subscription
+                    .needs_candles
+                    .then(|| candle_cache.get(&fetch_pair.key()).cloned())
+                    .flatten();
+                pairs.push((
+                    subscription.clone(),
+                    fetch_pair,
+                    requested_pair.source,
+                    cached_entry,
+                ));
             }
             _ => errors.push(format!(
                 "{}: invalid market pair",
@@ -1160,57 +1182,52 @@ where
         }
     }
 
-    for chunk in pairs.chunks(MAX_CONCURRENT_PAIR_FETCHES) {
-        if interrupted() {
-            return None;
-        }
-        let fetch = &fetch;
-        let results = thread::scope(|scope| {
-            let handles = chunk
-                .iter()
-                .map(|(subscription, pair, preferred_source)| {
-                    let agent = agent.clone();
-                    let subscription = subscription.clone();
-                    let pair = pair.clone();
-                    let preferred_source = *preferred_source;
-                    let cached_entry = subscription
-                        .needs_candles
-                        .then(|| candle_cache.get(&pair.key()).cloned())
-                        .flatten();
-                    scope.spawn(move || {
-                        let key = pair.key();
-                        let mut local_cache = CandleCache::new();
-                        if let Some(entry) = cached_entry {
-                            local_cache.insert(key.clone(), entry);
-                        }
-                        let result = fetch(
-                            &agent,
-                            &pair,
+    let next_pair = AtomicUsize::new(0);
+    thread::scope(|scope| {
+        let (sender, receiver) = mpsc::sync_channel(MAX_CONCURRENT_PAIR_FETCHES);
+        for _ in 0..pairs.len().min(MAX_CONCURRENT_PAIR_FETCHES) {
+            let sender = sender.clone();
+            let pairs = &pairs;
+            let next_pair = &next_pair;
+            let fetch = &fetch;
+            scope.spawn(move || {
+                while !interrupted() {
+                    let index = next_pair.fetch_add(1, Ordering::Relaxed);
+                    let Some((subscription, pair, _, cached_entry)) = pairs.get(index) else {
+                        break;
+                    };
+                    let key = pair.key();
+                    let mut local_cache = CandleCache::new();
+                    if let Some(entry) = cached_entry {
+                        local_cache.insert(key.clone(), entry.clone());
+                    }
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        fetch(
+                            agent,
+                            pair,
                             subscription.needs_candles,
                             &mut local_cache,
                             interrupted,
-                        );
-                        (
-                            subscription,
-                            preferred_source,
-                            result,
-                            local_cache.remove(&key),
                         )
-                    })
-                })
-                .collect::<Vec<_>>();
+                    }))
+                    .unwrap_or_else(|_| Err(anyhow!("market pair worker panicked")));
+                    if interrupted()
+                        || sender
+                            .send((index, result, local_cache.remove(&key)))
+                            .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
 
-            handles
-                .into_iter()
-                .map(|handle| handle.join())
-                .collect::<Vec<_>>()
-        });
-
-        for result in results {
-            let Ok((subscription, preferred_source, result, cached_entry)) = result else {
-                errors.push("market pair worker panicked".to_string());
-                continue;
-            };
+        for (index, result, cached_entry) in receiver {
+            if interrupted() {
+                return None;
+            }
+            let (subscription, _, preferred_source, _) = &pairs[index];
             if subscription.needs_candles {
                 if let Some(entry) = cached_entry {
                     candle_cache.insert(subscription.fetch_symbol.clone(), entry);
@@ -1219,10 +1236,11 @@ where
             match result {
                 Ok(mut outcome) => {
                     source_statuses
-                        .entry(preferred_source)
+                        .entry(*preferred_source)
                         .or_default()
                         .successes += 1;
                     outcome.snapshot.symbol = subscription.requested_symbol.clone();
+                    on_snapshot(&outcome.snapshot);
                     snapshots.push(outcome.snapshot);
                     if let Some(warning) = outcome.warning {
                         errors.push(format!("{}: {warning}", subscription.requested_symbol));
@@ -1232,13 +1250,13 @@ where
             }
         }
         if interrupted() {
-            return None;
+            None
+        } else {
+            Some(MarketFetchCycle {
+                batch: market_batch(snapshots, errors),
+                source_statuses,
+            })
         }
-    }
-
-    Some(MarketFetchCycle {
-        batch: market_batch(snapshots, errors),
-        source_statuses,
     })
 }
 
@@ -2933,6 +2951,7 @@ fn market_snapshot(
         symbol: pair.key(),
         price,
         change_percent_24h,
+        updated_at: Instant::now(),
         chart_closes_24h: Vec::new(),
         chart_candles_24h: Vec::new(),
         chart_updated_at: None,
@@ -3034,6 +3053,7 @@ mod tests {
             symbol: symbol.to_string(),
             price: 100.0,
             change_percent_24h: 1.0,
+            updated_at: Instant::now(),
             chart_closes_24h: Vec::new(),
             chart_candles_24h: Vec::new(),
             chart_updated_at: None,
@@ -3342,6 +3362,115 @@ mod tests {
     }
 
     #[test]
+    fn completed_pairs_are_delivered_while_an_earlier_request_is_blocked() {
+        let subscriptions =
+            ["BTC", "ETH", "SOL", "ADA", "DOT", "XRP"].map(|base| RoutedMarketSubscription {
+                requested_symbol: format!("binance:spot:{base}/USDT"),
+                fetch_symbol: format!("binance:spot:{base}/USDT"),
+                needs_candles: false,
+            });
+        let agent = build_agent(None).unwrap();
+        let (release, blocked) = mpsc::channel();
+        let blocked = Mutex::new(blocked);
+        let (delivered, received) = mpsc::channel();
+        let collected_at = Instant::now() - Duration::from_secs(60);
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                fetch_routed_subscriptions_interruptible_with(
+                    &agent,
+                    &subscriptions,
+                    &mut CandleCache::new(),
+                    &|| false,
+                    |_, pair, _, _, _| {
+                        let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(count, Ordering::SeqCst);
+                        let result = if pair.base == "BTC" {
+                            blocked
+                                .lock()
+                                .unwrap()
+                                .recv_timeout(Duration::from_secs(10))
+                                .unwrap();
+                            Err(anyhow!("blocked source failed"))
+                        } else {
+                            let mut snapshot = snapshot(&pair.key());
+                            snapshot.updated_at = collected_at;
+                            Ok(MarketFetchOutcome {
+                                snapshot,
+                                warning: None,
+                            })
+                        };
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        result
+                    },
+                    &mut |snapshot| delivered.send(snapshot.clone()).unwrap(),
+                )
+                .unwrap()
+            });
+            // There are more healthy requests than remaining worker slots.
+            // They must all finish before releasing the blocked first request.
+            let early = (0..5)
+                .map(|_| received.recv_timeout(Duration::from_secs(2)))
+                .collect::<Vec<_>>();
+            let _ = release.send(());
+            let cycle = worker.join().unwrap();
+            assert!(
+                early.iter().all(Result::is_ok),
+                "healthy requests waited for the blocked source"
+            );
+            assert!(early
+                .into_iter()
+                .all(|event| event.unwrap().updated_at == collected_at));
+            assert!(peak.load(Ordering::SeqCst) <= MAX_CONCURRENT_PAIR_FETCHES);
+            let batch = cycle.batch.unwrap();
+            assert_eq!(batch.snapshots.len(), 5);
+            assert_eq!(batch.errors.len(), 1);
+            assert!(batch.errors[0].contains("blocked source failed"));
+        });
+    }
+
+    #[test]
+    fn cancelled_cycle_does_not_deliver_obsolete_snapshots() {
+        let agent = build_agent(None).unwrap();
+        let subscriptions = [RoutedMarketSubscription {
+            requested_symbol: "binance:spot:BTC/USDT".to_string(),
+            fetch_symbol: "binance:spot:BTC/USDT".to_string(),
+            needs_candles: false,
+        }];
+        let cancelled = AtomicBool::new(false);
+        let mut delivered = Vec::new();
+        let cycle = fetch_routed_subscriptions_interruptible_with(
+            &agent,
+            &subscriptions,
+            &mut CandleCache::new(),
+            &|| cancelled.load(Ordering::Acquire),
+            |_, pair, _, _, _| {
+                cancelled.store(true, Ordering::Release);
+                Ok(MarketFetchOutcome {
+                    snapshot: snapshot(&pair.key()),
+                    warning: None,
+                })
+            },
+            &mut |snapshot| delivered.push(snapshot.clone()),
+        );
+        assert!(cycle.is_none());
+        assert!(delivered.is_empty());
+    }
+
+    #[test]
+    fn completed_cycle_reports_health_without_resending_snapshots() {
+        let (sender, receiver) = mpsc::channel();
+        let batch = market_batch(vec![snapshot("BTC")], vec!["chart failed".to_string()]);
+        assert_eq!(send_market_batch_status(&sender, batch), Some(true));
+        assert!(matches!(receiver.try_recv(), Ok(MarketEvent::Error(_))));
+        let batch = market_batch(vec![snapshot("BTC")], Vec::new());
+        assert_eq!(send_market_batch_status(&sender, batch), Some(true));
+        assert!(matches!(receiver.try_recv(), Ok(MarketEvent::Healthy)));
+        assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
     fn runtime_failover_waits_for_two_consecutive_source_failures() {
         let subscriptions = vec![subscription("binance:spot:BTC/USDT", false)];
         let enabled_sources = vec![MarketDataSource::Binance, MarketDataSource::Okx];
@@ -3428,6 +3557,7 @@ mod tests {
                     warning: None,
                 })
             },
+            &mut |_| {},
         )
         .unwrap();
         let batch = cycle.batch.unwrap();
@@ -3571,8 +3701,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(batch.snapshots.len(), 2);
-        assert!(batch.snapshots[0].chart_candles_24h.is_empty());
-        assert_eq!(batch.snapshots[1].chart_candles_24h.len(), 2);
+        let candle_counts = batch
+            .snapshots
+            .iter()
+            .map(|snapshot| (snapshot.symbol.as_str(), snapshot.chart_candles_24h.len()))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            candle_counts,
+            HashMap::from([("binance:spot:BTC/USDT", 0), ("binance:spot:ETH/USDT", 2)])
+        );
         assert!(!candle_cache.contains_key("binance:spot:BTC/USDT"));
         assert!(candle_cache.contains_key("binance:spot:ETH/USDT"));
         assert!(batch.errors.is_empty());
