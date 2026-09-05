@@ -28,7 +28,7 @@ $ChecksumPath = "$ZipPath.sha256"
 $TempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $IsolatedRoot = Join-Path $TempRoot "crypto-hud-package-smoke-$PID"
 $IsolatedPackageRoot = Join-Path $IsolatedRoot "package"
-$InstallDir = Join-Path $IsolatedRoot "install"
+$InstallDir = Join-Path $IsolatedRoot "custom install"
 $ShellSandbox = Join-Path $IsolatedRoot "shell"
 $ActivePackageRoot = $PackageRoot
 $OriginalLocalAppData = $env:LOCALAPPDATA
@@ -549,6 +549,17 @@ try {
     if (-not (Test-Path -LiteralPath $sentinel)) {
         throw "Uninstall safety check removed a protected directory"
     }
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "install.ps1") `
+        -InstallDir $protectedDir `
+        -SkipShellIntegration `
+        -AllowUnsignedPackage
+    if ($LASTEXITCODE -eq 0) {
+        throw "Installer accepted a nonempty directory without an installation manifest"
+    }
+    if ((Get-Content -LiteralPath $sentinel -Raw).Trim() -ne "keep" -or
+        @(Get-ChildItem -LiteralPath $protectedDir -Force).Count -ne 1) {
+        throw "Rejected installation changed unrelated directory content"
+    }
     Remove-Item -LiteralPath $protectedDir -Recurse -Force
 
     & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "install.ps1") `
@@ -587,6 +598,30 @@ try {
         -Executable $installedExe `
         -WorkingDirectory $InstallDir `
         -Scenario "installed"
+
+    $unownedFile = Join-Path $InstallDir "personal-notes.txt"
+    Set-Content -LiteralPath $unownedFile -Value "keep across upgrades"
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "install.ps1") `
+        -InstallDir $InstallDir `
+        -SkipShellIntegration `
+        -AllowUnsignedPackage
+    if ($LASTEXITCODE -eq 0) {
+        throw "Installer accepted an upgrade that would remove an unowned file"
+    }
+    if ((Get-Content -LiteralPath $unownedFile -Raw).Trim() -ne "keep across upgrades") {
+        throw "Rejected upgrade changed the unowned file"
+    }
+    Assert-Hash -Path $installedExe -ExpectedHash ([string]$manifest.executableSha256)
+    Remove-Item -LiteralPath $unownedFile -Force
+
+    # A clean existing installation remains upgradeable.
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ActivePackageRoot "install.ps1") `
+        -InstallDir $InstallDir `
+        -SkipShellIntegration `
+        -AllowUnsignedPackage
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installer rejected a clean existing installation"
+    }
 
     if ($Version -eq "v9999.0.1-smoke") {
         $installedManifestPath = Join-Path $InstallDir "release-manifest.json"
@@ -627,7 +662,8 @@ try {
     $legacySentinel = Join-Path $sandboxLegacyDir "keep.txt"
     Set-Content -LiteralPath $legacySentinel -Value "keep"
 
-    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "uninstall.ps1") -InstallDir $InstallDir -SkipShellIntegration
+    # The registered system command supplies only the script path, not -InstallDir.
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "uninstall.ps1") -SkipShellIntegration
     if ($LASTEXITCODE -ne 0) {
         throw "Uninstall smoke failed with code $LASTEXITCODE"
     }

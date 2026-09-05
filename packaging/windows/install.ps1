@@ -121,6 +121,36 @@ function Resolve-SafeRelativePath {
     $fullPath
 }
 
+function Assert-InstallDirectoryContents {
+    param(
+        [string]$Path,
+        [string[]]$OwnedPaths
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "Install target must be a directory: $Path"
+    }
+    Assert-TreeHasNoReparsePoints -Path $Path
+    $allowedEntries = @{}
+    foreach ($relativePath in $OwnedPaths) {
+        $ownedPath = Resolve-SafeRelativePath -Root $Path -RelativePath $relativePath -Description "existing installation file"
+        $allowedEntries[$ownedPath] = $true
+        $parent = Split-Path -Parent $ownedPath
+        while (-not $parent.TrimEnd('\', '/').Equals($Path.TrimEnd('\', '/'), [System.StringComparison]::OrdinalIgnoreCase)) {
+            $allowedEntries[$parent] = $true
+            $parent = Split-Path -Parent $parent
+        }
+    }
+    foreach ($entry in Get-ChildItem -LiteralPath $Path -Recurse -Force) {
+        if (-not $allowedEntries.ContainsKey($entry.FullName)) {
+            throw "Refusing to replace an installation directory containing unowned content: $($entry.FullName)"
+        }
+    }
+}
+
 function Assert-FileHash {
     param(
         [string]$Path,
@@ -389,6 +419,7 @@ if (-not $AllowUnsignedPackage) {
 $existingManifestPath = Join-Path $InstallDir $ManifestName
 $existingIntegrityPath = Join-Path $InstallDir $IntegrityName
 $existingExecutablePath = Join-Path $InstallDir $ExeName
+$existingOwnedPaths = @()
 if (Test-Path -LiteralPath $existingManifestPath -PathType Leaf) {
     Assert-NoReparsePoint -Path $existingManifestPath -StopDirectory $InstallDir
     Assert-NoReparsePoint -Path $existingIntegrityPath -StopDirectory $InstallDir
@@ -427,9 +458,9 @@ if (Test-Path -LiteralPath $existingManifestPath -PathType Leaf) {
             throw "Existing installation publisher does not match the candidate package"
         }
     }
-} elseif ((Test-Path -LiteralPath $existingExecutablePath) -and -not $AllowUnsignedPackage) {
-    throw "Refusing to overwrite an existing executable without a trusted release manifest"
+    $existingOwnedPaths = @($existingManifest.files | ForEach-Object { [string]$_.path }) + @($ManifestName, $IntegrityName)
 }
+Assert-InstallDirectoryContents -Path $InstallDir -OwnedPaths $existingOwnedPaths
 
 $installParent = Split-Path -Parent $InstallDir
 New-Item -ItemType Directory -Force -Path $installParent | Out-Null
@@ -472,7 +503,8 @@ try {
         Assert-FileHash -Path $targetPath -ExpectedHash ([string]$file.sha256)
     }
     if (Test-Path -LiteralPath $InstallDir) {
-        Assert-TreeHasNoReparsePoints -Path $InstallDir
+        # Recheck immediately before moving; the target may have changed while staging.
+        Assert-InstallDirectoryContents -Path $InstallDir -OwnedPaths $existingOwnedPaths
         Move-Item -LiteralPath $InstallDir -Destination $backupDir
     }
     try {
@@ -485,7 +517,7 @@ try {
     }
     if (Test-Path -LiteralPath $backupDir) {
         try {
-            Assert-TreeHasNoReparsePoints -Path $backupDir
+            Assert-InstallDirectoryContents -Path $backupDir -OwnedPaths $existingOwnedPaths
             Remove-Item -LiteralPath $backupDir -Recurse -Force
         } catch {
             Write-Warning "Installed successfully but could not remove rollback directory ${backupDir}: $($_.Exception.Message)"

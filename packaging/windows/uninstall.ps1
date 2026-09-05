@@ -1,5 +1,5 @@
 param(
-    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "CryptoHud"),
+    [string]$InstallDir = $PSScriptRoot,
     [switch]$SkipShellIntegration,
     [switch]$RemoveUserData
 )
