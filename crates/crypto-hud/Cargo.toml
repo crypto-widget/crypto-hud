@@ -32,6 +32,12 @@ sys-locale = "0.3"
 ureq = { version = "3.3.0", features = ["socks-proxy"] }
 windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
+[target.'cfg(unix)'.dependencies]
+# Bound existing Slint dependencies to fixes for RUSTSEC-2026-0257 and
+# RUSTSEC-2026-0221; these constraints do not add a Windows runtime dependency.
+webbrowser = { version = "1.2.2", default-features = false }
+event-listener = { version = "5.4.2", default-features = false }
+
 [build-dependencies]
 slint-build = "1.17.1"
 winresource = "0.1.31"
