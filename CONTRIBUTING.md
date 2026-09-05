@@ -58,6 +58,10 @@ mise run ci
 For UI, shell, packaging, or installer changes, also run the relevant PowerShell
 smoke script from `scripts/`.
 
+See [Recovery and market delivery](docs/recovery-and-market-delivery.md) for
+state preservation, installer ownership checks, failover behavior, and their
+regression checks.
+
 ## Issues and Pull Requests
 
 - Use issues for bugs, feature proposals, and UX reports.

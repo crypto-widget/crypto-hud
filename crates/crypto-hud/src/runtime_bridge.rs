@@ -328,35 +328,8 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
             while let Ok(event) = market_updates.try_recv() {
                 match event {
                     market::MarketEvent::Snapshot(snapshot) => {
-                        *market_error_active.borrow_mut() = false;
                         let settings = layouts.borrow().settings.clone().normalized();
-                        let updated_at = Instant::now();
-                        {
-                            let mut cache = quote_cache.borrow_mut();
-                            cache.insert(
-                                snapshot.symbol.clone(),
-                                QuoteState::new_with_chart_status(
-                                    snapshot.price,
-                                    snapshot.change_percent_24h,
-                                    snapshot.chart_closes_24h.clone(),
-                                    snapshot
-                                        .chart_candles_24h
-                                        .iter()
-                                        .map(|candle| widget_runtime::ChartCandle {
-                                            open_time_millis: candle.open_time_millis,
-                                            open: candle.open,
-                                            high: candle.high,
-                                            low: candle.low,
-                                            close: candle.close,
-                                        })
-                                        .collect(),
-                                    snapshot.source,
-                                    updated_at,
-                                    snapshot.chart_updated_at,
-                                    snapshot.chart_error.clone(),
-                                ),
-                            );
-                        }
+                        cache_market_snapshot(&mut quote_cache.borrow_mut(), snapshot);
 
                         let cache = quote_cache.borrow();
                         if feature_flags::ALERT_RULES_ENABLED {
@@ -371,6 +344,9 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
                     market::MarketEvent::Error(error) => {
                         *market_error_active.borrow_mut() = true;
                         eprintln!("market data update failed: {error}");
+                    }
+                    market::MarketEvent::Healthy => {
+                        *market_error_active.borrow_mut() = false;
                     }
                 }
             }
@@ -435,6 +411,32 @@ pub(crate) fn install_runtime_event_timer(deps: RuntimeEventTimerDeps) -> Timer 
         });
     }
     timer
+}
+
+fn cache_market_snapshot(cache: &mut QuoteCache, snapshot: market::MarketSnapshot) {
+    cache.insert(
+        snapshot.symbol,
+        QuoteState::new_with_chart_status(
+            snapshot.price,
+            snapshot.change_percent_24h,
+            snapshot.chart_closes_24h,
+            snapshot
+                .chart_candles_24h
+                .into_iter()
+                .map(|candle| widget_runtime::ChartCandle {
+                    open_time_millis: candle.open_time_millis,
+                    open: candle.open,
+                    high: candle.high,
+                    low: candle.low,
+                    close: candle.close,
+                })
+                .collect(),
+            snapshot.source,
+            snapshot.updated_at,
+            snapshot.chart_updated_at,
+            snapshot.chart_error,
+        ),
+    );
 }
 
 fn runtime_reload_instance_indices(
@@ -1342,6 +1344,32 @@ fn update_notification_body(update: &updater::UpdateInfo, locale: i18n::Locale) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delayed_market_delivery_does_not_refresh_the_price_timestamp() {
+        let now = Instant::now();
+        let collected_at = now - Duration::from_secs(300);
+        let symbol = "binance:spot:BTC/USDT".to_string();
+        let mut cache = QuoteCache::new();
+        cache_market_snapshot(
+            &mut cache,
+            market::MarketSnapshot {
+                symbol: symbol.clone(),
+                price: 100.0,
+                change_percent_24h: 2.0,
+                updated_at: collected_at,
+                chart_closes_24h: Vec::new(),
+                chart_candles_24h: Vec::new(),
+                chart_updated_at: None,
+                chart_error: None,
+                source: settings::MarketDataSource::Binance,
+            },
+        );
+        let health =
+            widget_runtime::data_health_for_symbols(std::slice::from_ref(&symbol), &cache, now);
+        assert_eq!(health.stale, 1);
+        assert_eq!(cache.get(&symbol).unwrap().updated_at, collected_at);
+    }
 
     fn runtime_test_widget(symbols: Vec<&str>) -> WidgetInstance {
         WidgetInstance {

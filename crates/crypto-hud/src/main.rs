@@ -281,6 +281,7 @@ fn deterministic_gui_smoke_market_events(
                 symbol: subscription.symbol.clone(),
                 price,
                 change_percent_24h: 1.0 + index as f64 * 0.1,
+                updated_at: Instant::now(),
                 chart_closes_24h,
                 chart_candles_24h,
                 chart_updated_at: subscription.needs_candles.then(Instant::now),
