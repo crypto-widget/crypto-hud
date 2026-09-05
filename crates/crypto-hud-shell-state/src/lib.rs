@@ -8,7 +8,10 @@ use std::{
     fs::{self, File},
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -398,6 +401,53 @@ pub struct LayoutStore {
     pub next_widget_number: u64,
     #[serde(default)]
     pub widgets: Vec<WidgetInstance>,
+    /// Runtime-only protection shared by settings transactions and layout clones.
+    #[serde(skip)]
+    pub write_guard: LayoutStoreWriteGuard,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct LayoutStoreWriteGuard(Option<Arc<Mutex<PendingStatePreservation>>>);
+
+#[derive(Debug)]
+struct PendingStatePreservation {
+    source: PathBuf,
+    preserved_path: Option<PathBuf>,
+}
+
+impl PartialEq for LayoutStoreWriteGuard {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+            (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
+}
+
+impl LayoutStoreWriteGuard {
+    fn pending(source: PathBuf) -> Self {
+        Self(Some(Arc::new(Mutex::new(PendingStatePreservation {
+            source,
+            preserved_path: None,
+        }))))
+    }
+
+    fn ensure_preserved(&self) -> Result<()> {
+        let Some(pending) = &self.0 else {
+            return Ok(());
+        };
+        let mut pending = pending
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state recovery protection is unavailable"))?;
+        if pending.preserved_path.is_none() {
+            pending.preserved_path = Some(
+                preserve_unreadable_layout_store(&pending.source)
+                    .context("refusing to save defaults before preserving the original state")?,
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1366,6 +1416,7 @@ fn normalize_alert_rule(
 }
 
 pub fn save_layout_store(path: &Path, store: &LayoutStore) -> Result<()> {
+    store.write_guard.ensure_preserved()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -1743,7 +1794,14 @@ fn default_layout_store_after_error(
     work_areas: &[DesktopWorkArea],
 ) -> LoadedLayoutStore {
     let warning = layout_store_load_warning(&error);
-    let mut store = LayoutStore::default();
+    let mut store = LayoutStore {
+        write_guard: if warning.preserved_path.is_none() {
+            LayoutStoreWriteGuard::pending(error.path().to_path_buf())
+        } else {
+            LayoutStoreWriteGuard::default()
+        },
+        ..LayoutStore::default()
+    };
     normalize_store_with_catalog_and_work_areas(
         &mut store,
         requested_widget_count,
@@ -1786,7 +1844,25 @@ fn preserve_unreadable_layout_store(path: &Path) -> Result<PathBuf> {
         std::process::id()
     ));
     let backup_path = parent.join(backup_name);
-    fs::copy(path, &backup_path).with_context(|| {
+    let mut original = File::open(path).with_context(|| {
+        format!(
+            "failed to open original state {} for backup",
+            path.display()
+        )
+    })?;
+    let mut backup = File::options()
+        .write(true)
+        .create_new(true)
+        .open(&backup_path)
+        .with_context(|| format!("failed to create state backup {}", backup_path.display()))?;
+    let result = io::copy(&mut original, &mut backup).and_then(|_| backup.sync_all());
+    drop(backup);
+    if result.is_err() {
+        if let Err(error) = fs::remove_file(&backup_path) {
+            eprintln!("failed to remove incomplete state backup: {error}");
+        }
+    }
+    result.with_context(|| {
         format!(
             "failed to preserve unreadable state {} as {}",
             path.display(),
@@ -1847,6 +1923,7 @@ fn migrate_legacy_store_in_work_areas(
 
     let mut store = LayoutStore {
         settings,
+        write_guard: LayoutStoreWriteGuard::default(),
         selected_widget_id: None,
         next_widget_number: DEFAULT_NEXT_WIDGET_NUMBER,
         widgets: widgets
@@ -5003,6 +5080,81 @@ mod tests {
         assert_eq!(parse_error.kind(), LayoutStoreReadErrorKind::Parse);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_state_preservation_blocks_saves_until_the_original_is_backed_up() {
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-state-write-guard-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        // A directory at the state path makes both reading and backup fail on
+        // every platform, without relying on permissions or the current user.
+        fs::create_dir_all(&path).unwrap();
+        let loaded = load_layout_store_with_diagnostics(&path, 1, &[], (1920, 1080));
+        let warning = loaded.warning.unwrap();
+        assert!(warning.preserved_path.is_none());
+        assert!(warning.preservation_error.is_some());
+        let mut candidate = loaded.store.clone();
+        candidate.settings.opacity_percent = 88;
+        let alternative = dir.join("other.json");
+        assert!(save_layout_store(&alternative, &candidate).is_err());
+        assert!(!alternative.exists());
+
+        fs::remove_dir(&path).unwrap();
+        let original = br#"{"settings":{"opacity_percent":77},"widgets":[]}"#;
+        fs::write(&path, original).unwrap();
+        save_layout_store(&path, &candidate).unwrap();
+        save_layout_store(&path, &loaded.store).unwrap();
+        let backups = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|entry| entry != &path)
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 1, "cloned stores share the recovery backup");
+        assert_eq!(fs::read(&backups[0]).unwrap(), original);
+        let json: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(json.get("write_guard").is_none());
+        assert_eq!(json["schema_version"], LAYOUT_STORE_SCHEMA_VERSION);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn temporarily_locked_state_is_preserved_before_saving_recovery_defaults() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "crypto-hud-state-locked-{}-{}",
+            std::process::id(),
+            SAVE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(LAYOUT_STATE_FILE_NAME);
+        let original = br#"{"settings":{"opacity_percent":77},"widgets":[]}"#;
+        fs::write(&path, original).unwrap();
+        let lock = File::options()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        let loaded = load_layout_store_with_diagnostics(&path, 1, &[], (1920, 1080));
+        let warning = loaded.warning.unwrap();
+        assert_eq!(warning.kind, LayoutStoreReadErrorKind::Read);
+        assert!(warning.preserved_path.is_none());
+        assert!(save_layout_store(&path, &loaded.store).is_err());
+        drop(lock);
+        assert_eq!(fs::read(&path).unwrap(), original);
+        save_layout_store(&path, &loaded.store).unwrap();
+        let backup = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|entry| entry != &path)
+            .unwrap();
+        assert_eq!(fs::read(backup).unwrap(), original);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
