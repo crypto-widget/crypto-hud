@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     io::Read,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -175,11 +175,12 @@ struct MarketFetchCycle {
     source_statuses: HashMap<MarketDataSource, MarketSourceStatus>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeSourceRoute {
     active_source: MarketDataSource,
     consecutive_failures: u32,
     next_probe_at: Option<Instant>,
+    subscribed_pairs: BTreeSet<String>,
 }
 
 #[derive(Debug, Default)]
@@ -514,31 +515,38 @@ impl RuntimeSourceFailover {
                 })
         });
 
+        let mut pairs_by_source = HashMap::<MarketDataSource, BTreeSet<String>>::new();
         for subscription in subscriptions {
             let Some(pair) = parse_market_pair(&subscription.symbol) else {
                 continue;
             };
+            pairs_by_source
+                .entry(pair.source)
+                .or_default()
+                .insert(pair.key());
+        }
+        for (preferred_source, subscribed_pairs) in pairs_by_source {
             let route = self
                 .routes
-                .entry(pair.source)
+                .entry(preferred_source)
                 .or_insert(RuntimeSourceRoute {
-                    active_source: pair.source,
+                    active_source: preferred_source,
                     consecutive_failures: 0,
                     next_probe_at: None,
+                    subscribed_pairs: subscribed_pairs.clone(),
                 });
-            if route.active_source != pair.source
-                && !subscriptions
-                    .iter()
-                    .filter_map(|subscription| parse_market_pair(&subscription.symbol))
-                    .filter(|candidate| candidate.source == pair.source)
-                    .all(|candidate| can_route_pair_to_source(&candidate, route.active_source))
-            {
+            // A fallback was verified for a specific set of pairs. Additions
+            // must go back through the preferred source and catalog probing.
+            // Removals, reordering and chart-only changes keep a valid route.
+            if !subscribed_pairs.is_subset(&route.subscribed_pairs) {
                 *route = RuntimeSourceRoute {
-                    active_source: pair.source,
+                    active_source: preferred_source,
                     consecutive_failures: 0,
                     next_probe_at: None,
+                    subscribed_pairs: subscribed_pairs.clone(),
                 };
             }
+            route.subscribed_pairs = subscribed_pairs;
         }
     }
 
@@ -3259,6 +3267,77 @@ mod tests {
         assert_eq!(
             subscriptions,
             vec![subscription("binance:spot:BTC/USDT", true)]
+        );
+    }
+
+    #[test]
+    fn adding_pairs_revalidates_fallback_without_resetting_unrelated_sources() {
+        let enabled = vec![
+            MarketDataSource::Binance,
+            MarketDataSource::Coinbase,
+            MarketDataSource::Okx,
+        ];
+        let mut subscriptions = vec![
+            subscription("binance:spot:BTC/USDT", false),
+            subscription("okx:spot:ETH/USDT", false),
+        ];
+        let mut failover = RuntimeSourceFailover::default();
+        failover.sync(true, &enabled, &subscriptions);
+        failover.switch_source(MarketDataSource::Binance, MarketDataSource::Coinbase);
+        failover.switch_source(MarketDataSource::Okx, MarketDataSource::Coinbase);
+
+        // The previous fallback was checked before this source-specific pair
+        // was selected. Its spot type alone cannot prove Coinbase lists it.
+        subscriptions.push(subscription("binance:spot:NEW/USDT", false));
+        failover.sync(true, &enabled, &subscriptions);
+        let routed = failover.route_subscriptions(&subscriptions);
+        assert_eq!(routed[2].fetch_symbol, "binance:spot:NEW/USDT");
+        assert_eq!(
+            failover.active_source(MarketDataSource::Binance),
+            Some(MarketDataSource::Binance)
+        );
+        assert_eq!(
+            failover.active_source(MarketDataSource::Okx),
+            Some(MarketDataSource::Coinbase)
+        );
+
+        let failed = HashMap::from([(
+            MarketDataSource::Binance,
+            MarketSourceStatus {
+                attempts: 2,
+                successes: 0,
+            },
+        )]);
+        let now = Instant::now();
+        assert!(failover.observe_source_statuses(&failed, now).is_empty());
+        assert_eq!(
+            failover.observe_source_statuses(&failed, now),
+            vec![MarketDataSource::Binance]
+        );
+    }
+
+    #[test]
+    fn fallback_survives_pair_removal_reordering_and_candle_changes() {
+        let enabled = vec![MarketDataSource::Binance, MarketDataSource::Okx];
+        let mut subscriptions = vec![
+            subscription("binance:spot:BTC/USDT", false),
+            subscription("binance:spot:ETH/USDT", false),
+        ];
+        let mut failover = RuntimeSourceFailover::default();
+        failover.sync(true, &enabled, &subscriptions);
+        failover.switch_source(MarketDataSource::Binance, MarketDataSource::Okx);
+        subscriptions.reverse();
+        subscriptions[0].needs_candles = true;
+        failover.sync(true, &enabled, &subscriptions);
+        assert_eq!(
+            failover.active_source(MarketDataSource::Binance),
+            Some(MarketDataSource::Okx)
+        );
+        subscriptions.pop();
+        failover.sync(true, &enabled, &subscriptions);
+        assert_eq!(
+            failover.active_source(MarketDataSource::Binance),
+            Some(MarketDataSource::Okx)
         );
     }
 
