@@ -69,3 +69,5 @@ The desktop manifest constrains Slint's existing Unix dependencies to
 RUSTSEC-2026-0257 and RUSTSEC-2026-0221. Keep these constraints and `Cargo.lock`
 aligned and run `cargo audit` after dependency changes. Upstream maintenance
 warnings for other Slint dependencies remain visible; they are not suppressed.
+The workspace also constrains ureq's shared TLS dependency to `rustls >=0.23.45`
+for RUSTSEC-2026-0285, with default features supplied by ureq.

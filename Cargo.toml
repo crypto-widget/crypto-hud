@@ -19,3 +19,7 @@ homepage = "https://github.com/crypto-widget/crypto-hud"
 readme = "README.md"
 rust-version = "1.96"
 publish = false
+
+[workspace.dependencies]
+# Keep ureq's shared TLS implementation above the RUSTSEC-2026-0285 fix.
+rustls = { version = "0.23.45", default-features = false }
