@@ -482,6 +482,10 @@ mise run check
 powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```
 
+Status Strip 的圆角装饰使用自包含 SVG，避免软件渲染器的渐变矩形覆盖圆角。
+修改后可运行 `scripts/update-status-strip-preview.ps1`，从带透明通道的离屏快照
+重建预览图；该脚本同时检查空数据、1–5 个币对、浅色/深色、锁定状态、缩放和 DPI。
+
 手动 GUI smoke：
 
 - 运行 `mise run run-app`。

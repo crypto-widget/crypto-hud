@@ -5,23 +5,15 @@ export struct QuoteRow {
     positive: bool,
 }
 
-component StatusStripFill inherits Path {
-    in property <int> tone-index;
+component StatusStripFill inherits Image {
     in property <int> edge-kind;
-
-    viewbox-width: 136;
-    viewbox-height: 84;
-    fit: fill;
-    commands: root.edge-kind == 1 ? "M 10 0 L 136 0 L 136 84 L 10 84 Q 0 84 0 74 L 0 10 Q 0 0 10 0 Z"
-        : (root.edge-kind == 2 ? "M 0 0 L 126 0 Q 136 0 136 10 L 136 74 Q 136 84 126 84 L 0 84 Z"
-        : (root.edge-kind == 3 ? "M 10 0 L 126 0 Q 136 0 136 10 L 136 74 Q 136 84 126 84 L 10 84 Q 0 84 0 74 L 0 10 Q 0 0 10 0 Z"
-        : "M 0 0 L 136 0 L 136 84 L 0 84 Z"));
-    fill: root.tone-index == 0 ? @linear-gradient(180deg, #1ab5cd 0%, #128bb1 100%)
-        : (root.tone-index == 1 ? @linear-gradient(180deg, #29a2d7 0%, #1f6ebc 100%)
-        : (root.tone-index == 2 ? @linear-gradient(180deg, #f79d25 0%, #e55e1f 100%)
-        : (root.tone-index == 3 ? @linear-gradient(180deg, #dbcc27 0%, #b5aa16 100%)
-        : @linear-gradient(180deg, #52b868 0%, #288b52 100%))));
-    stroke-width: 0px;
+    // SVG rasterization preserves gradient masks at fractional DPI and scale.
+    // Native software-renderer gradient rectangles do not clip rounded corners.
+    source: root.edge-kind == 1 ? @image-url("gloss-left.svg")
+        : (root.edge-kind == 2 ? @image-url("gloss-right.svg")
+        : (root.edge-kind == 3 ? @image-url("gloss-single.svg")
+        : @image-url("gloss-middle.svg")));
+    image-fit: fill;
 }
 
 export component StatusStrip inherits Window {
@@ -48,8 +40,6 @@ export component StatusStrip inherits Window {
     property <length> window-padding: 4px;
     property <length> block-width: 122px;
     property <length> card-radius: 10px;
-    property <length> upper-highlight-radius: root.card-radius - 1px;
-    property <length> top-highlight-radius: root.card-radius - 2px;
     property <length> text-left: 13px;
     property <length> text-horizontal-padding: root.text-left * 2;
     property <length> price-right-gap: 7px;
@@ -152,52 +142,18 @@ export component StatusStrip inherits Window {
                 border-bottom-left-radius: index == 0 ? root.s(root.card-radius) : 0px;
                 border-top-right-radius: index + 1 == root.block-count ? root.s(root.card-radius) : 0px;
                 border-bottom-right-radius: index + 1 == root.block-count ? root.s(root.card-radius) : 0px;
-                // Keep a solid rounded fill below the decorative gradient
-                // path. The software renderer can cull very small paths, but
-                // it does not apply rectangle radii to gradient backgrounds.
+                // Keep the solid fill and the SVG gloss independently rounded;
+                // the software renderer only supports rectangular child clips.
                 background: index == 0 ? #159fbe
                     : (index == 1 ? #2388ca
                     : (index == 2 ? #ee7c22
                     : (index == 3 ? #c8bb1d : #3da45d)));
 
                 StatusStripFill {
-                    tone-index: index;
                     edge-kind: root.block-count == 1 ? 3 : (index == 0 ? 1 : (index + 1 == root.block-count ? 2 : 0));
                     width: parent.width;
                     height: parent.height;
                 }
-            }
-
-            whole_card_highlight := Rectangle {
-                width: parent.width;
-                height: parent.height;
-                border-radius: root.s(root.card-radius);
-                background: @linear-gradient(180deg, #ffffff12 0%, #ffffff0a 18%, #ffffff03 50%, #ffffff00 74%, #00000000 100%);
-            }
-
-            upper_gloss := Rectangle {
-                x: root.s(1px);
-                y: root.s(1px);
-                width: parent.width - root.s(2px);
-                height: root.s(48px);
-                border-radius: root.s(root.upper-highlight-radius);
-                background: @linear-gradient(180deg, #ffffff22 0%, #ffffff13 22%, #ffffff06 56%, #ffffff02 82%, #ffffff00 100%);
-            }
-
-            top_glint := Rectangle {
-                x: root.s(2px);
-                y: root.s(2px);
-                width: parent.width - root.s(4px);
-                height: root.s(12px);
-                border-radius: root.s(root.top-highlight-radius);
-                background: @linear-gradient(180deg, #ffffff18 0%, #ffffff04 100%);
-            }
-
-            bottom_shade := Rectangle {
-                width: parent.width;
-                height: parent.height;
-                border-radius: root.s(root.card-radius);
-                background: @linear-gradient(180deg, #00000000 0%, #00000000 42%, #0000000b 78%, #00000016 100%);
             }
 
             for quote[index] in root.quote-rows : Rectangle {

@@ -3300,6 +3300,157 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
+    fn status_strip_keeps_rounded_corners_in_software_snapshots() {
+        fn verify_snapshots() {
+            use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+            use slint::platform::{Platform, WindowAdapter, WindowEvent};
+            use slint::{ComponentHandle, LogicalSize, ModelRc, VecModel};
+            use slint_interpreter::{Struct, Value};
+
+            struct SnapshotPlatform;
+            impl Platform for SnapshotPlatform {
+                fn create_window_adapter(
+                    &self,
+                ) -> Result<std::rc::Rc<dyn WindowAdapter>, slint::PlatformError> {
+                    Ok(MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer))
+                }
+            }
+            slint::platform::set_platform(Box::new(SnapshotPlatform)).unwrap();
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let plugin_root =
+                fs::canonicalize(root.join("plugins/com.cryptohud.status-strip")).unwrap();
+            let definition = compile_slint_renderer(
+                &plugin_root,
+                &plugin_root.join("ui/main.slint"),
+                "StatusStrip",
+                &[],
+            )
+            .unwrap();
+
+            for count in 0..=5 {
+                for scale in [0.3_f64, 1.0] {
+                    for dpi in [1.0_f32, 1.25, 1.5, 2.0] {
+                        for theme in ["light", "dark"] {
+                            for locked in [false, true] {
+                                let component = definition.create().unwrap();
+                                let width = ((122 * count.max(1) + 8) as f64 * scale).round();
+                                let height = (92.0 * scale).round();
+                                for (name, value) in [
+                                    ("widget-width", Value::Number(width)),
+                                    ("widget-height", Value::Number(height)),
+                                    ("widget-scale", Value::Number(scale)),
+                                    ("content-opacity", Value::Number(100.0)),
+                                    ("theme-name", Value::String(theme.into())),
+                                    ("layout-locked", Value::Bool(locked)),
+                                    ("empty-text", Value::String("No data".into())),
+                                ] {
+                                    component.set_property(name, value).unwrap();
+                                }
+                                let rows = (0..count)
+                                    .map(|index| {
+                                        Value::Struct(Struct::from_iter([
+                                            (
+                                                "symbol".into(),
+                                                Value::String(
+                                                    [
+                                                        "BTC/USDT", "ETH/USDT", "SOL/USDT",
+                                                        "BNB/USDT", "XRP/USDT",
+                                                    ]
+                                                        [index as usize]
+                                                        .into(),
+                                                ),
+                                            ),
+                                            (
+                                                "price".into(),
+                                                Value::String(
+                                                    ["63206", "1771", "80.88", "580.24", "0.53"]
+                                                        [index as usize]
+                                                        .into(),
+                                                ),
+                                            ),
+                                            ("change".into(), Value::String("+1.00%".into())),
+                                            ("positive".into(), Value::Bool(index % 2 == 0)),
+                                        ]))
+                                    })
+                                    .collect::<Vec<_>>();
+                                component
+                                    .set_property(
+                                        "quote-rows",
+                                        Value::Model(ModelRc::new(VecModel::from(rows))),
+                                    )
+                                    .unwrap();
+                                component.window().dispatch_event(
+                                    WindowEvent::ScaleFactorChanged { scale_factor: dpi },
+                                );
+                                component
+                                    .window()
+                                    .set_size(LogicalSize::new(width as f32, height as f32));
+                                component.show().unwrap();
+                                let snapshot = component.window().take_snapshot().unwrap();
+                                let context = format!("count={count}, scale={scale}, dpi={dpi}, theme={theme}, locked={locked}");
+                                assert_eq!(snapshot.as_slice()[0].a, 0, "{context}");
+                                let visible_rows = snapshot
+                                    .as_slice()
+                                    .chunks_exact(snapshot.width() as usize)
+                                    .filter_map(|row| {
+                                        let visible = row
+                                            .iter()
+                                            .enumerate()
+                                            .filter_map(|(x, pixel)| (pixel.a > 75).then_some(x))
+                                            .collect::<Vec<_>>();
+                                        (visible.len() >= row.len() / 2).then(|| {
+                                            (visible[0], visible[visible.len() - 1], visible.len())
+                                        })
+                                    })
+                                    .collect::<Vec<_>>();
+                                if count > 0 {
+                                    let top = visible_rows.first().expect("visible top row");
+                                    let bottom = visible_rows.last().expect("visible bottom row");
+                                    let widest =
+                                        visible_rows.iter().max_by_key(|row| row.2).unwrap();
+                                    assert!(
+                                        top.0 > widest.0 && top.1 < widest.1,
+                                        "square top corners: {context}"
+                                    );
+                                    assert!(
+                                        bottom.0 > widest.0 && bottom.1 < widest.1,
+                                        "square bottom corners: {context}"
+                                    );
+                                } else {
+                                    assert!(
+                                        snapshot.as_slice().iter().any(|pixel| pixel.a > 0),
+                                        "missing empty-state text: {context}"
+                                    );
+                                }
+                                if count == 3
+                                    && scale == 1.0
+                                    && dpi == 1.0
+                                    && theme == "light"
+                                    && !locked
+                                    && std::env::var("CRYPTO_HUD_UPDATE_STATUS_STRIP_PREVIEW")
+                                        .as_deref()
+                                        == Ok("1")
+                                {
+                                    let output =
+                                        root.join("../../target/tmp/status-strip-preview.rgba");
+                                    fs::create_dir_all(output.parent().unwrap()).unwrap();
+                                    let mut bytes = snapshot.width().to_le_bytes().to_vec();
+                                    bytes.extend_from_slice(&snapshot.height().to_le_bytes());
+                                    bytes.extend_from_slice(snapshot.as_bytes());
+                                    fs::write(output, bytes).unwrap();
+                                }
+                                component.hide().unwrap();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Keep the headless platform on its own thread, away from other tests.
+        std::thread::spawn(verify_snapshots).join().unwrap();
+    }
+
+    #[test]
     fn market_board_manifest_declares_default_symbols() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
         let catalog = PluginCatalog::discover(vec![root]);
