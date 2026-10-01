@@ -62,6 +62,14 @@ Market regression tests use fixed inputs and channels to hold one request while
 later healthy requests finish. They cover delivery, cancellation, concurrency,
 fallback subscription changes, and final cycle status without live exchanges.
 
+The settings symbol catalog queries only enabled sources, using at most four
+workers. Successful catalogs become selectable before slower sources finish.
+Refreshing retains the last online catalog while requests are pending; a failed
+refresh reports its error without replacing those entries with local fallback
+pairs. A completed refresh replaces the catalog with its successful results.
+New settings requests cancel queued work and suppress obsolete progress. In-flight
+HTTP requests retain their eight-second deadline before the newest request starts.
+
 ## Dependency checks
 
 The desktop manifest constrains Slint's existing Unix dependencies to
