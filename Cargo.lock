@@ -1019,6 +1019,7 @@ dependencies = [
  "global-hotkey",
  "i-slint-compiler",
  "i-slint-core",
+ "roxmltree",
  "rustls",
  "semver",
  "serde",

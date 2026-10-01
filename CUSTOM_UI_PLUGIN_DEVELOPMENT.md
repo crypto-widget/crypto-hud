@@ -89,6 +89,10 @@ Manifest requirements:
 All `.slint` imports and `@image-url()` resources must resolve inside the plugin directory. Image
 resources support `png`, `jpg`, `jpeg`, and `svg`, with a 1 MiB limit per asset. File imports other
 than `.slint` are rejected; custom fonts and other external filesystem resources are not supported.
+SVG resources, including SVG data URLs, must be self-contained UTF-8 XML without DTDs.
+SVG image and filter-image references must embed PNG or JPEG data; external paths,
+URLs, and nested SVG images are rejected. Vector references such as `<use href="#shape">`
+remain supported. Inline image data URLs follow the same asset types and size limit.
 
 Pairs without an explicit source are normalized as Binance spot pairs quoted in USDT. For example, `BTC` is equivalent to `binance:spot:BTC/USDT`.
 
