@@ -4,6 +4,28 @@ All notable changes to Crypto HUD will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## 1.0.3 - 2026-10-01
+
+### Changed
+
+- Load symbol catalogs with bounded concurrent requests and show completed
+  results without waiting for slower market sources.
+- Keep cached symbol choices available during refreshes and discard obsolete
+  catalog results after settings change.
+
+### Fixed
+
+- Account for monitor DPI when checking native window layouts and capturing
+  screenshots in GUI smoke tests.
+- Preserve Status Strip's rounded corners at small widget scales and fractional
+  monitor DPI without clipping its decorative gradients.
+
+### Security
+
+- Reject external and nested SVG image references in plugin resources while
+  retaining support for local vector fragments and embedded PNG/JPEG images.
+- Require a patched rustls dependency for TLS handshake validation.
+
 ## 1.0.2 - 2026-09-05
 
 ### Fixed
