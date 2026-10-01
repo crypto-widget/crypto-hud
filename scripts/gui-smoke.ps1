@@ -112,11 +112,18 @@ try {
         if ([int]$widget.scalePercent -le 0) {
             throw "Widget $($widget.id) did not report a persisted scale_percent"
         }
-        if ([Math]::Abs([int]$widget.runtimeWidth - [int]$widget.layoutWidth) -gt 1) {
-            throw "Widget $($widget.id) runtime width $($widget.runtimeWidth) did not match layout width $($widget.layoutWidth)"
+        $windowScaleFactor = [double]$widget.windowScaleFactor
+        if ([double]::IsNaN($windowScaleFactor) -or
+            [double]::IsInfinity($windowScaleFactor) -or $windowScaleFactor -le 0) {
+            throw "Widget $($widget.id) reported an invalid window scale factor: $windowScaleFactor"
         }
-        if ([Math]::Abs([int]$widget.runtimeHeight - [int]$widget.layoutHeight) -gt 1) {
-            throw "Widget $($widget.id) runtime height $($widget.runtimeHeight) did not match layout height $($widget.layoutHeight)"
+        $physicalWidth = [int]$widget.layoutWidth * $windowScaleFactor
+        $physicalHeight = [int]$widget.layoutHeight * $windowScaleFactor
+        if ([Math]::Abs([double]$widget.runtimeWidth - $physicalWidth) -gt 1) {
+            throw "Widget $($widget.id) physical width expected $physicalWidth, saw $($widget.runtimeWidth)"
+        }
+        if ([Math]::Abs([double]$widget.runtimeHeight - $physicalHeight) -gt 1) {
+            throw "Widget $($widget.id) physical height expected $physicalHeight, saw $($widget.runtimeHeight)"
         }
     }
 } finally {

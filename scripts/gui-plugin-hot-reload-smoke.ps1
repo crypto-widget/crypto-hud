@@ -217,6 +217,7 @@ public static class CryptoHudGuiPluginHotReloadSmokeWin32 {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
+    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
@@ -530,6 +531,10 @@ $env:CRYPTO_HUD_GUI_SMOKE_OFFLINE = "1"
 $env:CRYPTO_HUD_DISABLE_UPDATE_CHECK = "1"
 $env:SLINT_BACKEND = "software"
 
+$previousDpiContext = [CryptoHudGuiPluginHotReloadSmokeWin32]::SetThreadDpiAwarenessContext([IntPtr](-4))
+if ($previousDpiContext -eq [IntPtr]::Zero) {
+    throw "Could not enable physical-pixel window capture: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
 Push-Location $RepoRoot
 try {
     cargo build -p crypto-hud
@@ -542,6 +547,7 @@ try {
         -ArgumentList @("--widgets", "3", "--gui-smoke-ms", "$TimeoutMs") `
         -RedirectStandardOutput $StdoutFile `
         -RedirectStandardError $StderrFile `
+        -WindowStyle Hidden `
         -PassThru
     try {
         Wait-ForFile $ReadyFile 15000
@@ -675,6 +681,7 @@ try {
     }
 } finally {
     Pop-Location
+    [void][CryptoHudGuiPluginHotReloadSmokeWin32]::SetThreadDpiAwarenessContext($previousDpiContext)
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_INSTANCE_ID -ErrorAction SilentlyContinue

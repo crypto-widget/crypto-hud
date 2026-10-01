@@ -129,6 +129,9 @@ public static class CryptoHudGuiPluginScaleSmokeWin32 {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
+    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
         public int Left;
@@ -168,6 +171,7 @@ function Get-ProcessWindows([int]$ProcessId) {
             Top = $rect.Top
             Width = $rect.Right - $rect.Left
             Height = $rect.Bottom - $rect.Top
+            ScaleFactor = [double][CryptoHudGuiPluginScaleSmokeWin32]::GetDpiForWindow($handle) / 96.0
         }
     }
 }
@@ -235,11 +239,17 @@ function Assert-RoundedOuterCorners([System.Drawing.Bitmap]$Bitmap, [string]$Tit
 }
 
 function Assert-ScaledContentVisible([object]$Window, [string]$Title, [int]$ExpectedWidth, [int]$ExpectedHeight) {
-    if ([int]$Window.Width -ne $ExpectedWidth) {
-        throw "$Title width expected $ExpectedWidth, saw $($Window.Width)"
+    $scaleFactor = [double]$Window.ScaleFactor
+    if ($scaleFactor -le 0) {
+        throw "$Title window DPI was not available"
     }
-    if ([int]$Window.Height -ne $ExpectedHeight) {
-        throw "$Title height expected $ExpectedHeight, saw $($Window.Height)"
+    $physicalWidth = $ExpectedWidth * $scaleFactor
+    $physicalHeight = $ExpectedHeight * $scaleFactor
+    if ([Math]::Abs([double]$Window.Width - $physicalWidth) -gt 1) {
+        throw "$Title physical width expected $physicalWidth, saw $($Window.Width)"
+    }
+    if ([Math]::Abs([double]$Window.Height - $physicalHeight) -gt 1) {
+        throw "$Title physical height expected $physicalHeight, saw $($Window.Height)"
     }
 
     $bitmap = [System.Drawing.Bitmap]::new(
@@ -319,6 +329,10 @@ $env:CRYPTO_HUD_GUI_SMOKE_OFFLINE = "1"
 $env:CRYPTO_HUD_DISABLE_UPDATE_CHECK = "1"
 $env:SLINT_BACKEND = "software"
 
+$previousDpiContext = [CryptoHudGuiPluginScaleSmokeWin32]::SetThreadDpiAwarenessContext([IntPtr](-4))
+if ($previousDpiContext -eq [IntPtr]::Zero) {
+    throw "Could not enable physical-pixel window capture: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
 Push-Location $RepoRoot
 try {
     cargo build -p crypto-hud
@@ -329,6 +343,7 @@ try {
     $app = Start-Process `
         -FilePath (Join-Path $RepoRoot "target\debug\crypto-hud.exe") `
         -ArgumentList @("--widgets", "4", "--gui-smoke-ms", "$TimeoutMs") `
+        -WindowStyle Hidden `
         -PassThru
     try {
         Wait-ForFile $ReadyFile 10000
@@ -362,6 +377,7 @@ try {
     }
 } finally {
     Pop-Location
+    [void][CryptoHudGuiPluginScaleSmokeWin32]::SetThreadDpiAwarenessContext($previousDpiContext)
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_INSTANCE_ID -ErrorAction SilentlyContinue

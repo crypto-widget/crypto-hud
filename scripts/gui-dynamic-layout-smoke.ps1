@@ -131,12 +131,13 @@ function Assert-Widget(
     if ([int]$Widget.layoutHeight -ne $LayoutHeight) {
         throw "Widget $($Widget.id) layout height expected $LayoutHeight, saw $($Widget.layoutHeight)"
     }
-    if ([int]$Widget.runtimeWidth -ne $LayoutWidth) {
-        throw "Widget $($Widget.id) runtime width expected $LayoutWidth, saw $($Widget.runtimeWidth)"
+    $windowScaleFactor = [double]$Widget.windowScaleFactor
+    if ([double]::IsNaN($windowScaleFactor) -or
+        [double]::IsInfinity($windowScaleFactor) -or $windowScaleFactor -le 0) {
+        throw "Widget $($Widget.id) reported an invalid window scale factor: $windowScaleFactor"
     }
-    if ([int]$Widget.runtimeHeight -ne $LayoutHeight) {
-        throw "Widget $($Widget.id) runtime height expected $LayoutHeight, saw $($Widget.runtimeHeight)"
-    }
+    Assert-Close ([double]$Widget.runtimeWidth) ($LayoutWidth * $windowScaleFactor) 1 "Widget $($Widget.id) physical width"
+    Assert-Close ([double]$Widget.runtimeHeight) ($LayoutHeight * $windowScaleFactor) 1 "Widget $($Widget.id) physical height"
     if ([int]$Widget.symbolCount -ne $SymbolCount) {
         throw "Widget $($Widget.id) symbol count expected $SymbolCount, saw $($Widget.symbolCount)"
     }

@@ -70,6 +70,15 @@ pairs. A completed refresh replaces the catalog with its successful results.
 New settings requests cancel queued work and suppress obsolete progress. In-flight
 HTTP requests retain their eight-second deadline before the newest request starts.
 
+## Native smoke dimensions
+
+Smoke markers report `layoutWidth` and `layoutHeight` in logical pixels, and
+`runtimeWidth` and `runtimeHeight` in physical pixels. Assertions convert expected
+layout sizes using each window's `windowScaleFactor`, allowing one physical pixel
+for rounding. Plugin screenshot checks use a per-monitor DPI-aware capture thread,
+so the bitmap includes the full physical window instead of cropping it to the
+virtualized logical size.
+
 ## Dependency checks
 
 The desktop manifest constrains Slint's existing Unix dependencies to
