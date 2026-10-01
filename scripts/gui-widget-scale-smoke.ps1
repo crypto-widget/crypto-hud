@@ -82,6 +82,8 @@ public static class CryptoHudGuiScaleSmokeWin32 {
     [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
+    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
@@ -141,7 +143,19 @@ function Get-ProcessWindows([int]$ProcessId) {
             Top = $rect.Top
             Width = $rect.Right - $rect.Left
             Height = $rect.Bottom - $rect.Top
+            ScaleFactor = [double][CryptoHudGuiScaleSmokeWin32]::GetDpiForWindow($handle) / 96.0
         }
+    }
+}
+
+function Assert-LogicalWindowSize([object]$Window, [int]$Width, [int]$Height) {
+    if ([double]$Window.ScaleFactor -le 0) {
+        throw "$($Window.Title) window DPI was not available"
+    }
+    $physicalWidth = [int][Math]::Round($Width * $Window.ScaleFactor, [MidpointRounding]::AwayFromZero)
+    $physicalHeight = [int][Math]::Round($Height * $Window.ScaleFactor, [MidpointRounding]::AwayFromZero)
+    if ([int]$Window.Width -ne $physicalWidth -or [int]$Window.Height -ne $physicalHeight) {
+        throw "$($Window.Title) expected physical size ${physicalWidth}x${physicalHeight} for logical ${Width}x${Height}, saw $($Window.Width)x$($Window.Height)"
     }
 }
 
@@ -365,6 +379,10 @@ $env:CRYPTO_HUD_GUI_SMOKE_OFFLINE = "1"
 $env:CRYPTO_HUD_DISABLE_UPDATE_CHECK = "1"
 $env:SLINT_BACKEND = "software"
 
+$previousDpiContext = [CryptoHudGuiScaleSmokeWin32]::SetThreadDpiAwarenessContext([IntPtr](-4))
+if ($previousDpiContext -eq [IntPtr]::Zero) {
+    throw "Could not enable physical-pixel window capture: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
 Push-Location $RepoRoot
 try {
     cargo build -p crypto-hud
@@ -375,6 +393,7 @@ try {
     $app = Start-Process `
         -FilePath $Exe `
         -ArgumentList @("--widgets", "1", "--show-settings", "--gui-smoke-ms", "$TimeoutMs") `
+        -WindowStyle Hidden `
         -PassThru
     try {
         Wait-ForFile $ReadyFile 8000
@@ -420,12 +439,7 @@ try {
         if (-not $liveWidget) {
             throw "Live widget window was not found"
         }
-        if ([int]$liveWidget.Width -ne 235) {
-            throw "Live widget width expected 235, saw $($liveWidget.Width)"
-        }
-        if ([int]$liveWidget.Height -ne 106) {
-            throw "Live widget height expected 106, saw $($liveWidget.Height)"
-        }
+        Assert-LogicalWindowSize $liveWidget 235 106
 
         Set-AutomationRangeValue ([IntPtr]$settingsWindow.Handle) "Scale" 30
 
@@ -436,12 +450,7 @@ try {
         if (-not $minimumScaleWidget) {
             throw "Live widget window was not found after scaling down"
         }
-        if ([int]$minimumScaleWidget.Width -ne 67) {
-            throw "Live widget width at 30% expected 67, saw $($minimumScaleWidget.Width)"
-        }
-        if ([int]$minimumScaleWidget.Height -ne 30) {
-            throw "Live widget height at 30% expected 30, saw $($minimumScaleWidget.Height)"
-        }
+        Assert-LogicalWindowSize $minimumScaleWidget 67 30
         Assert-ScaledQuoteBoardContentVisible $minimumScaleWidget
     } finally {
         if ($app -and -not $app.HasExited) {
@@ -450,6 +459,7 @@ try {
     }
 } finally {
     Pop-Location
+    [void][CryptoHudGuiScaleSmokeWin32]::SetThreadDpiAwarenessContext($previousDpiContext)
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_GUI_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:\CRYPTO_HUD_INSTANCE_ID -ErrorAction SilentlyContinue
