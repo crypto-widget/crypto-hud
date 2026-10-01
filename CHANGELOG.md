@@ -4,7 +4,26 @@ All notable changes to Crypto HUD will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
-## 1.0.0 - Unreleased
+## 1.0.2 - 2026-09-05
+
+### Fixed
+
+- Preserve unreadable layouts until a recovery backup can be safely created.
+- Deliver completed market quotes without waiting for unrelated requests and
+  preserve the original quote timestamps when updating the UI.
+- Revalidate temporary fallback routes when subscribed pairs change.
+- Protect unrelated files in custom installation directories during upgrades
+  and resolve the default uninstall target from the installed script location.
+
+### Security
+
+- Require patched webbrowser and event-listener dependencies used by Slint.
+
+### Documentation
+
+- Document installation ownership checks, state recovery, and market delivery.
+
+## 1.0.1 - Unreleased
 
 ### Changed
 
