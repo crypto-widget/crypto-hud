@@ -62,6 +62,23 @@ Market regression tests use fixed inputs and channels to hold one request while
 later healthy requests finish. They cover delivery, cancellation, concurrency,
 fallback subscription changes, and final cycle status without live exchanges.
 
+The settings symbol catalog queries only enabled sources, using at most four
+workers. Successful catalogs become selectable before slower sources finish.
+Refreshing retains the last online catalog while requests are pending; a failed
+refresh reports its error without replacing those entries with local fallback
+pairs. A completed refresh replaces the catalog with its successful results.
+New settings requests cancel queued work and suppress obsolete progress. In-flight
+HTTP requests retain their eight-second deadline before the newest request starts.
+
+## Native smoke dimensions
+
+Smoke markers report `layoutWidth` and `layoutHeight` in logical pixels, and
+`runtimeWidth` and `runtimeHeight` in physical pixels. Assertions convert expected
+layout sizes using each window's `windowScaleFactor`, allowing one physical pixel
+for rounding. Plugin screenshot checks use a per-monitor DPI-aware capture thread,
+so the bitmap includes the full physical window instead of cropping it to the
+virtualized logical size.
+
 ## Dependency checks
 
 The desktop manifest constrains Slint's existing Unix dependencies to
@@ -69,3 +86,5 @@ The desktop manifest constrains Slint's existing Unix dependencies to
 RUSTSEC-2026-0257 and RUSTSEC-2026-0221. Keep these constraints and `Cargo.lock`
 aligned and run `cargo audit` after dependency changes. Upstream maintenance
 warnings for other Slint dependencies remain visible; they are not suppressed.
+The workspace also constrains ureq's shared TLS dependency to `rustls >=0.23.45`
+for RUSTSEC-2026-0285, with default features supplied by ureq.

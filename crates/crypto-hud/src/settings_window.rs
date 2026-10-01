@@ -883,6 +883,7 @@ static SYMBOL_CATALOG_COORDINATOR: OnceLock<Arc<SymbolCatalogCoordinator>> = Onc
 struct SymbolCatalogRequest {
     weak: slint::Weak<SettingsWindow>,
     proxy_url: Option<String>,
+    sources: Vec<settings::MarketDataSource>,
     fallback_symbols: Vec<String>,
     locale: i18n::Locale,
 }
@@ -947,41 +948,49 @@ pub(crate) fn request_symbol_catalog_refresh_from_store(
     request_symbol_catalog_refresh(
         ui.as_weak(),
         settings::effective_network_proxy_url(&settings),
+        settings::enabled_market_sources(&settings),
         collect_symbol_fallback_symbols(store, plugin_catalog),
         locale,
     );
+    let state = symbol_catalog_snapshot();
+    refresh_symbol_selector_models_from_ui(ui, &state, locale);
 }
 
 fn request_symbol_catalog_refresh(
     weak: slint::Weak<SettingsWindow>,
     proxy_url: Option<String>,
+    sources: Vec<settings::MarketDataSource>,
     fallback_symbols: Vec<String>,
     locale: i18n::Locale,
 ) {
-    if let Ok(mut state) = shared_symbol_catalog_state().lock() {
-        state.loading = true;
-        state.last_error = None;
-        state.warnings.clear();
-        state.fallback_symbols = sorted_symbol_values(
-            state
-                .fallback_symbols
-                .iter()
-                .cloned()
-                .chain(fallback_symbols.clone())
-                .collect(),
-        );
-    }
-
     let coordinator = shared_symbol_catalog_coordinator();
     if let Ok(mut requests) = coordinator.requests.lock() {
+        if let Ok(mut state) = shared_symbol_catalog_state().lock() {
+            prepare_symbol_catalog_refresh(&mut state);
+            state.fallback_symbols = sorted_symbol_values(
+                state
+                    .fallback_symbols
+                    .iter()
+                    .cloned()
+                    .chain(fallback_symbols.clone())
+                    .collect(),
+            );
+        }
         requests.replace(SymbolCatalogRequest {
             weak,
             proxy_url,
+            sources,
             fallback_symbols,
             locale,
         });
         coordinator.ready.notify_one();
     }
+}
+
+fn prepare_symbol_catalog_refresh(state: &mut SymbolCatalogState) {
+    state.loading = true;
+    state.last_error = None;
+    state.warnings.clear();
 }
 
 fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
@@ -994,7 +1003,34 @@ fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
                 "symbol catalog network access is disabled for offline GUI smoke",
             ))
         } else {
-            market::fetch_symbol_catalog_with_warnings(request.proxy_url.as_deref())
+            market::fetch_symbol_catalog_with_progress(
+                request.proxy_url.as_deref(),
+                &request.sources,
+                &|| {
+                    !coordinator
+                        .requests
+                        .lock()
+                        .is_ok_and(|requests| requests.is_current(generation))
+                },
+                &mut |fetch| {
+                    let Ok(requests) = coordinator.requests.lock() else {
+                        return;
+                    };
+                    if !requests.is_current(generation) {
+                        return;
+                    }
+                    if let Ok(mut state) = shared_symbol_catalog_state().lock() {
+                        apply_symbol_catalog_progress(&mut state, fetch);
+                    }
+                    queue_symbol_catalog_model_refresh(&request, generation);
+                },
+            )
+        };
+
+        let result = match result {
+            Ok(Some(fetch)) => Ok(fetch),
+            Ok(None) => continue,
+            Err(error) => Err(error),
         };
 
         let Ok(requests) = coordinator.requests.lock() else {
@@ -1010,24 +1046,56 @@ fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
                     .fallback_symbols
                     .iter()
                     .cloned()
-                    .chain(request.fallback_symbols)
+                    .chain(request.fallback_symbols.iter().cloned())
                     .collect(),
             );
         }
 
-        let weak = request.weak;
-        let locale = request.locale;
-        let _ = weak.upgrade_in_event_loop(move |ui| {
-            if !symbol_catalog_generation_is_current(generation) {
-                return;
-            }
-            let state = symbol_catalog_snapshot();
-            refresh_symbol_selector_models_from_ui(&ui, &state, locale);
-            if let Some(status) = symbol_catalog_status_text(&state, locale) {
-                ui.set_status_text(status.into());
-            }
-        });
+        queue_symbol_catalog_model_refresh(&request, generation);
     }
+}
+
+fn queue_symbol_catalog_model_refresh(request: &SymbolCatalogRequest, generation: u64) {
+    let locale = request.locale;
+    let _ = request.weak.clone().upgrade_in_event_loop(move |ui| {
+        if !symbol_catalog_generation_is_current(generation) {
+            return;
+        }
+        let state = symbol_catalog_snapshot();
+        refresh_symbol_selector_models_from_ui(&ui, &state, locale);
+        if let Some(status) = symbol_catalog_status_text(&state, locale) {
+            ui.set_status_text(status.into());
+        }
+    });
+}
+
+fn apply_symbol_catalog_progress(
+    state: &mut SymbolCatalogState,
+    fetch: &market::SymbolCatalogFetch,
+) {
+    // Replace completed sources, while retaining the last online results for sources
+    // that are still pending. No locally invented fallback pairs are introduced.
+    let sources = fetch
+        .catalog
+        .entries
+        .iter()
+        .fold(Vec::new(), |mut sources, entry| {
+            if !sources.contains(&entry.source) {
+                sources.push(entry.source);
+            }
+            sources
+        });
+    state
+        .catalog
+        .entries
+        .retain(|entry| !sources.contains(&entry.source));
+    state
+        .catalog
+        .entries
+        .extend(fetch.catalog.entries.iter().cloned());
+    state.warnings = fetch.warnings.clone();
+    state.fallback_only = false;
+    state.last_error = None;
 }
 
 fn apply_symbol_catalog_fetch_result(
@@ -1043,7 +1111,6 @@ fn apply_symbol_catalog_fetch_result(
             state.last_error = None;
         }
         Err(error) => {
-            state.catalog = market::SymbolCatalog::default();
             state.warnings.clear();
             state.fallback_only = true;
             state.last_error = Some(error.to_string());
@@ -1279,6 +1346,17 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 notifications::tray_icon_hovered(),
             );
             commit.refresh_settings_window(&weak);
+            if settings::enabled_market_sources(&previous)
+                != settings::enabled_market_sources(&settings)
+            {
+                if let Some(ui) = weak.upgrade() {
+                    request_symbol_catalog_refresh_from_store(
+                        &ui,
+                        &commit.layouts.borrow(),
+                        &commit.plugin_catalog,
+                    );
+                }
+            }
             schedule_widget_shell_window_configuration();
         }
     });
@@ -6413,6 +6491,106 @@ mod tests {
         assert!(status.contains(i18n::text(i18n::Locale::En).status_symbol_catalog_partial));
         assert!(status.contains("Coinbase"));
         assert!(!status.contains("catalog unavailable"));
+    }
+
+    #[test]
+    fn starting_symbol_catalog_refresh_preserves_online_candidates() {
+        let mut state = SymbolCatalogState {
+            catalog: market::SymbolCatalog {
+                entries: vec![catalog_entry(
+                    settings::MarketDataSource::Binance,
+                    settings::MarketType::Spot,
+                    "BTC",
+                    "USDT",
+                )],
+            },
+            warnings: vec![market::SymbolCatalogWarning {
+                source: settings::MarketDataSource::Coinbase,
+                message: "stale warning".to_string(),
+            }],
+            last_error: Some("stale error".to_string()),
+            ..SymbolCatalogState::default()
+        };
+
+        prepare_symbol_catalog_refresh(&mut state);
+
+        assert_eq!(state.catalog.entries.len(), 1);
+        assert_eq!(
+            symbol_pick_options(&state, &[settings::MarketDataSource::Binance], Vec::new()),
+            vec!["binance:spot:BTC/USDT"]
+        );
+        assert!(state.warnings.is_empty());
+        assert!(state.loading);
+        assert!(state.last_error.is_none());
+    }
+
+    #[test]
+    fn failed_symbol_catalog_refresh_preserves_online_candidates_and_reports_error() {
+        let mut state = SymbolCatalogState {
+            catalog: market::SymbolCatalog {
+                entries: vec![catalog_entry(
+                    settings::MarketDataSource::Binance,
+                    settings::MarketType::Spot,
+                    "BTC",
+                    "USDT",
+                )],
+            },
+            loading: true,
+            ..SymbolCatalogState::default()
+        };
+
+        apply_symbol_catalog_fetch_result(&mut state, Err(anyhow::Error::msg("offline")));
+
+        assert!(!state.loading);
+        assert_eq!(
+            symbol_pick_options(&state, &[settings::MarketDataSource::Binance], Vec::new()),
+            vec!["binance:spot:BTC/USDT"]
+        );
+        assert_eq!(state.last_error.as_deref(), Some("offline"));
+        assert_eq!(
+            symbol_catalog_status_text(&state, i18n::Locale::ZhHans).as_deref(),
+            Some(i18n::text(i18n::Locale::ZhHans).status_symbol_catalog_fallback)
+        );
+    }
+
+    #[test]
+    fn symbol_catalog_progress_replaces_completed_sources_and_keeps_pending_sources() {
+        let binance = settings::MarketDataSource::Binance;
+        let okx = settings::MarketDataSource::Okx;
+        let mut state = SymbolCatalogState {
+            catalog: market::SymbolCatalog {
+                entries: vec![
+                    catalog_entry(binance, settings::MarketType::Spot, "BTC", "USDT"),
+                    catalog_entry(okx, settings::MarketType::Spot, "BTC", "USDT"),
+                ],
+            },
+            loading: true,
+            ..SymbolCatalogState::default()
+        };
+        let fetch = market::SymbolCatalogFetch {
+            catalog: market::SymbolCatalog {
+                entries: vec![catalog_entry(
+                    binance,
+                    settings::MarketType::Spot,
+                    "ETH",
+                    "USDT",
+                )],
+            },
+            warnings: Vec::new(),
+        };
+        apply_symbol_catalog_progress(&mut state, &fetch);
+        apply_symbol_catalog_progress(&mut state, &fetch);
+
+        assert!(state.loading);
+        assert_eq!(state.catalog.entries.len(), 2);
+        assert_eq!(
+            symbol_pick_options(&state, &[binance], Vec::new()),
+            vec!["binance:spot:ETH/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options(&state, &[okx], Vec::new()),
+            vec!["okx:spot:BTC/USDT"]
+        );
     }
 
     #[test]

@@ -104,12 +104,13 @@ try {
     if ([int]$widget.layoutHeight -ne 152) {
         throw "Widget layout height expected 152, saw $($widget.layoutHeight)"
     }
-    if ([int]$widget.runtimeWidth -ne 336) {
-        throw "Widget runtime width expected 336, saw $($widget.runtimeWidth)"
+    $windowScaleFactor = [double]$widget.windowScaleFactor
+    if ([double]::IsNaN($windowScaleFactor) -or
+        [double]::IsInfinity($windowScaleFactor) -or $windowScaleFactor -le 0) {
+        throw "Invalid window scale factor: $windowScaleFactor"
     }
-    if ([int]$widget.runtimeHeight -ne 152) {
-        throw "Widget runtime height expected 152, saw $($widget.runtimeHeight)"
-    }
+    Assert-Close ([double]$widget.runtimeWidth) ([double]$widget.layoutWidth * $windowScaleFactor) 1 "Widget physical width"
+    Assert-Close ([double]$widget.runtimeHeight) ([double]$widget.layoutHeight * $windowScaleFactor) 1 "Widget physical height"
     if ([int]$widget.symbolCount -ne 2) {
         throw "Widget symbol count expected 2, saw $($widget.symbolCount)"
     }

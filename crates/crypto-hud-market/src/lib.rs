@@ -30,6 +30,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 const SOURCE_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_MARKET_RESPONSE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CONCURRENT_PAIR_FETCHES: usize = 4;
+const MAX_CONCURRENT_CATALOG_FETCHES: usize = 4;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(60);
 const SOURCE_FAILOVER_FAILURE_THRESHOLD: u32 = 2;
@@ -725,8 +726,44 @@ pub fn fetch_symbol_catalog(proxy_url: Option<&str>) -> Result<SymbolCatalog> {
 }
 
 pub fn fetch_symbol_catalog_with_warnings(proxy_url: Option<&str>) -> Result<SymbolCatalogFetch> {
+    fetch_symbol_catalog_with_progress(
+        proxy_url,
+        &[
+            MarketDataSource::Binance,
+            MarketDataSource::Coinbase,
+            MarketDataSource::Okx,
+            MarketDataSource::Hyperliquid,
+            MarketDataSource::Bitget,
+            MarketDataSource::Coinex,
+            MarketDataSource::Gate,
+            MarketDataSource::Mexc,
+            MarketDataSource::Bybit,
+        ],
+        &|| false,
+        &mut |_| {},
+    )?
+    .context("symbol catalog fetch was cancelled")
+}
+
+/// Fetch only the requested sources with bounded concurrency, publishing successful
+/// catalogs as they arrive. `Ok(None)` means cancellation. Cancellation skips queued
+/// sources; in-flight HTTP requests remain bounded by the eight-second deadline.
+pub fn fetch_symbol_catalog_with_progress(
+    proxy_url: Option<&str>,
+    sources: &[MarketDataSource],
+    interrupted: &(impl Fn() -> bool + Sync),
+    on_progress: &mut impl FnMut(&SymbolCatalogFetch),
+) -> Result<Option<SymbolCatalogFetch>> {
+    if interrupted() {
+        return Ok(None);
+    }
     let agent = build_agent(proxy_url)?;
-    fetch_symbol_catalog_with_agent(&agent)
+    fetch_symbol_catalog_interruptible_with(
+        sources,
+        interrupted,
+        |source| fetch_source_symbol_catalog(&agent, source),
+        on_progress,
+    )
 }
 
 pub fn select_low_latency_spot_source(
@@ -852,66 +889,74 @@ fn select_fastest_source(
     selected.map(|(source, _)| source)
 }
 
-fn fetch_symbol_catalog_with_agent(agent: &ureq::Agent) -> Result<SymbolCatalogFetch> {
-    let mut warnings = Vec::new();
-    let mut catalogs = Vec::new();
-
-    collect_symbol_catalog_result(
-        MarketDataSource::Binance,
-        fetch_binance_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-    collect_symbol_catalog_result(
-        MarketDataSource::Coinbase,
-        fetch_coinbase_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-    collect_symbol_catalog_result(
-        MarketDataSource::Okx,
-        fetch_okx_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-    collect_symbol_catalog_result(
-        MarketDataSource::Hyperliquid,
-        fetch_hyperliquid_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-    collect_symbol_catalog_result(
-        MarketDataSource::Bitget,
-        fetch_bitget_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-    collect_symbol_catalog_result(
-        MarketDataSource::Coinex,
-        fetch_coinex_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-    collect_symbol_catalog_result(
-        MarketDataSource::Gate,
-        fetch_gate_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-    collect_symbol_catalog_result(
-        MarketDataSource::Mexc,
-        fetch_mexc_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-    collect_symbol_catalog_result(
-        MarketDataSource::Bybit,
-        fetch_bybit_symbol_catalog(agent),
-        &mut catalogs,
-        &mut warnings,
-    );
-
-    finish_symbol_catalog_fetch(catalogs, warnings)
+fn fetch_symbol_catalog_interruptible_with(
+    sources: &[MarketDataSource],
+    interrupted: &(impl Fn() -> bool + Sync),
+    fetch: impl Fn(MarketDataSource) -> Result<Vec<SymbolCatalogEntry>> + Sync,
+    on_progress: &mut impl FnMut(&SymbolCatalogFetch),
+) -> Result<Option<SymbolCatalogFetch>> {
+    let sources = sources
+        .iter()
+        .copied()
+        .fold(Vec::new(), |mut unique, source| {
+            if !unique.contains(&source) {
+                unique.push(source);
+            }
+            unique
+        });
+    let next_source = AtomicUsize::new(0);
+    thread::scope(|scope| {
+        let (sender, receiver) = mpsc::sync_channel(MAX_CONCURRENT_CATALOG_FETCHES);
+        for _ in 0..sources.len().min(MAX_CONCURRENT_CATALOG_FETCHES) {
+            let sender = sender.clone();
+            let sources = &sources;
+            let next_source = &next_source;
+            let fetch = &fetch;
+            scope.spawn(move || {
+                while !interrupted() {
+                    let index = next_source.fetch_add(1, Ordering::Relaxed);
+                    let Some(source) = sources.get(index).copied() else {
+                        break;
+                    };
+                    let result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fetch(source)))
+                            .unwrap_or_else(|_| Err(anyhow!("symbol catalog worker panicked")));
+                    if interrupted() || sender.send((source, result)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        let mut catalogs = Vec::new();
+        let mut warnings = Vec::new();
+        loop {
+            if interrupted() {
+                return Ok(None);
+            }
+            match receiver.recv_timeout(Duration::from_millis(50)) {
+                Ok((source, result)) => {
+                    collect_symbol_catalog_result(source, result, &mut catalogs, &mut warnings);
+                    warnings.sort_by_key(|warning| {
+                        sources.iter().position(|source| *source == warning.source)
+                    });
+                    if !catalogs.is_empty() && !interrupted() {
+                        on_progress(&SymbolCatalogFetch {
+                            catalog: combine_symbol_catalogs(catalogs.clone()),
+                            warnings: warnings.clone(),
+                        });
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        if interrupted() {
+            Ok(None)
+        } else {
+            finish_symbol_catalog_fetch(catalogs, warnings).map(Some)
+        }
+    })
 }
 
 fn fetch_source_symbol_catalog(
@@ -4526,6 +4571,157 @@ mod tests {
                 "okx:spot:BTC/USDT"
             ]
         );
+    }
+
+    #[test]
+    fn symbol_catalog_progress_arrives_before_a_blocked_source_finishes() {
+        let sources = [
+            MarketDataSource::Binance,
+            MarketDataSource::Coinbase,
+            MarketDataSource::Okx,
+            MarketDataSource::Hyperliquid,
+            MarketDataSource::Bitget,
+            MarketDataSource::Coinex,
+            MarketDataSource::Gate,
+            MarketDataSource::Mexc,
+            MarketDataSource::Bybit,
+        ];
+        let (release, blocked) = mpsc::channel();
+        let blocked = Mutex::new(blocked);
+        let (started, started_receiver) = mpsc::channel();
+        let (delivered, received) = mpsc::channel();
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                fetch_symbol_catalog_interruptible_with(
+                    &sources,
+                    &|| false,
+                    |source| {
+                        let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(count, Ordering::SeqCst);
+                        let result = if source == MarketDataSource::Binance {
+                            started.send(()).unwrap();
+                            blocked
+                                .lock()
+                                .unwrap()
+                                .recv_timeout(Duration::from_secs(10))
+                                .unwrap();
+                            Err(anyhow!("blocked source failed"))
+                        } else {
+                            Ok(vec![
+                                catalog_entry(source, MarketType::Spot, "BTC", "USDT").unwrap()
+                            ])
+                        };
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        result
+                    },
+                    &mut |fetch| delivered.send(fetch.catalog.entries.len()).unwrap(),
+                )
+                .unwrap()
+                .unwrap()
+            });
+            let started = started_receiver.recv_timeout(Duration::from_secs(2));
+            let early = (0..8)
+                .map(|_| received.recv_timeout(Duration::from_secs(2)))
+                .collect::<Vec<_>>();
+            let _ = release.send(());
+            let result = worker.join().unwrap();
+            assert!(started.is_ok());
+            assert!(
+                early.iter().all(Result::is_ok),
+                "healthy catalogs waited for the blocked source"
+            );
+            assert_eq!(early.last().unwrap().as_ref().unwrap(), &8);
+            assert!(peak.load(Ordering::SeqCst) <= MAX_CONCURRENT_CATALOG_FETCHES);
+            assert_eq!(result.catalog.entries.len(), 8);
+            assert_eq!(result.warnings.len(), 1);
+            assert_eq!(result.warnings[0].source, MarketDataSource::Binance);
+        });
+    }
+
+    #[test]
+    fn symbol_catalog_cancellation_skips_queued_sources_and_obsolete_progress() {
+        let sources = [
+            MarketDataSource::Binance,
+            MarketDataSource::Coinbase,
+            MarketDataSource::Okx,
+            MarketDataSource::Bitget,
+            MarketDataSource::Coinex,
+        ];
+        let cancelled = AtomicBool::new(false);
+        let calls = AtomicUsize::new(0);
+        let progress = AtomicUsize::new(0);
+        let (started, started_receiver) = mpsc::channel();
+        let (release, blocked) = mpsc::channel();
+        let blocked = Mutex::new(blocked);
+        thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                fetch_symbol_catalog_interruptible_with(
+                    &sources,
+                    &|| cancelled.load(Ordering::SeqCst),
+                    |source| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        started.send(()).unwrap();
+                        blocked
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(Duration::from_secs(10))
+                            .unwrap();
+                        Ok(vec![
+                            catalog_entry(source, MarketType::Spot, "BTC", "USDT").unwrap()
+                        ])
+                    },
+                    &mut |_| {
+                        progress.fetch_add(1, Ordering::SeqCst);
+                    },
+                )
+                .unwrap()
+            });
+            let started = (0..MAX_CONCURRENT_CATALOG_FETCHES)
+                .map(|_| started_receiver.recv_timeout(Duration::from_secs(2)))
+                .collect::<Vec<_>>();
+            cancelled.store(true, Ordering::SeqCst);
+            for _ in 0..MAX_CONCURRENT_CATALOG_FETCHES {
+                let _ = release.send(());
+            }
+            assert!(worker.join().unwrap().is_none());
+            assert!(started.iter().all(Result::is_ok));
+            assert_eq!(calls.load(Ordering::SeqCst), MAX_CONCURRENT_CATALOG_FETCHES);
+            assert_eq!(progress.load(Ordering::SeqCst), 0);
+        });
+    }
+
+    #[test]
+    fn symbol_catalog_queries_only_requested_unique_sources_and_preserves_failures() {
+        let calls = Mutex::new(Vec::new());
+        let result = fetch_symbol_catalog_interruptible_with(
+            &[
+                MarketDataSource::Binance,
+                MarketDataSource::Okx,
+                MarketDataSource::Okx,
+            ],
+            &|| false,
+            |source| {
+                calls.lock().unwrap().push(source);
+                if source == MarketDataSource::Binance {
+                    bail!("unavailable");
+                }
+                Ok(vec![
+                    catalog_entry(source, MarketType::Spot, "BTC", "USDT").unwrap()
+                ])
+            },
+            &mut |_| {},
+        )
+        .unwrap()
+        .unwrap();
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.contains(&MarketDataSource::Binance));
+        assert!(calls.contains(&MarketDataSource::Okx));
+        assert_eq!(result.catalog.entries.len(), 1);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].source, MarketDataSource::Binance);
     }
 
     #[test]

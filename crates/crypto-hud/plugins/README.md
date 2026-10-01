@@ -84,6 +84,9 @@ com.example.my-widget/
 - 所有 `.slint` import 和 `@image-url()` 资源都必须解析到插件目录内部。图片资源仅支持
   `png`、`jpg`、`jpeg`、`svg`，单个文件最大 1 MiB。除 `.slint` 外的文件 import 会被
   拒绝；当前不支持自定义字体或其他外部文件系统资源。
+- SVG（包括 SVG data URL）必须是自包含的 UTF-8 XML，不能包含 DTD。图片和滤镜图片
+  引用必须内嵌 PNG 或 JPEG 数据；外部路径、URL 和嵌套 SVG 图片会被拒绝。
+  `<use href="#shape">` 等内部矢量引用仍受支持。内联图片 data URL 遵循相同类型和大小限制。
 
 内容尺寸随币种数量变化的插件建议声明 `symbolGrid`：
 

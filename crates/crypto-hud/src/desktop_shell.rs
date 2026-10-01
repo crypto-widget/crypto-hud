@@ -324,6 +324,7 @@ fn write_gui_smoke_ready_file(
                 "scalePercent": instance.layout.scale_percent,
                 "runtimeWidth": runtime_size.width,
                 "runtimeHeight": runtime_size.height,
+                "windowScaleFactor": runtime.ui.window().scale_factor(),
                 "symbolCount": runtime.symbols.len(),
                 "marketDataRowCount": market_data_row_count,
                 "widgetScale": runtime.widget_scale,

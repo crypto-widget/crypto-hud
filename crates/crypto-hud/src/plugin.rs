@@ -1623,6 +1623,23 @@ fn validate_slint_file_imports(source_path: &Path, source: &str) -> Result<()> {
 }
 
 fn validate_slint_file_import_nodes(node: &SyntaxNode, source_path: &Path) -> Result<()> {
+    // Data URLs are not included in the compiler's resource watch paths.
+    if node.kind() == SyntaxKind::AtImageUrl {
+        for token in node
+            .children_with_tokens()
+            .filter_map(|item| item.into_token())
+        {
+            if token.kind() == SyntaxKind::StringLiteral {
+                if let Some(url) = i_slint_compiler::literals::unescape_string(token.text()) {
+                    if url.starts_with("data:") {
+                        validate_plugin_image_data_url(&url).with_context(|| {
+                            format!("invalid image data URL in {}", source_path.display())
+                        })?;
+                    }
+                }
+            }
+        }
+    }
     if node.kind() == SyntaxKind::ImportSpecifier {
         for token in node
             .children_with_tokens()
@@ -1700,8 +1717,63 @@ fn validate_compiled_plugin_paths(root_dir: &Path, paths: &[PathBuf]) -> Result<
                 canonical.display()
             );
         }
+        if extension == "svg" {
+            let mut data = Vec::new();
+            fs::File::open(&canonical)?
+                .take(ASSET_MAX_BYTES + 1)
+                .read_to_end(&mut data)?;
+            validate_plugin_svg(&data).map_err(|error| {
+                anyhow!("invalid SVG resource {}: {error}", canonical.display())
+            })?;
+        }
     }
 
+    Ok(())
+}
+
+fn validate_plugin_image_data_url(url: &str) -> Result<()> {
+    let (data, extension) =
+        i_slint_compiler::data_uri::decode_data_uri(url).map_err(|error| anyhow!("{error}"))?;
+    if data.len() as u64 > ASSET_MAX_BYTES {
+        bail!("image data URL exceeds {ASSET_MAX_BYTES} bytes");
+    }
+    match extension.as_str() {
+        "png" | "jpg" | "jpeg" => Ok(()),
+        "svg" => validate_plugin_svg(&data),
+        _ => bail!("image data URL must contain PNG, JPEG, or SVG"),
+    }
+}
+
+fn validate_plugin_svg(data: &[u8]) -> Result<()> {
+    if data.len() as u64 > ASSET_MAX_BYTES {
+        bail!("SVG exceeds {ASSET_MAX_BYTES} bytes");
+    }
+    let source = std::str::from_utf8(data).context("SVG must use UTF-8")?;
+    // Match the renderer's XML parsing, without enabling DTD or entity resolution.
+    let document = roxmltree::Document::parse(source).context("invalid SVG XML")?;
+    for node in document.descendants().filter(roxmltree::Node::is_element) {
+        for attribute in node
+            .attributes()
+            .filter(|attribute| attribute.name() == "href")
+        {
+            let value = attribute.value();
+            let is_image = matches!(node.tag_name().name(), "image" | "feImage");
+            if !is_image && value.starts_with('#') {
+                continue;
+            }
+            // Slint's SVG renderer has a filesystem-enabled resolver. Only explicitly
+            // typed raster data can bypass it safely; nested SVG and text/plain data
+            // could invoke the resolver again. Never include the reference in errors.
+            let is_embedded_raster = is_image
+                && value.starts_with("data:")
+                && i_slint_compiler::data_uri::decode_data_uri(value).is_ok_and(
+                    |(_, extension)| matches!(extension.as_str(), "png" | "jpg" | "jpeg"),
+                );
+            if !is_embedded_raster {
+                bail!("SVG external references and nested SVG images are not allowed; embed PNG or JPEG data instead");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3002,6 +3074,87 @@ export component ExamplePriceCard inherits Window {
         assert_eq!(catalog.errors().len(), 1);
         assert!(catalog.errors()[0].message.contains("escapes plugin root"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn svg_external_image_reference_marks_plugin_unavailable() {
+        let root = temp_plugin_root("svg-external-image-reference");
+        let plugin_dir = root.join("com.example.price-card");
+        fs::create_dir_all(plugin_dir.join("ui")).unwrap();
+        fs::write(root.join("outside.png"), b"outside plugin boundary").unwrap();
+        fs::write(plugin_dir.join(MANIFEST_FILE_NAME), valid_manifest_json()).unwrap();
+        fs::write(
+            plugin_dir.join("ui/main.slint"),
+            valid_slint_source_with_image("icon.svg"),
+        )
+        .unwrap();
+        fs::write(
+            plugin_dir.join("ui/icon.svg"),
+            format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><image href="{}" width="2" height="2"/></svg>"#,
+                root.join("outside.png").to_string_lossy().replace('\\', "/")),
+        ).unwrap();
+
+        let catalog = PluginCatalog::discover(vec![root.clone()]);
+        assert!(!catalog
+            .find("com.example.price-card")
+            .unwrap()
+            .is_available());
+        assert!(catalog
+            .errors()
+            .iter()
+            .any(|error| error.message.contains("SVG external references")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn svg_rejects_external_and_nested_references_including_xml_escapes() {
+        for reference in [
+            "../outside.png",
+            "C:/outside.png",
+            "//server/share/outside.png",
+            "https://example.invalid/image.png",
+            "#outside.png",
+            "&#x2e;&#x2e;/outside.png",
+            "data:image/svg+xml,%3Csvg/%3E",
+            "data:text/plain,%3Csvg/%3E",
+        ] {
+            for element in ["image", "feImage"] {
+                let svg = format!(
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><{element} xlink:href="{reference}"/></svg>"#
+                );
+                assert!(
+                    validate_plugin_svg(svg.as_bytes()).is_err(),
+                    "accepted {element} reference {reference}"
+                );
+            }
+        }
+        assert!(validate_plugin_svg(
+            br#"<!DOCTYPE svg [<!ENTITY path "../outside.png">]><svg><image href="&path;"/></svg>"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn svg_accepts_vector_fragments_and_embedded_raster_images() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
+            <defs><path id="shape" d="M0 0h1v1z"/></defs><use href="#shape"/>
+            <image href="data:image/png;base64,iVBORw0KGgo="/>
+        </svg>"##;
+        validate_plugin_svg(svg).unwrap();
+    }
+
+    #[test]
+    fn inline_svg_data_url_is_checked_before_compilation() {
+        let source = valid_slint_source_with_image(
+            "data:image/svg+xml,%3Csvg%3E%3Cimage%20href=%27../outside.png%27/%3E%3C/svg%3E",
+        );
+        let error = validate_slint_file_imports(Path::new("main.slint"), &source).unwrap_err();
+        assert!(format!("{error:#}").contains("SVG external references"));
+        validate_slint_file_imports(
+            Path::new("main.slint"),
+            &valid_slint_source_with_image("data:image/svg+xml,%3Csvg/%3E"),
+        )
+        .unwrap();
     }
 
     #[test]
