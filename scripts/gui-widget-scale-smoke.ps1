@@ -1,5 +1,5 @@
 param(
-    [int]$TimeoutMs = 10000
+    [int]$TimeoutMs = 30000
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,7 +64,6 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($StateFile, $seedJson, $utf8NoBom)
 
 Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
@@ -113,6 +112,10 @@ public static class CryptoHudGuiScaleSmokeWin32 {
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+
+    public static void ScrollDown() {
+        mouse_event(0x0800, 0, 0, unchecked((uint)-360), UIntPtr.Zero);
+    }
 }
 '@
 }
@@ -169,22 +172,37 @@ function Wait-ForFile([string]$Path, [int]$TimeoutMilliseconds) {
     }
 }
 
-function Wait-ForWidgetState([int]$ExpectedWidth, [int]$ExpectedHeight, [int]$ExpectedScale) {
+function Wait-ForWidgetState(
+    [int]$ExpectedWidth,
+    [int]$ExpectedHeight,
+    [int]$ExpectedScale,
+    [hashtable]$ExpectedConfig = @{}
+) {
     $deadline = (Get-Date).AddSeconds(5)
     do {
         $state = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
         $widget = @($state.widgets)[0]
+        $configMatches = $true
+        foreach ($name in $ExpectedConfig.Keys) {
+            $property = $widget.config.PSObject.Properties[$name]
+            if ($null -eq $property -or $property.Value -ne $ExpectedConfig[$name]) {
+                $configMatches = $false
+                break
+            }
+        }
         if (
             [int]$widget.layout.width -eq $ExpectedWidth -and
             [int]$widget.layout.height -eq $ExpectedHeight -and
-            [int]$widget.layout.scale_percent -eq $ExpectedScale
+            [int]$widget.layout.scale_percent -eq $ExpectedScale -and
+            $configMatches
         ) {
             return $widget
         }
         Start-Sleep -Milliseconds 100
     } while ((Get-Date) -lt $deadline)
 
-    throw "Widget state did not reach ${ExpectedWidth}x${ExpectedHeight} at ${ExpectedScale}%"
+    $configDescription = $ExpectedConfig | ConvertTo-Json -Compress
+    throw "Widget state did not reach ${ExpectedWidth}x${ExpectedHeight} at ${ExpectedScale}% with config $configDescription"
 }
 
 function Get-AutomationControl(
@@ -226,62 +244,53 @@ function Get-AutomationControl(
     throw "Could not find accessible $ControlType control named '$Name' within $TimeoutMilliseconds ms. Last error: $lastError"
 }
 
-function Invoke-AutomationButton([IntPtr]$WindowHandle, [string]$Name) {
+function Click-AutomationSwitch([IntPtr]$WindowHandle, [string]$Name) {
     $element = Get-AutomationControl `
         -WindowHandle $WindowHandle `
         -Name $Name `
         -ControlType ([System.Windows.Automation.ControlType]::Button)
-    $pattern = $null
-    if ($element.TryGetCurrentPattern(
-            [System.Windows.Automation.InvokePattern]::Pattern,
-            [ref]$pattern
-        )) {
-        ([System.Windows.Automation.InvokePattern]$pattern).Invoke()
-    } elseif ($element.TryGetCurrentPattern(
-            [System.Windows.Automation.TogglePattern]::Pattern,
-            [ref]$pattern
-        )) {
-        ([System.Windows.Automation.TogglePattern]$pattern).Toggle()
-    } else {
-        try {
-            $point = $element.GetClickablePoint()
-        } catch {
-            throw "Accessible control '$Name' exposes no action pattern or clickable point: $($_.Exception.Message)"
-        }
-        [void][CryptoHudGuiScaleSmokeWin32]::SetCursorPos(
+    try {
+        $point = $element.GetClickablePoint()
+    } catch {
+        throw "Accessible switch '$Name' has no clickable point: $($_.Exception.Message)"
+    }
+    if (-not [CryptoHudGuiScaleSmokeWin32]::SetCursorPos(
             [int][Math]::Round($point.X),
             [int][Math]::Round($point.Y)
-        )
-        [CryptoHudGuiScaleSmokeWin32]::mouse_event(
-            [CryptoHudGuiScaleSmokeWin32]::MOUSEEVENTF_LEFTDOWN,
-            0,
-            0,
-            0,
-            [UIntPtr]::Zero
-        )
-        Start-Sleep -Milliseconds 80
-        [CryptoHudGuiScaleSmokeWin32]::mouse_event(
-            [CryptoHudGuiScaleSmokeWin32]::MOUSEEVENTF_LEFTUP,
-            0,
-            0,
-            0,
-            [UIntPtr]::Zero
-        )
+        )) {
+        throw "Could not move the pointer to accessible switch '$Name'"
     }
+    [CryptoHudGuiScaleSmokeWin32]::mouse_event(
+        [CryptoHudGuiScaleSmokeWin32]::MOUSEEVENTF_LEFTDOWN,
+        0,
+        0,
+        0,
+        [UIntPtr]::Zero
+    )
+    Start-Sleep -Milliseconds 80
+    [CryptoHudGuiScaleSmokeWin32]::mouse_event(
+        [CryptoHudGuiScaleSmokeWin32]::MOUSEEVENTF_LEFTUP,
+        0,
+        0,
+        0,
+        [UIntPtr]::Zero
+    )
     Start-Sleep -Milliseconds 350
 }
 
-function Move-AutomationFocus([IntPtr]$WindowHandle, [string]$AnchorName, [string]$Keys) {
+function Scroll-AutomationPanel([IntPtr]$WindowHandle, [string]$AnchorName) {
     $anchor = Get-AutomationControl `
         -WindowHandle $WindowHandle `
         -Name $AnchorName `
         -ControlType ([System.Windows.Automation.ControlType]::Button)
-    try {
-        $anchor.SetFocus()
-    } catch {
-        throw "Could not focus accessible control '$AnchorName': $($_.Exception.Message)"
+    $point = $anchor.GetClickablePoint()
+    if (-not [CryptoHudGuiScaleSmokeWin32]::SetCursorPos(
+            [int][Math]::Round($point.X),
+            [int][Math]::Round($point.Y)
+        )) {
+        throw "Could not move the pointer to the settings panel"
     }
-    [System.Windows.Forms.SendKeys]::SendWait($Keys)
+    [CryptoHudGuiScaleSmokeWin32]::ScrollDown()
     Start-Sleep -Milliseconds 350
 }
 
@@ -418,20 +427,16 @@ try {
         [void][CryptoHudGuiScaleSmokeWin32]::SetForegroundWindow([IntPtr]$settingsWindow.Handle)
         Start-Sleep -Milliseconds 300
 
-        Invoke-AutomationButton ([IntPtr]$settingsWindow.Handle) "Show coin logos"
-        Move-AutomationFocus ([IntPtr]$settingsWindow.Handle) "Show coin logos" "{TAB}"
-        Move-AutomationFocus ([IntPtr]$settingsWindow.Handle) "Hide quote asset" " "
-        [void](Wait-ForWidgetState 224 101 100)
-        Move-AutomationFocus ([IntPtr]$settingsWindow.Handle) "Hide quote asset" "{TAB}"
+        # Slint switches do not expose UIA focus, and the hosted runner can
+        # reject Toggle(). Click the accessible point and verify persisted state.
+        Scroll-AutomationPanel ([IntPtr]$settingsWindow.Handle) "Show coin logos"
+        Click-AutomationSwitch ([IntPtr]$settingsWindow.Handle) "Show coin logos"
+        Click-AutomationSwitch ([IntPtr]$settingsWindow.Handle) "Hide quote asset"
+        $expectedConfig = @{ show_coin_logos = $false; hide_quote_asset = $true }
+        [void](Wait-ForWidgetState 224 101 100 $expectedConfig)
         Set-AutomationRangeValue ([IntPtr]$settingsWindow.Handle) "Scale" 105
 
-        $widgetState = Wait-ForWidgetState 235 106 105
-        if ([bool]$widgetState.config.show_coin_logos) {
-            throw "show_coin_logos expected false after GUI click"
-        }
-        if (-not [bool]$widgetState.config.hide_quote_asset) {
-            throw "hide_quote_asset expected true after GUI click"
-        }
+        [void](Wait-ForWidgetState 235 106 105 $expectedConfig)
 
         $liveWidget = @(Get-ProcessWindows $app.Id) |
             Where-Object { $_.Title -eq "quote-board-1" } |
@@ -443,7 +448,7 @@ try {
 
         Set-AutomationRangeValue ([IntPtr]$settingsWindow.Handle) "Scale" 30
 
-        [void](Wait-ForWidgetState 67 30 30)
+        [void](Wait-ForWidgetState 67 30 30 $expectedConfig)
         $minimumScaleWidget = @(Get-ProcessWindows $app.Id) |
             Where-Object { $_.Title -eq "quote-board-1" } |
             Select-Object -First 1
