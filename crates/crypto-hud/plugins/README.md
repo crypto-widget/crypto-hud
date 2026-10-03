@@ -155,6 +155,7 @@ in property <int> content-opacity;
 
 ```slint
 in property <string> source-name-text;
+in property <string> layout-lock-text;
 in property <bool> rtl-layout: false;
 in property <float> widget-scale: 1.0;
 in property <[image]> quote-icons;
@@ -163,6 +164,9 @@ in property <string> chart-fill-path;
 in property <bool> chart-ready;
 in property <bool> chart-positive;
 ```
+
+`layout-lock-text` 是宿主提供的本地化“锁定位置”标签，属于可选属性，旧插件仍可继续运行。
+锁定控件应提供可勾选的无障碍角色、`layout-locked` 状态、可见焦点，以及空格/回车操作。
 
 插件 Slint 文件中需要定义 `QuoteRow`：
 
@@ -481,6 +485,19 @@ cargo test --workspace
 mise run check
 powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```
+
+Mint Tile 的聚焦验证使用隔离状态和离线行情；原生 smoke 会检查当前桌面 DPI 下的完整
+窗口尺寸、鼠标锁定/解锁、拖动和无障碍操作：
+
+```powershell
+cargo +1.96.0 test --locked -p crypto-hud mint_tile
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -ScalePercent 30
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -Language ar -RedUp -LockLight
+```
+
+需要同步浅色和深色预览图时，以默认 100% 组件缩放运行 `-PaperBackdrop -UpdatePreviews`；
+脚本会从完整原生窗口截图生成预览，避免 DPI 裁切和相邻卡片透入透明边缘。
 
 手动 GUI smoke：
 

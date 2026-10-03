@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 3,
+  "id": "com.cryptohud.mint-tile",
+  "name": "Mint Tile",
+  "version": "1.0.0",
+  "hostApiVersion": ">=0.1.0, <1.0.0",
+  "renderer": {
+    "kind": "slint",
+    "entry": "ui/main.slint",
+    "component": "MintTile"
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  },
+  "defaultSize": {
+    "width": 360,
+    "height": 440
+  },
+  "sizePolicy": {
+    "kind": "fixed"
+  },
+  "minSymbolLimit": 1,
+  "symbolLimit": 1,
+  "defaultSymbols": [
+    "binance:spot:BTC/USDT"
+  ],
+  "previewImages": [
+    "ui/preview-light.png",
+    "ui/preview-dark.png"
+  ],
+  "themes": [
+    {
+      "id": "light",
+      "name": "Light",
+      "role": "light",
+      "default": true
+    },
+    {
+      "id": "dark",
+      "name": "Dark",
+      "role": "dark"
+    }
+  ],
+  "dataRequirements": [
+    {
+      "capability": "market.price"
+    },
+    {
+      "capability": "market.candles"
+    }
+  ]
+}

@@ -86,6 +86,26 @@ $seedWidgets = @(
         }
         symbols = @("BTC")
         config = [ordered]@{}
+    },
+    [ordered]@{
+        id = "mint-tile-30"
+        plugin_id = "com.cryptohud.mint-tile"
+        name = "Mint Tile 30"
+        visible = $true
+        layout = [ordered]@{
+            x = 830
+            y = 80
+            always_on_top = $false
+            opacity_percent = 96
+            locked = $false
+            scale_percent = 30
+            width = 108
+            height = 132
+        }
+        symbols = @("BTC")
+        config = [ordered]@{
+            theme = "light"
+        }
     }
 )
 
@@ -342,7 +362,7 @@ try {
 
     $app = Start-Process `
         -FilePath (Join-Path $RepoRoot "target\debug\crypto-hud.exe") `
-        -ArgumentList @("--widgets", "4", "--gui-smoke-ms", "$TimeoutMs") `
+        -ArgumentList @("--widgets", "5", "--gui-smoke-ms", "$TimeoutMs") `
         -WindowStyle Hidden `
         -PassThru
     try {
@@ -358,7 +378,8 @@ try {
             [pscustomobject]@{ Title = "focus-ticker-30"; Width = 246; Height = 47 },
             [pscustomobject]@{ Title = "trust-card-30"; Width = 156; Height = 116 },
             [pscustomobject]@{ Title = "status-strip-30"; Width = 112; Height = 28 },
-            [pscustomobject]@{ Title = "status-strip-100-single"; Width = 130; Height = 92 }
+            [pscustomobject]@{ Title = "status-strip-100-single"; Width = 130; Height = 92 },
+            [pscustomobject]@{ Title = "mint-tile-30"; Width = 108; Height = 132 }
         )
 
         foreach ($widget in $expected) {

@@ -18,6 +18,9 @@ mod widget_host;
 mod window_manager;
 
 #[cfg(test)]
+mod mint_tile_tests;
+
+#[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
 use std::path::PathBuf;

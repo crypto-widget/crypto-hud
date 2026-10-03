@@ -1,0 +1,399 @@
+export struct QuoteRow {
+    symbol: string,
+    price: string,
+    change: string,
+    positive: bool,
+}
+
+export component MintTile inherits Window {
+    in property <string> widget-id;
+    in property <[QuoteRow]> quote-rows;
+    in property <[image]> quote-icons;
+    property <image> empty-quote-icon;
+    in property <string> pairs-heading-text;
+    in property <string> source-text;
+    in property <string> source-name-text: root.source-text;
+    in property <string> updated-text;
+    in property <string> empty-text;
+    in property <string> layout-lock-text;
+    in property <bool> rtl-layout: false;
+    in property <bool> pin-to-top;
+    in property <bool> layout-locked;
+    in property <int> widget-width: 360;
+    in property <int> widget-height: 440;
+    in property <float> widget-scale: 1.0;
+    in property <bool> red-up-enabled;
+    in property <int> content-opacity;
+    in property <string> theme-name: "light";
+    in property <string> chart-line-path;
+    in property <string> chart-fill-path;
+    in property <bool> chart-ready;
+    in property <bool> chart-positive;
+    in property <int> chart-end-y-ratio;
+    in-out property <bool> card-left-drag-active: false;
+
+    property <bool> light-theme: root.theme-name == "light";
+    property <float> content-scale: root.widget-scale;
+    property <length> card-x: 15px;
+    property <length> card-width: 330px;
+    property <length> card-height: 386px;
+    property <length> card-y: 19px;
+    property <length> card-radius: 20px;
+    property <bool> chart-uses-gain-color: root.chart-positive ? !root.red-up-enabled : root.red-up-enabled;
+    property <color> primary-text-color: root.light-theme ? #071426 : #f2fffb;
+    property <color> secondary-text-color: root.light-theme ? #123f42 : #b8ddd6;
+    property <color> divider-color: root.light-theme ? #d8fff36e : #b6fff052;
+    property <color> provider-dot-color: root.light-theme ? #0e7f6f : #63ead0;
+    property <color> gain-color: root.light-theme ? #087b48 : #67ef9a;
+    property <color> loss-color: root.light-theme ? #c82738 : #ff7785;
+    property <color> chart-color: root.chart-uses-gain-color ? root.gain-color : root.loss-color;
+    property <color> chart-fill-color: root.chart-uses-gain-color
+        ? (root.light-theme ? #087b4824 : #67ef9a22)
+        : (root.light-theme ? #c8273822 : #ff778526);
+    property <color> gain-pill-background: root.light-theme ? #07895bd8 : #075b3be8;
+    property <color> loss-pill-background: root.light-theme ? #d63a48e8 : #7f2632ee;
+    property <color> pill-text-color: #ffffffff;
+    property <color> lock-background: root.light-theme ? #d9fff1a8 : #073e3bc9;
+    property <color> lock-hover-background: root.light-theme ? #f2fff9d8 : #0b504bdc;
+    property <color> lock-border-color: root.light-theme ? #ffffffa8 : #b9fff260;
+    property <color> lock-icon-color: root.light-theme ? #15564f : #d9fff7;
+    property <string> measured-price: root.quote-rows.length > 0 ? root.quote-rows[0].price : "";
+    property <length> price-font-size: root.s(58px) * min(1,
+        (root.s(276px) - max(root.s(2px), 2px)) / max(1px, price_measure.preferred-width));
+
+    callback drag-move(length, length);
+    callback toggle-layout-lock();
+
+    function s(value: length) -> length {
+        return value * root.content-scale;
+    }
+
+    title: root.widget-id;
+    width: root.widget-width * 1px;
+    height: root.widget-height * 1px;
+    no-frame: true;
+    always-on-top: root.pin-to-top;
+    background: transparent;
+    forward-focus: lock_focus;
+
+    // Measure at the largest size so fitting never depends on the fitted text itself.
+    price_measure := Text {
+        text: root.measured-price;
+        font-size: root.s(58px);
+        font-weight: 900;
+        visible: false;
+    }
+
+    drag_area := TouchArea {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
+        pointer-event(event) => {
+            if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.card-left-drag-active = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                root.card-left-drag-active = false;
+            }
+        }
+        moved => {
+            if !root.layout-locked && root.card-left-drag-active {
+                root.drag-move(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+
+    Image {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        source: @image-url("material-light.png");
+        image-fit: fill;
+        visible: root.light-theme;
+        opacity: root.content-opacity / 100;
+    }
+
+    Image {
+        width: root.widget-width * 1px;
+        height: root.widget-height * 1px;
+        source: @image-url("material-dark.png");
+        image-fit: fill;
+        visible: !root.light-theme;
+        opacity: root.content-opacity / 100;
+    }
+
+    card := Rectangle {
+        x: root.s(root.card-x);
+        y: root.s(root.card-y);
+        width: root.s(root.card-width);
+        height: root.s(root.card-height);
+        border-radius: root.s(root.card-radius);
+        background: transparent;
+        opacity: root.content-opacity / 100;
+        clip: true;
+
+        for quote[index] in root.quote-rows : Rectangle {
+            width: parent.width;
+            height: parent.height;
+            visible: index == 0;
+            background: transparent;
+
+            coin_plate := Rectangle {
+                x: root.s(26px);
+                y: root.s(23px);
+                width: root.s(48px);
+                height: root.s(48px);
+                border-radius: root.s(24px);
+                background: transparent;
+                border-width: 0px;
+                drop-shadow-offset-y: root.s(4px);
+                drop-shadow-blur: root.s(9px);
+                drop-shadow-color: #07594f32;
+                visible: root.quote-icons.length > index;
+
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
+                    image-fit: contain;
+                }
+            }
+
+            Text {
+                x: root.quote-icons.length > index ? root.s(88px) : root.s(28px);
+                y: root.s(25px);
+                width: root.quote-icons.length > index ? root.s(200px) : root.s(260px);
+                height: root.s(44px);
+                text: quote.symbol;
+                color: root.primary-text-color;
+                font-size: root.s(24px);
+                font-weight: 900;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: root.s(27px);
+                y: root.s(89px);
+                width: parent.width - root.s(54px);
+                height: root.s(72px);
+                text: quote.price;
+                color: root.primary-text-color;
+                font-size: root.price-font-size;
+                font-weight: 900;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            change_pill := Rectangle {
+                x: root.s(28px);
+                y: root.s(162px);
+                width: root.s(116px);
+                height: root.s(43px);
+                border-radius: root.s(21.5px);
+                background: quote.positive
+                    ? (root.red-up-enabled ? root.loss-pill-background : root.gain-pill-background)
+                    : (root.red-up-enabled ? root.gain-pill-background : root.loss-pill-background);
+                border-width: root.s(1px);
+                border-color: quote.positive
+                    ? (root.red-up-enabled ? #ffabb5aa : #9dffbf70)
+                    : (root.red-up-enabled ? #9dffbf70 : #ffabb5aa);
+                drop-shadow-offset-y: root.s(4px);
+                drop-shadow-blur: root.s(8px);
+                drop-shadow-color: #07594f32;
+
+                Text {
+                    x: root.s(5px);
+                    width: parent.width - root.s(10px);
+                    height: parent.height;
+                    text: quote.change;
+                    color: root.pill-text-color;
+                    font-size: root.s(22px);
+                    font-weight: 900;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            chart := Rectangle {
+                x: root.s(20px);
+                y: root.s(214px);
+                width: parent.width - root.s(40px);
+                height: root.s(108px);
+                background: transparent;
+
+                Path {
+                    x: 0px;
+                    y: root.s(4px);
+                    width: parent.width;
+                    height: root.s(100px);
+                    viewbox-width: 100;
+                    viewbox-height: 40;
+                    fit: fill;
+                    commands: root.chart-fill-path;
+                    fill: root.chart-fill-color;
+                    stroke-width: 0px;
+                    opacity: 0.78;
+                    visible: root.chart-ready;
+                }
+
+                Path {
+                    x: 0px;
+                    y: root.s(4px);
+                    width: parent.width;
+                    height: root.s(100px);
+                    viewbox-width: 100;
+                    viewbox-height: 40;
+                    fit: fill;
+                    commands: root.chart-line-path;
+                    fill: transparent;
+                    stroke: root.chart-color;
+                    stroke-width: root.s(2.7px);
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                    opacity: 0.96;
+                    visible: root.chart-ready;
+                }
+            }
+
+            Rectangle {
+                x: root.s(26px);
+                y: root.s(330px);
+                width: parent.width - root.s(52px);
+                height: root.s(1px);
+                background: root.divider-color;
+            }
+
+            Rectangle {
+                x: root.s(28px);
+                y: root.s(355px);
+                width: root.s(10px);
+                height: root.s(10px);
+                border-radius: root.s(5px);
+                background: root.provider-dot-color;
+            }
+
+            Text {
+                x: root.s(47px);
+                y: root.s(344px);
+                width: root.s(135px);
+                height: root.s(34px);
+                text: root.source-name-text;
+                color: root.primary-text-color;
+                font-size: root.s(17px);
+                font-weight: 800;
+                horizontal-alignment: root.rtl-layout ? right : left;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: root.s(190px);
+                y: root.s(344px);
+                width: root.s(122px);
+                height: root.s(34px);
+                text: root.updated-text;
+                color: root.secondary-text-color;
+                font-size: root.s(15px);
+                font-weight: 600;
+                horizontal-alignment: root.rtl-layout ? left : right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        chart_status := Text {
+            x: root.s(20px);
+            y: root.s(214px);
+            width: parent.width - root.s(40px);
+            height: root.s(108px);
+            text: root.source-text;
+            color: root.secondary-text-color;
+            font-size: root.s(14px);
+            wrap: word-wrap;
+            overflow: elide;
+            horizontal-alignment: root.rtl-layout ? right : left;
+            vertical-alignment: center;
+            visible: root.quote-rows.length > 0 && !root.chart-ready;
+        }
+
+        Text {
+            x: root.s(26px);
+            y: root.s(180px);
+            width: parent.width - root.s(52px);
+            height: root.s(60px);
+            text: root.empty-text;
+            color: root.secondary-text-color;
+            font-size: root.s(18px);
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            visible: root.quote-rows.length == 0;
+            overflow: elide;
+        }
+
+        lock_button := Rectangle {
+            x: parent.width - root.s(55px);
+            y: root.s(19px);
+            width: root.s(34px);
+            height: root.s(34px);
+            border-radius: root.s(10px);
+            background: root.layout-locked || lock_button_hit_area.has-hover
+                ? root.lock-hover-background
+                : root.lock-background;
+            border-width: root.s(lock_focus.has-focus ? 2px : 1px);
+            border-color: lock_focus.has-focus ? root.lock-icon-color : root.lock-border-color;
+            visible: root.layout-locked || drag_area.has-hover || lock_button_hit_area.has-hover || lock_focus.has-focus;
+
+            Path {
+                x: root.s(5px);
+                y: root.s(4px);
+                width: root.s(24px);
+                height: root.s(25px);
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
+                fill: root.layout-locked ? root.lock-icon-color : transparent;
+                stroke: root.lock-icon-color;
+                stroke-width: root.s(2px);
+                stroke-line-cap: round;
+                stroke-line-join: round;
+            }
+        }
+    }
+
+    lock_control := Rectangle {
+        x: card.x + card.width - root.s(55px);
+        y: card.y + root.s(19px);
+        width: root.s(34px);
+        height: root.s(34px);
+        background: transparent;
+        forward-focus: lock_focus;
+        accessible-role: checkbox;
+        accessible-label: root.layout-lock-text;
+        accessible-checkable: true;
+        accessible-checked: root.layout-locked;
+        accessible-action-default => { root.toggle-layout-lock(); }
+
+        lock_button_hit_area := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: pointer;
+            clicked => {
+                lock_focus.focus();
+                root.toggle-layout-lock();
+            }
+        }
+
+        lock_focus := FocusScope {
+            width: 0px;
+            height: 0px;
+            key-pressed(event) => {
+                if !event.repeat && (event.text == Key.Space || event.text == Key.Return) {
+                    root.toggle-layout-lock();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+    }
+}

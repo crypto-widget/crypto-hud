@@ -59,6 +59,7 @@ const DISABLED_PROTOTYPE_PLUGIN_IDS: &[&str] = &[
 const BUNDLED_BUILTIN_SLINT_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.focus-ticker",
     "com.cryptohud.market-compass",
+    "com.cryptohud.mint-tile",
     "com.cryptohud.trust-card",
     "com.cryptohud.status-strip",
 ];
@@ -69,6 +70,7 @@ const HOST_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.focus-ticker",
     "com.cryptohud.market-board",
     "com.cryptohud.market-compass",
+    "com.cryptohud.mint-tile",
     "com.cryptohud.status-strip",
     "com.cryptohud.trust-card",
     "com.example.stage3-price-card",
@@ -76,6 +78,7 @@ const HOST_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
 #[cfg(test)]
 const DIRECT_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.focus-ticker",
+    "com.cryptohud.mint-tile",
     "com.cryptohud.status-strip",
     "com.cryptohud.trust-card",
 ];
@@ -2330,6 +2333,7 @@ export component ExamplePriceCard inherits Window {
             BUILTIN_QUOTE_BOARD_PLUGIN_ID,
             "com.cryptohud.focus-ticker",
             "com.cryptohud.market-compass",
+            "com.cryptohud.mint-tile",
             "com.cryptohud.trust-card",
             "com.cryptohud.status-strip",
         ] {
@@ -3249,6 +3253,7 @@ export component ExamplePriceCard inherits Window {
         for plugin_id in [
             "com.cryptohud.focus-ticker",
             "com.cryptohud.market-compass",
+            "com.cryptohud.mint-tile",
             "com.cryptohud.trust-card",
             "com.cryptohud.status-strip",
         ] {
@@ -3297,6 +3302,87 @@ export component ExamplePriceCard inherits Window {
                 rows: None
             }
         );
+    }
+
+    #[test]
+    fn mint_tile_manifest_declares_single_symbol_candle_card() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let plugin = catalog.find("com.cryptohud.mint-tile").unwrap();
+
+        assert_eq!(plugin.default_size.width, 360);
+        assert_eq!(plugin.default_size.height, 440);
+        assert_eq!(plugin.min_symbol_limit, 1);
+        assert_eq!(plugin.symbol_limit, 1);
+        assert_eq!(plugin.preview_images.len(), 2);
+        for image_path in &plugin.preview_images {
+            assert!(
+                image_path.exists(),
+                "mint tile preview image should exist: {}",
+                image_path.display()
+            );
+            let image = slint::Image::load_from_path(image_path).unwrap_or_else(|error| {
+                panic!(
+                    "mint tile preview image should load: {}: {error}",
+                    image_path.display()
+                )
+            });
+            let pixels = image.to_rgba8().unwrap_or_else(|| {
+                panic!(
+                    "mint tile preview image should expose RGBA pixels: {}",
+                    image_path.display()
+                )
+            });
+            assert_eq!(
+                (pixels.width(), pixels.height()),
+                (360, 440),
+                "mint tile preview should match the natural widget canvas"
+            );
+            let width = pixels.width() as usize;
+            let height = pixels.height() as usize;
+            let data = pixels.as_slice();
+            let corners = [
+                data[0],
+                data[width - 1],
+                data[(height - 1) * width],
+                data[height * width - 1],
+            ];
+            assert!(
+                corners.iter().all(|pixel| pixel.a == 255),
+                "mint tile preview should fully composite the frameless window"
+            );
+            let corner_spread = corners
+                .iter()
+                .flat_map(|pixel| [pixel.r, pixel.g, pixel.b])
+                .map(i16::from)
+                .max()
+                .unwrap()
+                - corners
+                    .iter()
+                    .flat_map(|pixel| [pixel.r, pixel.g, pixel.b])
+                    .map(i16::from)
+                    .min()
+                    .unwrap();
+            assert!(
+                corner_spread <= 20,
+                "mint tile preview corners should retain a neutral paper backdrop"
+            );
+            let paper = data[0];
+            let shadow = data[430 * width + width / 2];
+            assert!(
+                i16::from(paper.r) + i16::from(paper.g) + i16::from(paper.b)
+                    > i16::from(shadow.r) + i16::from(shadow.g) + i16::from(shadow.b) + 24,
+                "mint tile preview should retain a visible shadow below the card"
+            );
+        }
+        assert!(plugin
+            .data_requirements
+            .iter()
+            .any(|requirement| requirement.capability == "market.price"));
+        assert!(plugin
+            .data_requirements
+            .iter()
+            .any(|requirement| requirement.capability == "market.candles"));
     }
 
     #[test]
@@ -3472,6 +3558,24 @@ export component ExamplePriceCard inherits Window {
             !source.contains("for dot[i] in 38 : Rectangle"),
             "trust card chart should not render horizontal dotted guide lines"
         );
+        assert!(source.contains("commands: root.chart-line-path;"));
+        assert!(source.contains("commands: root.chart-fill-path;"));
+    }
+
+    #[test]
+    fn mint_tile_keeps_market_direction_on_change_and_chart_only() {
+        let source = repo_plugin_ui_source("com.cryptohud.mint-tile");
+
+        assert!(source.contains("source: @image-url(\"material-light.png\");"));
+        assert!(source.contains("source: @image-url(\"material-dark.png\");"));
+        assert!(source.contains("visible: root.light-theme;"));
+        assert!(source.contains("visible: !root.light-theme;"));
+        assert!(!source.contains("shadow-light.png"));
+        assert!(!source.contains("shadow-dark.png"));
+        assert!(source.contains("property <color> chart-color: root.chart-uses-gain-color"));
+        assert!(source.contains(
+            "? (root.red-up-enabled ? root.loss-pill-background : root.gain-pill-background)"
+        ));
         assert!(source.contains("commands: root.chart-line-path;"));
         assert!(source.contains("commands: root.chart-fill-path;"));
     }

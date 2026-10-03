@@ -163,6 +163,7 @@ Optional properties:
 ```slint
 in property <bool> rtl-layout: false;
 in property <string> source-name-text;
+in property <string> layout-lock-text;
 in property <[image]> quote-icons;
 in property <string> chart-line-path;
 in property <string> chart-fill-path;
@@ -171,6 +172,10 @@ in property <bool> chart-positive;
 ```
 
 `quote-icons[index]` aligns with `quote-rows[index]`. If the icon array is empty or too short, hide icons or render an empty placeholder.
+
+`layout-lock-text` is the localized label for a layout-lock control. It is optional;
+existing plugins remain compatible. Expose a checkable accessibility role and the
+current `layout-locked` state, and support Space/Return with a visible focus indicator.
 
 ## Theme And Change Colors
 
@@ -415,3 +420,18 @@ cargo test -p crypto-hud discovers_repo_local_plugins
 cargo check -p crypto-hud
 powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```
+
+For Mint Tile, run the focused layout and interaction regression plus the native
+Windows smoke. The smoke uses isolated state and offline quotes, checks physical
+window dimensions at the current desktop DPI, and verifies mouse locking,
+dragging, and the accessibility action:
+
+```powershell
+cargo +1.96.0 test --locked -p crypto-hud mint_tile
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -ScalePercent 30
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -Language ar -RedUp -LockLight
+```
+
+To regenerate its light and dark preview assets from complete native captures,
+run the smoke with `-PaperBackdrop -UpdatePreviews` at the default 100% widget scale.

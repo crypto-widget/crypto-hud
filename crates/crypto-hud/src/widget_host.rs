@@ -258,6 +258,12 @@ impl WidgetUi {
         }
     }
 
+    pub(crate) fn set_layout_lock_text(&self, value: SharedString) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("layout-lock-text", Value::from(value));
+        }
+    }
+
     pub(crate) fn set_rtl_layout(&self, value: bool) {
         match self {
             Self::BuiltinPriceCard(ui) => ui.set_rtl_layout(value),
