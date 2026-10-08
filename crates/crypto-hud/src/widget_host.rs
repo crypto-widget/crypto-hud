@@ -258,6 +258,37 @@ impl WidgetUi {
         }
     }
 
+    fn set_quote_labels_and_readiness(&self, view: &widget_runtime::WidgetRuntimeView) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property(
+                "quote-base-labels",
+                string_model_value(&view.quote_base_labels),
+            );
+            ui.set_optional_property(
+                "quote-quote-labels",
+                string_model_value(&view.quote_quote_labels),
+            );
+            ui.set_optional_property(
+                "quote-price-ready",
+                bool_model_value(&view.quote_price_ready),
+            );
+            ui.set_optional_property(
+                "quote-compact-prices",
+                string_model_value(&view.quote_compact_prices),
+            );
+            ui.set_optional_property(
+                "quote-full-prices",
+                string_model_value(&view.quote_full_prices),
+            );
+        }
+    }
+
+    pub(crate) fn set_change_period_text(&self, value: SharedString) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("change-period-text", Value::from(value));
+        }
+    }
+
     pub(crate) fn set_layout_lock_text(&self, value: SharedString) {
         if let Self::DynamicSlint(ui) = self {
             ui.set_optional_property("layout-lock-text", Value::from(value));
@@ -579,6 +610,7 @@ pub(crate) fn apply_runtime_view_to_widget(
     ui.set_hide_quote_asset(display_options.hide_quote_asset);
     ui.set_show_header(display_options.show_header);
     ui.set_quote_assets(&view.quote_assets);
+    ui.set_quote_labels_and_readiness(view);
     ui.set_quote_chart_line_paths(&view.quote_chart_line_paths);
     ui.set_quote_chart_fill_paths(&view.quote_chart_fill_paths);
     ui.set_quote_chart_up_candle_paths(&view.quote_chart_up_candle_paths);

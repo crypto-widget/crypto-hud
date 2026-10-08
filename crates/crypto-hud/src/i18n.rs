@@ -36,6 +36,24 @@ impl Locale {
     ];
 }
 
+/// Compact, explicitly localized period label for the quote's 24-hour change.
+pub fn change_period_label(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "24h",
+        Locale::ZhHans => "24小时",
+        Locale::ZhHant => "24小時",
+        Locale::Es419 => "24 h",
+        Locale::PtBr => "24 h",
+        Locale::Vi => "24 giờ",
+        Locale::Id => "24 jam",
+        Locale::Tr => "24 sa",
+        Locale::Ko => "24시간",
+        Locale::Ja => "24時間",
+        Locale::Ru => "24 ч",
+        Locale::Ar => "\u{2066}24\u{2069} ساعة",
+    }
+}
+
 #[cfg(test)]
 impl Locale {
     pub const NON_ENGLISH: [Self; 11] = [
@@ -4319,6 +4337,27 @@ fn default_symbols_future_only(locale: Locale, selected_count: usize, max: usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn change_period_labels_cover_all_locales() {
+        let expected = [
+            "24h",
+            "24小时",
+            "24小時",
+            "24 h",
+            "24 h",
+            "24 giờ",
+            "24 jam",
+            "24 sa",
+            "24시간",
+            "24時間",
+            "24 ч",
+            "\u{2066}24\u{2069} ساعة",
+        ];
+        for (locale, expected) in Locale::ALL.into_iter().zip(expected) {
+            assert_eq!(change_period_label(locale), expected, "{locale:?}");
+        }
+    }
 
     #[test]
     fn locale_tags_resolve_to_supported_locales() {

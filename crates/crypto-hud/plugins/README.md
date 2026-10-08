@@ -156,6 +156,12 @@ in property <int> content-opacity;
 ```slint
 in property <string> source-name-text;
 in property <string> layout-lock-text;
+in property <string> change-period-text;
+in property <[string]> quote-base-labels;
+in property <[string]> quote-quote-labels;
+in property <[bool]> quote-price-ready;
+in property <[string]> quote-compact-prices;
+in property <[string]> quote-full-prices;
 in property <bool> rtl-layout: false;
 in property <float> widget-scale: 1.0;
 in property <[image]> quote-icons;
@@ -167,6 +173,40 @@ in property <bool> chart-positive;
 
 `layout-lock-text` 是宿主提供的本地化“锁定位置”标签，属于可选属性，旧插件仍可继续运行。
 锁定控件应提供可勾选的无障碍角色、`layout-locked` 状态、可见焦点，以及空格/回车操作。
+
+`change-period-text` 是本地化的 24 小时涨跌周期标签。上述 `quote-*` 数组
+与 `quote-rows` 一一对应：基础币标签只含基础币；报价币标签包含分隔符（如 `/ USDT`），
+隐藏报价币时为空，两个标签均保留 RTL 隔离。`quote-price-ready` 表示存在可显示的缓存价格，
+不代表数据新鲜；新鲜度和错误提示使用 `updated-text`，图表可用性使用 `chart-ready`。
+这些属性均可选，旧插件继续兼容，不应通过比较翻译字符串推断状态。
+
+`quote-compact-prices` 将价格限制在 8 个显示字符以内，小数点、正负号和每个下标数字
+均按 1 位计算。连续 4 个及以上前导小数零使用下标压缩，例如 `0.000004110` 显示为
+`0.0₅4110`，下标表示首个非零数字前的零总数。其他超长价格调整小数精度，超长整数
+使用科学计数法。`quote-full-prices` 保留缓存 `f64` 的数值精度，不进行显示舍入，
+极端数量级使用科学计数法；它不是交易所返回的原始字符串。两个数组均保留 RTL 隔离，
+方向控制字符不占显示位；没有缓存价格时为空字符串，不改变行情数据和原有行价格。
+
+Focus Ticker 提供浅色和深色主题，自然窗口尺寸为 490 × 100，卡片为 470 × 80。
+币对按可用宽度调整字号，折线宽 146px、无底色。锁定按钮默认隐藏，
+鼠标悬浮于组件或使用键盘聚焦时浮现在右上角，不预留横向空间，也不挤压图表。
+价格上边距为 6px，底行区域下边距为 8px，保持原有字号与图表高度。
+交易对栏宽 112px，交易对、价格和图表之间均留 8px 间距。
+价格栏宽 168px，以 8 个显示位适配，统一采用 38px 字号。悬浮价格显示完整缓存数值，
+提示浮层不改变卡片宽度，也不拦截价格区域的拖动。
+辅助信息对齐在同一底行；两套主题统一采用 Segoe UI，价格字重减轻，锁图标为 17px。
+该插件只显示一个币对，超过数量限制的配置由宿主规范化。
+锁图标采用 [Feather 4.29.2](https://github.com/feathericons/feather/tree/v4.29.2)，
+每个 SVG 内保留 MIT 许可证。
+
+可运行 `scripts/gui-focus-ticker-smoke.ps1` 验证隔离状态下的两个原生窗口，支持
+`-ScalePercent`、`-OpacityPercent`、`-Language`、`-RedUp` 和 `-SymbolCount 1..8`。
+`-KeepOpen` 将窗口保留一小时供检查。
+`-PriceMatrix` 可用固定离线价格同时展示 BTC、ETH、SOL、BNB、PEPE 的两套主题，
+建议使用 100% 缩放查看十个窗口。运行
+`cargo +1.96.0 test --locked -p crypto-hud focus_ticker` 检查文字适配、空数据、
+加载/失败状态及键盘/鼠标锁定；设置 `CRYPTO_HUD_FOCUS_CAPTURE_DIR` 后会额外输出
+真实 Slint 组件的两套 PPM 渲染图，可转换为插件 PNG 预览。
 
 插件 Slint 文件中需要定义 `QuoteRow`：
 

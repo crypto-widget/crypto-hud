@@ -910,6 +910,9 @@ fn refresh_runtime_symbols_from_store(
                 .ui
                 .set_layout_lock_text(i18n::text(locale).always_on_top.into());
             runtime.ui.set_rtl_layout(i18n::is_rtl(locale));
+            runtime
+                .ui
+                .set_change_period_text(i18n::change_period_label(locale).into());
         }
     }
 }
@@ -959,6 +962,7 @@ fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
     ui.set_empty_text(text.empty_pairs.into());
     ui.set_layout_lock_text(text.always_on_top.into());
     ui.set_rtl_layout(i18n::is_rtl(locale));
+    ui.set_change_period_text(i18n::change_period_label(locale).into());
     ui.set_pin_to_top(instance.layout.always_on_top);
     ui.set_layout_locked(instance.layout.locked);
     ui.set_theme_name(widget_theme_name(instance, plugin_catalog).into());

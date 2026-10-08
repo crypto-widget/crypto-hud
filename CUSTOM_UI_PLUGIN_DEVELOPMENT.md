@@ -164,6 +164,12 @@ Optional properties:
 in property <bool> rtl-layout: false;
 in property <string> source-name-text;
 in property <string> layout-lock-text;
+in property <string> change-period-text;
+in property <[string]> quote-base-labels;
+in property <[string]> quote-quote-labels;
+in property <[bool]> quote-price-ready;
+in property <[string]> quote-compact-prices;
+in property <[string]> quote-full-prices;
 in property <[image]> quote-icons;
 in property <string> chart-line-path;
 in property <string> chart-fill-path;
@@ -176,6 +182,52 @@ in property <bool> chart-positive;
 `layout-lock-text` is the localized label for a layout-lock control. It is optional;
 existing plugins remain compatible. Expose a checkable accessibility role and the
 current `layout-locked` state, and support Space/Return with a visible focus indicator.
+
+`change-period-text` is the localized compact 24-hour change label. The
+`quote-*` arrays align with `quote-rows`: base labels contain the base asset;
+quote labels include the separator (for example `/ USDT`) and are empty when
+the user hides quote assets. Both labels preserve RTL isolation. `quote-price-ready`
+indicates whether a cached price exists; it does **not** guarantee freshness.
+Use `updated-text` for freshness/failure messages and `chart-ready` for chart
+availability. Never infer these states by comparing translated strings. These
+inputs are optional for plugins; older plugins remain compatible.
+
+`quote-compact-prices` limits prices to eight visible characters, counting the
+decimal point, sign, and each subscript digit as one. Tiny prices compress four
+or more leading fractional zeros (`0.000004110` → `0.0₅4110`); the subscript is
+the total zero count before the first nonzero digit. Other prices round decimals
+to fit; oversized integers use scientific notation. `quote-full-prices` preserves
+the cached `f64` value without display rounding (scientific notation for extreme
+magnitudes), not the original exchange's decimal string. Both arrays preserve RTL
+isolation; directional controls do not consume display slots. Missing cached
+prices have empty strings. Neither array changes quote data or legacy row prices.
+
+### Focus Ticker reference implementation
+
+Focus Ticker has light and dark themes and a natural window size of 490 × 100.
+The 470 × 80 card uses fitted pair typography, a 146px-wide unfilled sparkline,
+and a floating keyboard-accessible lock control. The lock is hidden by default,
+appears while hovering the widget or using keyboard focus, and overlays the
+chart without reserving width or changing the layout. It supports one pair; the
+host normalizes larger selections to the manifest's single-pair limit.
+The card uses a 6px top inset for the price and an 8px bottom inset for the footer.
+The pair column is 112px wide, with 8px gaps between the pair, price, and chart.
+Prices use eight display slots in a 168px column with a consistent 38px type size.
+Hovering the price reveals its full cached value in a passive overlay that preserves
+dragging and does not resize the card. Supporting information shares a common footer row;
+both themes use Segoe UI with a lighter price weight and a 17px lock icon.
+Lock icons are unmodified [Feather 4.29.2](https://github.com/feathericons/feather/tree/v4.29.2)
+assets, with the MIT license included in each SVG.
+
+Run `scripts/gui-focus-ticker-smoke.ps1` for isolated offline native validation.
+It accepts `-ScalePercent`, `-OpacityPercent`, `-Language`, `-RedUp`, and
+`-SymbolCount 1..8`; `-KeepOpen` leaves both themes open for one hour of review.
+`-PriceMatrix` opens BTC, ETH, SOL, BNB, and PEPE in both themes using fixed offline
+prices; use 100% scale for the ten-window comparison layout.
+`cargo +1.96.0 test --locked -p crypto-hud focus_ticker` verifies text fitting,
+empty/loading/error states, and keyboard/mouse locking. Set
+`CRYPTO_HUD_FOCUS_CAPTURE_DIR` to an output directory to render both themes as
+PPM files for PNG preview conversion; captures come from the real Slint component.
 
 ## Theme And Change Colors
 

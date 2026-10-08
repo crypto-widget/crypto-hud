@@ -230,6 +230,7 @@ cargo +1.96.0 test -p crypto-hud arabic_update_notification_isolates_ltr_release
 cargo +1.96.0 test -p crypto-hud alert_notification_copy_is_localized_for_every_non_english_locale
 cargo +1.96.0 test -p crypto-hud arabic_alert_notification_isolates_ltr_market_values
 cargo +1.96.0 test -p crypto-hud alert_24h_terms_are_locale_appropriate
+cargo +1.96.0 test -p crypto-hud change_period_labels_cover_all_locales
 cargo +1.96.0 test -p crypto-hud runtime_text_bridge_uses_selected_locale_labels
 cargo +1.96.0 test -p crypto-hud runtime_refresh_tracks_locale_sensitive_widget_labels
 cargo +1.96.0 test -p crypto-hud initial_widget_apply_sets_locale_sensitive_widget_labels

@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 pub use crypto_hud_core::{evaluate_alerts, AlertCondition, AlertEvaluation, AlertRule};
+mod compact_price;
 use crypto_hud_core::{
     format_market_pair_symbol, format_pair_change, format_price, market_pair_source,
     normalize_market_pair_key, parse_market_pair, AlertQuote, MarketDataSource,
@@ -1156,6 +1157,16 @@ pub struct WidgetRuntimeView {
     #[serde(default)]
     pub quote_assets: Vec<String>,
     #[serde(default)]
+    pub quote_base_labels: Vec<String>,
+    #[serde(default)]
+    pub quote_quote_labels: Vec<String>,
+    #[serde(default)]
+    pub quote_price_ready: Vec<bool>,
+    #[serde(default)]
+    pub quote_compact_prices: Vec<String>,
+    #[serde(default)]
+    pub quote_full_prices: Vec<String>,
+    #[serde(default)]
     pub quote_chart_line_paths: Vec<String>,
     #[serde(default)]
     pub quote_chart_fill_paths: Vec<String>,
@@ -1310,7 +1321,27 @@ impl QuoteRowView {
     }
 }
 
+fn quote_price_labels(
+    params: &WidgetRuntimeViewParams<'_>,
+    formatter: fn(f64) -> String,
+) -> Vec<String> {
+    params
+        .symbols
+        .iter()
+        .map(|symbol| {
+            params
+                .quote_cache
+                .get(symbol)
+                .map_or_else(String::new, |state| {
+                    bidi_isolate_if_needed(&formatter(state.price), params.labels)
+                })
+        })
+        .collect()
+}
+
 pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetRuntimeView {
+    let (quote_base_labels, quote_quote_labels) =
+        quote_pair_labels(params.symbols, params.display_options, params.labels);
     let chart = chart_path_view_for_symbols_at(params.symbols, params.quote_cache, params.now);
     let quote_charts =
         chart_path_views_for_symbols_at(params.symbols, params.quote_cache, params.now);
@@ -1329,6 +1360,15 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             params.display_options,
         ),
         quote_assets: quote_assets_for_symbols(params.symbols),
+        quote_base_labels,
+        quote_quote_labels,
+        quote_price_ready: params
+            .symbols
+            .iter()
+            .map(|symbol| params.quote_cache.get(symbol).is_some())
+            .collect(),
+        quote_compact_prices: quote_price_labels(&params, compact_price::compact_price),
+        quote_full_prices: quote_price_labels(&params, compact_price::full_price),
         quote_chart_line_paths: quote_charts
             .iter()
             .map(|chart| chart.line_path.clone())
@@ -1772,6 +1812,40 @@ pub fn quote_assets_for_symbols(symbols: &[String]) -> Vec<String> {
                 .unwrap_or_else(|| format_market_pair_symbol(symbol))
         })
         .collect()
+}
+
+fn quote_pair_labels(
+    symbols: &[String],
+    options: WidgetDisplayOptions,
+    labels: RuntimeTextLabels<'_>,
+) -> (Vec<String>, Vec<String>) {
+    symbols
+        .iter()
+        .map(|symbol| {
+            let (base, quote) = match parse_market_pair(symbol) {
+                Some(pair) => (
+                    pair.base,
+                    if options.hide_quote_asset {
+                        String::new()
+                    } else {
+                        format!("/ {}", pair.quote)
+                    },
+                ),
+                None => (
+                    format_pair_symbol_with_options(symbol, options),
+                    String::new(),
+                ),
+            };
+            (
+                bidi_isolate_if_needed(&base, labels),
+                if quote.is_empty() {
+                    quote
+                } else {
+                    bidi_isolate_if_needed(&quote, labels)
+                },
+            )
+        })
+        .unzip()
 }
 
 pub fn newest_update_for_symbols(symbols: &[String], quote_cache: &QuoteCache) -> Option<Instant> {
@@ -2824,6 +2898,11 @@ mod tests {
         assert_eq!(view.quote_rows[0].price, "106800");
         assert_eq!(view.quote_rows[1].symbol, "ETH/USDT");
         assert_eq!(view.quote_rows[1].price, "Connecting");
+        assert_eq!(view.quote_price_ready, vec![true, false]);
+        assert_eq!(view.quote_compact_prices, vec!["106800.1", ""]);
+        assert_eq!(view.quote_full_prices, vec!["106800.12", ""]);
+        assert_eq!(view.quote_base_labels, vec!["BTC", "ETH"]);
+        assert_eq!(view.quote_quote_labels, vec!["/ USDT", "/ USDT"]);
         assert!(view.chart_ready);
         assert!(view.chart_positive);
         assert!(view.chart_line_path.starts_with("M 0.0"));
@@ -2849,6 +2928,102 @@ mod tests {
         });
 
         assert_eq!(view.quote_rows[0].symbol, "BTC");
+        assert_eq!(view.quote_base_labels, vec!["BTC"]);
+        assert_eq!(view.quote_quote_labels, vec![""]);
+        assert_eq!(view.quote_price_ready, vec![false]);
+    }
+
+    #[test]
+    fn quote_pair_labels_isolate_rtl_tokens_and_preserve_hidden_quote_asset() {
+        let symbols = vec!["binance:spot:1000PEPE/USDT".to_string()];
+        let labels = RuntimeTextLabels {
+            isolate_numeric_values: true,
+            ..Default::default()
+        };
+        let (base, quote) = quote_pair_labels(&symbols, Default::default(), labels);
+        assert_eq!(base, vec!["\u{2066}1000PEPE\u{2069}"]);
+        assert_eq!(quote, vec!["\u{2066}/ USDT\u{2069}"]);
+        let (_, quote) = quote_pair_labels(
+            &symbols,
+            WidgetDisplayOptions {
+                hide_quote_asset: true,
+                ..Default::default()
+            },
+            labels,
+        );
+        assert_eq!(quote, vec![""]);
+    }
+
+    #[test]
+    fn runtime_view_accepts_legacy_payload_without_precision_labels() {
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "legacy",
+            symbols: &[],
+            quote_cache: &QuoteCache::new(),
+            source_prefix: "",
+            provider_labels: Default::default(),
+            labels: Default::default(),
+            has_market_error: false,
+            now: Instant::now(),
+            display_options: Default::default(),
+        });
+        let mut json = serde_json::to_value(&view).unwrap();
+        for field in [
+            "quote_base_labels",
+            "quote_quote_labels",
+            "quote_price_ready",
+            "quote_compact_prices",
+            "quote_full_prices",
+        ] {
+            json.as_object_mut().unwrap().remove(field);
+        }
+        let legacy: WidgetRuntimeView = serde_json::from_value(json).unwrap();
+        assert!(legacy.quote_base_labels.is_empty());
+        assert!(legacy.quote_quote_labels.is_empty());
+        assert!(legacy.quote_price_ready.is_empty());
+        assert!(legacy.quote_compact_prices.is_empty());
+        assert!(legacy.quote_full_prices.is_empty());
+    }
+
+    #[test]
+    fn compact_and_full_prices_preserve_cached_values_and_rtl_isolation() {
+        let now = Instant::now();
+        let symbols = vec!["binance:spot:PEPE/USDT".to_string(), "ETH/USDT".to_string()];
+        let mut cache = QuoteCache::new();
+        cache.insert(
+            symbols[0].clone(),
+            QuoteState::new(
+                0.000004110123456,
+                -4.86,
+                vec![],
+                MarketDataSource::Binance,
+                now - Duration::from_secs(3600),
+            ),
+        );
+        let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+            widget_id: "compact-prices",
+            symbols: &symbols,
+            quote_cache: &cache,
+            source_prefix: "",
+            provider_labels: Default::default(),
+            labels: RuntimeTextLabels {
+                isolate_numeric_values: true,
+                ..Default::default()
+            },
+            has_market_error: true,
+            now,
+            display_options: Default::default(),
+        });
+        assert_eq!(
+            view.quote_compact_prices,
+            vec!["\u{2066}0.0₅4110\u{2069}", ""]
+        );
+        assert_eq!(
+            view.quote_full_prices,
+            vec!["\u{2066}0.000004110123456\u{2069}", ""]
+        );
+        assert_eq!(view.quote_price_ready, vec![true, false]);
+        assert_eq!(cache.get(&symbols[0]).unwrap().price, 0.000004110123456);
     }
 
     #[test]

@@ -375,7 +375,7 @@ try {
 
         $windows = @(Get-ProcessWindows $app.Id)
         $expected = @(
-            [pscustomobject]@{ Title = "focus-ticker-30"; Width = 246; Height = 47 },
+            [pscustomobject]@{ Title = "focus-ticker-30"; Width = 147; Height = 30 },
             [pscustomobject]@{ Title = "trust-card-30"; Width = 156; Height = 116 },
             [pscustomobject]@{ Title = "status-strip-30"; Width = 112; Height = 28 },
             [pscustomobject]@{ Title = "status-strip-100-single"; Width = 130; Height = 92 },
