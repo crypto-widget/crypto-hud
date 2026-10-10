@@ -37,7 +37,12 @@
     "binance:spot:SOL/USDT"
   ],
   "previewImages": [
-    "ui/preview-light.png"
+    "ui/preview-light.png",
+    "ui/preview-dark.png"
+  ],
+  "themes": [
+    { "id": "default", "name": "Light", "role": "light", "default": true },
+    { "id": "dark", "name": "Dark", "role": "dark" }
   ],
   "dataRequirements": [
     {

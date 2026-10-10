@@ -224,6 +224,37 @@ Reserve enough width for eight digits at the chosen font size; do not rely on
 ellipsis to shorten numeric prices. This budget counts visible characters, not
 UTF-8 bytes or RTL isolation controls.
 
+### Status Strip reference implementation
+
+Status Strip keeps its 122 × 84 cells, 4px window padding, and one-to-five-pair
+horizontal layout. The existing `default` theme ID now has the light role; `dark`
+adds the matching dark palette without invalidating saved default selections.
+Prices reserve eight characters at a consistent size. Missing quotes use neutral
+placeholders, and each change includes the localized 24-hour label. The original
+cyan, blue, orange, yellow, and green faces retain their gloss and shaded edges;
+the dark theme uses deeper versions of the same colors. These decorative colors
+identify positions. The unboxed bottom row uses a filled direction caret followed
+by the signed change, with the period right-aligned. Caret direction follows the
+quote; caret and text colors follow `red-up-enabled`, with darker variants on the
+light yellow face. Missing quotes hide the caret.
+Physical-pixel-aligned rounded slices render the gradients without hover seams.
+
+Direction carets use Bootstrap Icons 1.11.3; each SVG includes its MIT license.
+
+The full-height colored faces show only pair, price, and change during normal use.
+Source and freshness details appear when hovering the lower edge. Data problems
+show a small amber indicator whose hover and accessibility label reveal the same
+details. These passive overlays never capture drag input. The floating lock
+appears only on hover or keyboard focus, temporarily covering the final period
+label, and supports Space/Return and accessibility actions.
+
+Run `cargo +1.96.0 test --locked -p crypto-hud status_strip` for rendering, data
+states, scale, DPI, input, and compatibility checks. Set
+`CRYPTO_HUD_STATUS_STRIP_CAPTURE_DIR` to export deterministic Slint PPM captures.
+`scripts/gui-status-strip-runtime-smoke.ps1` validates isolated native windows,
+both themes, and 1–8 requested pairs (normalized to at most five). It accepts
+scale, opacity, language, color direction, and lock settings; it does not capture
+the desktop or automate desktop input.
 
 ### Focus Ticker reference implementation
 

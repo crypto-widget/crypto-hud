@@ -29,6 +29,9 @@ mod market_compass_tests;
 mod trust_card_tests;
 
 #[cfg(test)]
+mod status_strip_tests;
+
+#[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
 use std::path::PathBuf;
