@@ -146,6 +146,7 @@ function Invoke-IsolatedPluginRuntimeSmoke {
     $expectedPluginIds = @(
         "com.cryptohud.focus-ticker",
         "com.cryptohud.market-compass",
+        "com.cryptohud.mint-tile",
         "com.cryptohud.trust-card",
         "com.cryptohud.status-strip"
     )
@@ -155,6 +156,7 @@ function Invoke-IsolatedPluginRuntimeSmoke {
     $sizes = @{
         "com.cryptohud.focus-ticker" = @(820, 156)
         "com.cryptohud.market-compass" = @(480, 480)
+        "com.cryptohud.mint-tile" = @(360, 440)
         "com.cryptohud.trust-card" = @(520, 386)
         "com.cryptohud.status-strip" = @(618, 92)
     }

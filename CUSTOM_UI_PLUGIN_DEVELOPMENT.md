@@ -252,6 +252,34 @@ empty/loading/error states, and keyboard/mouse locking. Set
 `CRYPTO_HUD_FOCUS_CAPTURE_DIR` to an output directory to render both themes as
 PPM files for PNG preview conversion; captures come from the real Slint component.
 
+### Mint Tile reference implementation
+
+Mint Tile displays one pair in a 360 × 360 native window. The light theme uses a
+muted mint surface; the dark theme uses deep gray-green. Rounded Slint surfaces
+with a layered gradient, a subtle border, and a soft shadow replace the stretched
+material image so the
+surface stays crisp across widget scale and display DPI. Price remains the primary
+element, with lighter pair, source, and update labels and a smaller change badge.
+
+The price column accommodates eight visible characters without truncation,
+including compressed PEPE prices. The change badge includes the host's localized
+24-hour period. Without a ready price, price and change use neutral placeholders;
+chart readiness is independent. Without a price, the chart area shows localized
+`updated-text`; with a price, the footer shows it alongside the source on separate
+lines. There is no permanently green status indicator. Rounded gradients and
+shadows use native layers because the software renderer does not support rounded
+gradient clipping or `BoxShadow`.
+The layout-lock control uses a lock icon and appears only on hover or keyboard
+focus, including when already locked. It overlays the card without reserving
+space and supports Space/Return with a visible focus indicator.
+
+Run `scripts/gui-mint-tile-runtime-smoke.ps1` for isolated offline native loading
+and DPI geometry checks. It accepts light/dark/both themes, BTC/PEPE, scale,
+opacity, language, color direction, logo visibility, and lock state; `-KeepOpen`
+leaves the preview windows open for one hour. This runtime smoke reads the app's
+ready marker and does not capture the desktop or send input. Use the focused
+`mint_tile` tests for real Slint rendering, text fit, data states, and interaction.
+
 ### Market Compass reference implementation
 
 Market Compass uses a 480 × 480 circular dial for one to eight pairs. Its default
@@ -529,17 +557,28 @@ cargo check -p crypto-hud
 powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```
 
-For Mint Tile, run the focused layout and interaction regression plus the native
-Windows smoke. The smoke uses isolated state and offline quotes, checks physical
-window dimensions at the current desktop DPI, and verifies mouse locking,
-dragging, and the accessibility action:
+For Mint Tile, run the focused layout and interaction regression plus the runtime
+smoke. Both use deterministic data; the runtime smoke creates isolated state,
+checks native loading and physical window dimensions at the current desktop DPI,
+and exits through the app's smoke timer:
 
 ```powershell
 cargo +1.96.0 test --locked -p crypto-hud mint_tile
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -Theme both
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -FirstAsset PEPE -ScalePercent 30
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -Theme dark -ScalePercent 200 -Language ar -RedUp -Locked -NoLogos
+```
+
+For a desktop session where capture and input automation are available, the
+additional native interaction smoke verifies mouse locking, dragging, and the
+accessibility action:
+
+```powershell
 powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop
 powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -ScalePercent 30
 powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -Language ar -RedUp -LockLight
 ```
 
 To regenerate its light and dark preview assets from complete native captures,
-run the smoke with `-PaperBackdrop -UpdatePreviews` at the default 100% widget scale.
+run the interaction smoke with `-PaperBackdrop -UpdatePreviews` at the default
+100% widget scale. The previews use the component's 360 × 360 natural size.

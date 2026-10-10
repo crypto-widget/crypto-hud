@@ -3311,7 +3311,7 @@ export component ExamplePriceCard inherits Window {
         let plugin = catalog.find("com.cryptohud.mint-tile").unwrap();
 
         assert_eq!(plugin.default_size.width, 360);
-        assert_eq!(plugin.default_size.height, 440);
+        assert_eq!(plugin.default_size.height, 360);
         assert_eq!(plugin.min_symbol_limit, 1);
         assert_eq!(plugin.symbol_limit, 1);
         assert_eq!(plugin.preview_images.len(), 2);
@@ -3335,7 +3335,7 @@ export component ExamplePriceCard inherits Window {
             });
             assert_eq!(
                 (pixels.width(), pixels.height()),
-                (360, 440),
+                (360, 360),
                 "mint tile preview should match the natural widget canvas"
             );
             let width = pixels.width() as usize;
@@ -3368,7 +3368,7 @@ export component ExamplePriceCard inherits Window {
                 "mint tile preview corners should retain a neutral paper backdrop"
             );
             let paper = data[0];
-            let shadow = data[430 * width + width / 2];
+            let shadow = data[(height - 20) * width + width / 2];
             assert!(
                 i16::from(paper.r) + i16::from(paper.g) + i16::from(paper.b)
                     > i16::from(shadow.r) + i16::from(shadow.g) + i16::from(shadow.b) + 24,
@@ -3383,6 +3383,66 @@ export component ExamplePriceCard inherits Window {
             .data_requirements
             .iter()
             .any(|requirement| requirement.capability == "market.candles"));
+    }
+
+    #[test]
+    fn mint_tile_compact_size_preserves_existing_layout_preferences() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let definitions = crate::state_bridge::widget_definitions_from_catalog(&catalog);
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id == "com.cryptohud.mint-tile")
+            .unwrap();
+        assert_eq!(
+            definition.size_policy,
+            crypto_hud_shell_state::WidgetSizePolicy::Fixed
+        );
+
+        for (width, height, scale) in [(360, 440, 100), (450, 550, 125)] {
+            for explicit_scale in [false, true] {
+                let mut saved = serde_json::json!({
+                    "widgets": [{
+                        "id": "mint-tile-1",
+                        "plugin_id": definition.id,
+                        "name": "My Mint Tile",
+                        "layout": {
+                            "x": 210,
+                            "y": 130,
+                            "always_on_top": false,
+                            "opacity_percent": 85,
+                            "locked": true,
+                            "width": width,
+                            "height": height
+                        },
+                        "symbols": ["binance:spot:PEPE/USDT"],
+                        "config": {"theme": "dark"}
+                    }]
+                });
+                if explicit_scale {
+                    saved["widgets"][0]["layout"]["scale_percent"] = scale.into();
+                }
+                let mut store: crypto_hud_shell_state::LayoutStore =
+                    serde_json::from_value(saved).unwrap();
+                let original = store.widgets[0].clone();
+
+                crypto_hud_shell_state::normalize_store_with_catalog(
+                    &mut store,
+                    0,
+                    &definitions,
+                    (1920, 1080),
+                );
+
+                let mut expected = original;
+                expected.layout.width = width;
+                expected.layout.height = width;
+                expected.layout.scale_percent = scale;
+                assert_eq!(
+                    store.widgets[0], expected,
+                    "old {width}x{height} layout with explicit_scale={explicit_scale} should only shrink its height and normalize scale"
+                );
+            }
+        }
     }
 
     #[test]
@@ -3567,12 +3627,6 @@ export component ExamplePriceCard inherits Window {
     fn mint_tile_keeps_market_direction_on_change_and_chart_only() {
         let source = repo_plugin_ui_source("com.cryptohud.mint-tile");
 
-        assert!(source.contains("source: @image-url(\"material-light.png\");"));
-        assert!(source.contains("source: @image-url(\"material-dark.png\");"));
-        assert!(source.contains("visible: root.light-theme;"));
-        assert!(source.contains("visible: !root.light-theme;"));
-        assert!(!source.contains("shadow-light.png"));
-        assert!(!source.contains("shadow-dark.png"));
         assert!(source.contains("property <color> chart-color: root.chart-uses-gain-color"));
         assert!(source.contains(
             "? (root.red-up-enabled ? root.loss-pill-background : root.gain-pill-background)"

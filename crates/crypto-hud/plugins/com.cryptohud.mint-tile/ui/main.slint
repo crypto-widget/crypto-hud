@@ -9,6 +9,7 @@ export component MintTile inherits Window {
     in property <string> widget-id;
     in property <[QuoteRow]> quote-rows;
     in property <[image]> quote-icons;
+    in property <[bool]> quote-price-ready;
     property <image> empty-quote-icon;
     in property <string> pairs-heading-text;
     in property <string> source-text;
@@ -16,11 +17,12 @@ export component MintTile inherits Window {
     in property <string> updated-text;
     in property <string> empty-text;
     in property <string> layout-lock-text;
+    in property <string> change-period-text;
     in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 360;
-    in property <int> widget-height: 440;
+    in property <int> widget-height: 360;
     in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
@@ -31,35 +33,41 @@ export component MintTile inherits Window {
     in property <bool> chart-positive;
     in property <int> chart-end-y-ratio;
     in-out property <bool> card-left-drag-active: false;
+    in-out property <bool> show-lock-focus: false;
 
     property <bool> light-theme: root.theme-name == "light";
     property <float> content-scale: root.widget-scale;
-    property <length> card-x: 15px;
-    property <length> card-width: 330px;
-    property <length> card-height: 386px;
-    property <length> card-y: 19px;
-    property <length> card-radius: 20px;
+    property <length> card-x: 14px;
+    property <length> card-y: 14px;
+    property <length> card-width: 332px;
+    property <length> card-height: 320px;
+    property <length> card-radius: 18px;
+    property <bool> price-ready: root.quote-rows.length > 0
+        && (root.quote-price-ready.length == 0 || root.quote-price-ready[0]);
     property <bool> chart-uses-gain-color: root.chart-positive ? !root.red-up-enabled : root.red-up-enabled;
-    property <color> primary-text-color: root.light-theme ? #071426 : #f2fffb;
-    property <color> secondary-text-color: root.light-theme ? #123f42 : #b8ddd6;
-    property <color> divider-color: root.light-theme ? #d8fff36e : #b6fff052;
-    property <color> provider-dot-color: root.light-theme ? #0e7f6f : #63ead0;
-    property <color> gain-color: root.light-theme ? #087b48 : #67ef9a;
-    property <color> loss-color: root.light-theme ? #c82738 : #ff7785;
+    property <color> primary-text-color: root.light-theme ? #17352d : #edf6f1;
+    property <color> secondary-text-color: root.light-theme ? #536e64 : #a6bcb2;
+    property <color> divider-color: root.light-theme ? #49736326 : #b6d8c923;
+    property <color> gain-color: root.light-theme ? #167151 : #72cba6;
+    property <color> loss-color: root.light-theme ? #b84050 : #f18c99;
     property <color> chart-color: root.chart-uses-gain-color ? root.gain-color : root.loss-color;
     property <color> chart-fill-color: root.chart-uses-gain-color
-        ? (root.light-theme ? #087b4824 : #67ef9a22)
-        : (root.light-theme ? #c8273822 : #ff778526);
-    property <color> gain-pill-background: root.light-theme ? #07895bd8 : #075b3be8;
-    property <color> loss-pill-background: root.light-theme ? #d63a48e8 : #7f2632ee;
-    property <color> pill-text-color: #ffffffff;
-    property <color> lock-background: root.light-theme ? #d9fff1a8 : #073e3bc9;
-    property <color> lock-hover-background: root.light-theme ? #f2fff9d8 : #0b504bdc;
-    property <color> lock-border-color: root.light-theme ? #ffffffa8 : #b9fff260;
-    property <color> lock-icon-color: root.light-theme ? #15564f : #d9fff7;
-    property <string> measured-price: root.quote-rows.length > 0 ? root.quote-rows[0].price : "";
-    property <length> price-font-size: root.s(58px) * min(1,
-        (root.s(276px) - max(root.s(2px), 2px)) / max(1px, price_measure.preferred-width));
+        ? (root.light-theme ? #16715112 : #72cba610)
+        : (root.light-theme ? #b8405010 : #f18c9910);
+    property <color> gain-pill-background: root.light-theme ? #16715112 : #72cba617;
+    property <color> loss-pill-background: root.light-theme ? #b8405010 : #f18c9917;
+    property <color> lock-background: root.light-theme ? #dceee5 : #203b32;
+    property <color> lock-hover-background: root.light-theme ? #cfe5d9 : #304d41;
+    property <color> focus-color: root.light-theme ? #36735c : #8dd8b9;
+    property <color> surface-top: root.light-theme ? #eef8f1 : #253c32;
+    property <color> surface-bottom: root.light-theme ? #cae4d7 : #152921;
+    property <bool> lock-revealed: drag_area.has-hover || lock_button_hit_area.has-hover
+        || lock_button_hit_area.pressed || root.card-left-drag-active
+        || (root.show-lock-focus && lock_focus.has-focus);
+    property <string> measured-price: root.price-ready ? root.quote-rows[0].price : root.price-slot-reference;
+    property <string> measured-change: root.price-ready ? root.quote-rows[0].change : "—";
+    property <length> price-font-size: root.s(50px) * min(1,
+        (root.s(284px) - max(root.s(2px), 2px)) / max(1px, max(price_slots.preferred-width, price_measure.preferred-width)));
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
@@ -74,13 +82,27 @@ export component MintTile inherits Window {
     no-frame: true;
     always-on-top: root.pin-to-top;
     background: transparent;
+    default-font-family: "Segoe UI";
     forward-focus: lock_focus;
 
-    // Measure at the largest size so fitting never depends on the fitted text itself.
+    // Measure at the maximum size, never at the fitted size.
     price_measure := Text {
         text: root.measured-price;
-        font-size: root.s(58px);
-        font-weight: 900;
+        font-size: root.s(50px);
+        font-weight: 700;
+        visible: false;
+    }
+    property <string> price-slot-reference: "88888888";
+    price_slots := Text {
+        text: root.price-slot-reference;
+        font-size: root.s(50px);
+        font-weight: 700;
+        visible: false;
+    }
+    change_measure := Text {
+        text: root.measured-change;
+        font-size: root.s(18px);
+        font-weight: 600;
         visible: false;
     }
 
@@ -89,6 +111,7 @@ export component MintTile inherits Window {
         height: root.widget-height * 1px;
         mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
         pointer-event(event) => {
+            if event.kind == PointerEventKind.down { root.show-lock-focus = false; }
             if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
                 root.card-left-drag-active = true;
             } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
@@ -102,33 +125,52 @@ export component MintTile inherits Window {
         }
     }
 
-    Image {
-        width: root.widget-width * 1px;
-        height: root.widget-height * 1px;
-        source: @image-url("material-light.png");
-        image-fit: fill;
-        visible: root.light-theme;
-        opacity: root.content-opacity / 100;
-    }
-
-    Image {
-        width: root.widget-width * 1px;
-        height: root.widget-height * 1px;
-        source: @image-url("material-dark.png");
-        image-fit: fill;
-        visible: !root.light-theme;
+    // The software renderer omits BoxShadow. Low-alpha rounded layers provide
+    // the same restrained elevation without a fixed-resolution material image.
+    for layer in 12 : Rectangle {
+        property <length> spread: root.s((12 - layer) * 0.7px);
+        x: root.s(root.card-x) - self.spread;
+        y: root.s(root.card-y + 5px) - self.spread;
+        width: root.s(root.card-width) + 2 * self.spread;
+        height: root.s(root.card-height) + 2 * self.spread;
+        border-radius: root.s(root.card-radius) + self.spread;
+        background: root.light-theme ? #17382a04 : #00000006;
         opacity: root.content-opacity / 100;
     }
 
     card := Rectangle {
-        x: root.s(root.card-x);
-        y: root.s(root.card-y);
-        width: root.s(root.card-width);
-        height: root.s(root.card-height);
+        // Align the origin as well as the gradient slices. Fractional global
+        // clip edges otherwise leave cleared rows during software partial redraw.
+        x: round(root.s(root.card-x) / 1phx) * 1phx;
+        y: round(root.s(root.card-y) / 1phx) * 1phx;
+        width: root.s(root.card-width); height: root.s(root.card-height);
         border-radius: root.s(root.card-radius);
         background: transparent;
         opacity: root.content-opacity / 100;
         clip: true;
+
+        // Slint's software gradient path does not clip to rounded corners.
+        // Physical-pixel-aligned slices of solid rounded rectangles do.
+        for band in 64 : Rectangle {
+            y: floor(band * card.height / 64 / 1phx) * 1phx;
+            width: card.width;
+            height: floor((band + 1) * card.height / 64 / 1phx) * 1phx - self.y;
+            background: transparent;
+            clip: true;
+            Rectangle {
+                y: -parent.y;
+                width: card.width; height: card.height;
+                border-radius: root.s(root.card-radius);
+                background: root.surface-top.mix(root.surface-bottom, band / 63.0);
+            }
+        }
+        Rectangle {
+            width: parent.width; height: parent.height;
+            border-radius: root.s(root.card-radius);
+            background: transparent;
+            border-width: root.s(1px);
+            border-color: root.light-theme ? #ffffffb8 : #809e8b48;
+        }
 
         for quote[index] in root.quote-rows : Rectangle {
             width: parent.width;
@@ -136,258 +178,197 @@ export component MintTile inherits Window {
             visible: index == 0;
             background: transparent;
 
-            coin_plate := Rectangle {
-                x: root.s(26px);
-                y: root.s(23px);
-                width: root.s(48px);
-                height: root.s(48px);
-                border-radius: root.s(24px);
-                background: transparent;
-                border-width: 0px;
-                drop-shadow-offset-y: root.s(4px);
-                drop-shadow-blur: root.s(9px);
-                drop-shadow-color: #07594f32;
+            Image {
+                x: root.s(24px); y: root.s(21px);
+                width: root.s(32px); height: root.s(32px);
+                source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
+                image-fit: contain;
                 visible: root.quote-icons.length > index;
-
-                Image {
-                    width: parent.width;
-                    height: parent.height;
-                    source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
-                    image-fit: contain;
-                }
             }
-
             Text {
-                x: root.quote-icons.length > index ? root.s(88px) : root.s(28px);
-                y: root.s(25px);
-                width: root.quote-icons.length > index ? root.s(200px) : root.s(260px);
-                height: root.s(44px);
+                x: root.quote-icons.length > index ? root.s(66px) : root.s(24px);
+                y: root.s(20px);
+                width: parent.width - self.x - root.s(24px) - (root.lock-revealed ? root.s(36px) : 0px);
+                height: root.s(34px);
                 text: quote.symbol;
                 color: root.primary-text-color;
-                font-size: root.s(24px);
-                font-weight: 900;
+                font-size: root.s(19px);
+                font-weight: 600;
                 vertical-alignment: center;
                 overflow: elide;
             }
 
-            Text {
-                x: root.s(27px);
-                y: root.s(89px);
-                width: parent.width - root.s(54px);
-                height: root.s(72px);
-                text: quote.price;
-                color: root.primary-text-color;
+            price_text := Text {
+                x: root.s(24px); y: root.s(66px);
+                width: root.s(284px); height: root.s(62px);
+                text: root.price-ready ? quote.price : "—";
+                color: root.price-ready ? root.primary-text-color : root.secondary-text-color;
                 font-size: root.price-font-size;
-                font-weight: 900;
+                font-weight: 700;
                 vertical-alignment: center;
                 overflow: elide;
             }
 
             change_pill := Rectangle {
-                x: root.s(28px);
-                y: root.s(162px);
-                width: root.s(116px);
-                height: root.s(43px);
-                border-radius: root.s(21.5px);
-                background: quote.positive
+                x: root.s(24px); y: root.s(132px);
+                width: min(root.s(162px), change_measure.preferred-width + root.s(16px));
+                height: root.s(28px);
+                border-radius: root.s(7px);
+                background: !root.price-ready ? transparent : quote.positive
                     ? (root.red-up-enabled ? root.loss-pill-background : root.gain-pill-background)
                     : (root.red-up-enabled ? root.gain-pill-background : root.loss-pill-background);
-                border-width: root.s(1px);
-                border-color: quote.positive
-                    ? (root.red-up-enabled ? #ffabb5aa : #9dffbf70)
-                    : (root.red-up-enabled ? #9dffbf70 : #ffabb5aa);
-                drop-shadow-offset-y: root.s(4px);
-                drop-shadow-blur: root.s(8px);
-                drop-shadow-color: #07594f32;
-
-                Text {
-                    x: root.s(5px);
-                    width: parent.width - root.s(10px);
-                    height: parent.height;
-                    text: quote.change;
-                    color: root.pill-text-color;
-                    font-size: root.s(22px);
-                    font-weight: 900;
+                change_text := Text {
+                    x: root.s(8px);
+                    width: parent.width - root.s(16px); height: parent.height;
+                    text: root.price-ready ? quote.change : "—";
+                    color: !root.price-ready ? root.secondary-text-color : quote.positive
+                        ? (root.red-up-enabled ? root.loss-color : root.gain-color)
+                        : (root.red-up-enabled ? root.gain-color : root.loss-color);
+                    font-size: root.s(18px) * min(1, self.width / max(1px, change_measure.preferred-width));
+                    font-weight: 600;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                     overflow: elide;
                 }
             }
+            change_period := Text {
+                x: change_pill.x + change_pill.width + root.s(9px);
+                y: change_pill.y;
+                width: root.s(284px) - change_pill.width - root.s(9px);
+                height: change_pill.height;
+                text: root.change-period-text;
+                color: root.secondary-text-color;
+                font-size: root.s(13px);
+                vertical-alignment: center;
+                horizontal-alignment: root.rtl-layout ? right : left;
+                visible: root.price-ready;
+                overflow: elide;
+            }
 
             chart := Rectangle {
-                x: root.s(20px);
-                y: root.s(214px);
-                width: parent.width - root.s(40px);
-                height: root.s(108px);
+                x: root.s(24px); y: root.s(174px);
+                width: root.s(284px); height: root.s(74px);
                 background: transparent;
-
                 Path {
-                    x: 0px;
-                    y: root.s(4px);
-                    width: parent.width;
-                    height: root.s(100px);
-                    viewbox-width: 100;
-                    viewbox-height: 40;
+                    width: parent.width; height: parent.height;
+                    viewbox-width: 100; viewbox-height: 40;
                     fit: fill;
                     commands: root.chart-fill-path;
                     fill: root.chart-fill-color;
                     stroke-width: 0px;
-                    opacity: 0.78;
-                    visible: root.chart-ready;
+                    visible: root.chart-ready && root.price-ready;
                 }
-
                 Path {
-                    x: 0px;
-                    y: root.s(4px);
-                    width: parent.width;
-                    height: root.s(100px);
-                    viewbox-width: 100;
-                    viewbox-height: 40;
+                    width: parent.width; height: parent.height;
+                    viewbox-width: 100; viewbox-height: 40;
                     fit: fill;
                     commands: root.chart-line-path;
                     fill: transparent;
                     stroke: root.chart-color;
-                    stroke-width: root.s(2.7px);
+                    stroke-width: root.s(1.8px);
                     stroke-line-cap: round;
                     stroke-line-join: round;
-                    opacity: 0.96;
-                    visible: root.chart-ready;
+                    visible: root.chart-ready && root.price-ready;
+                }
+                Rectangle {
+                    x: parent.width - self.width / 2;
+                    y: parent.height * clamp(root.chart-end-y-ratio, 0, 1000) / 1000 - self.height / 2;
+                    width: root.s(5px); height: self.width;
+                    border-radius: self.width / 2;
+                    background: root.chart-color;
+                    visible: root.chart-ready && root.price-ready;
                 }
             }
-
             Rectangle {
-                x: root.s(26px);
-                y: root.s(330px);
-                width: parent.width - root.s(52px);
-                height: root.s(1px);
+                x: root.s(24px); y: root.s(261px);
+                width: root.s(284px); height: root.s(1px);
                 background: root.divider-color;
             }
-
-            Rectangle {
-                x: root.s(28px);
-                y: root.s(355px);
-                width: root.s(10px);
-                height: root.s(10px);
-                border-radius: root.s(5px);
-                background: root.provider-dot-color;
-            }
-
             Text {
-                x: root.s(47px);
-                y: root.s(344px);
-                width: root.s(135px);
-                height: root.s(34px);
+                x: root.s(24px); y: root.s(271px);
+                width: root.s(284px); height: root.s(20px);
                 text: root.source-name-text;
-                color: root.primary-text-color;
-                font-size: root.s(17px);
-                font-weight: 800;
+                color: root.secondary-text-color;
+                font-size: root.s(13px);
+                font-weight: 600;
                 horizontal-alignment: root.rtl-layout ? right : left;
                 vertical-alignment: center;
                 overflow: elide;
             }
-
             Text {
-                x: root.s(190px);
-                y: root.s(344px);
-                width: root.s(122px);
-                height: root.s(34px);
+                x: root.s(24px); y: root.s(291px);
+                width: root.s(284px); height: root.s(20px);
                 text: root.updated-text;
                 color: root.secondary-text-color;
-                font-size: root.s(15px);
-                font-weight: 600;
-                horizontal-alignment: root.rtl-layout ? left : right;
+                font-size: root.s(12px);
+                horizontal-alignment: root.rtl-layout ? right : left;
                 vertical-alignment: center;
                 overflow: elide;
+                visible: root.price-ready;
             }
         }
 
         chart_status := Text {
-            x: root.s(20px);
-            y: root.s(214px);
-            width: parent.width - root.s(40px);
-            height: root.s(108px);
-            text: root.source-text;
+            x: root.s(24px); y: root.s(174px);
+            width: root.s(284px); height: root.s(74px);
+            text: root.price-ready ? root.source-text : root.updated-text;
             color: root.secondary-text-color;
             font-size: root.s(14px);
             wrap: word-wrap;
             overflow: elide;
             horizontal-alignment: root.rtl-layout ? right : left;
             vertical-alignment: center;
-            visible: root.quote-rows.length > 0 && !root.chart-ready;
+            visible: root.quote-rows.length > 0 && (!root.chart-ready || !root.price-ready);
         }
-
         Text {
-            x: root.s(26px);
-            y: root.s(180px);
-            width: parent.width - root.s(52px);
-            height: root.s(60px);
+            x: root.s(24px); y: root.s(124px);
+            width: root.s(284px); height: root.s(72px);
             text: root.empty-text;
             color: root.secondary-text-color;
-            font-size: root.s(18px);
-            font-weight: 700;
+            font-size: root.s(17px);
+            font-weight: 500;
             horizontal-alignment: center;
             vertical-alignment: center;
             visible: root.quote-rows.length == 0;
             overflow: elide;
         }
-
-        lock_button := Rectangle {
-            x: parent.width - root.s(55px);
-            y: root.s(19px);
-            width: root.s(34px);
-            height: root.s(34px);
-            border-radius: root.s(10px);
-            background: root.layout-locked || lock_button_hit_area.has-hover
-                ? root.lock-hover-background
-                : root.lock-background;
-            border-width: root.s(lock_focus.has-focus ? 2px : 1px);
-            border-color: lock_focus.has-focus ? root.lock-icon-color : root.lock-border-color;
-            visible: root.layout-locked || drag_area.has-hover || lock_button_hit_area.has-hover || lock_focus.has-focus;
-
-            Path {
-                x: root.s(5px);
-                y: root.s(4px);
-                width: root.s(24px);
-                height: root.s(25px);
-                viewbox-width: 24;
-                viewbox-height: 24;
-                commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
-                fill: root.layout-locked ? root.lock-icon-color : transparent;
-                stroke: root.lock-icon-color;
-                stroke-width: root.s(2px);
-                stroke-line-cap: round;
-                stroke-line-join: round;
-            }
-        }
     }
 
-    lock_control := Rectangle {
-        x: card.x + card.width - root.s(55px);
-        y: card.y + root.s(19px);
-        width: root.s(34px);
-        height: root.s(34px);
-        background: transparent;
+    // Keep the accessible target alive; pointer focus must not pin the overlay open.
+    lock_button := Rectangle {
+        x: card.x + card.width - root.s(48px);
+        y: card.y + root.s(20px);
+        width: max(root.s(28px), 18px); height: self.width;
+        border-radius: root.s(6px);
+        background: lock_button_hit_area.has-hover ? root.lock-hover-background : root.lock-background;
+        border-width: root.show-lock-focus && lock_focus.has-focus ? 1.5px : 0px;
+        border-color: root.focus-color;
+        opacity: root.lock-revealed ? root.content-opacity / 100 : 0;
         forward-focus: lock_focus;
         accessible-role: checkbox;
         accessible-label: root.layout-lock-text;
         accessible-checkable: true;
         accessible-checked: root.layout-locked;
         accessible-action-default => { root.toggle-layout-lock(); }
-
+        Image {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: max(root.s(16px), 12px); height: self.width;
+            source: root.layout-locked ? @image-url("icons/lock.svg") : @image-url("icons/unlock.svg");
+            colorize: root.secondary-text-color;
+            image-fit: contain;
+        }
         lock_button_hit_area := TouchArea {
-            width: parent.width;
-            height: parent.height;
             mouse-cursor: pointer;
             clicked => {
+                root.show-lock-focus = false;
                 lock_focus.focus();
                 root.toggle-layout-lock();
             }
         }
-
         lock_focus := FocusScope {
-            width: 0px;
-            height: 0px;
+            width: 0px; height: 0px;
             key-pressed(event) => {
+                root.show-lock-focus = true;
                 if !event.repeat && (event.text == Key.Space || event.text == Key.Return) {
                     root.toggle-layout-lock();
                     return accept;

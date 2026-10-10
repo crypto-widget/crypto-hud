@@ -225,6 +225,16 @@ Focus Ticker 提供浅色和深色主题，自然窗口尺寸为 490 × 100，�
 加载/失败状态及键盘/鼠标锁定；设置 `CRYPTO_HUD_FOCUS_CAPTURE_DIR` 后会额外输出
 真实 Slint 组件的两套 PPM 渲染图，可转换为插件 PNG 预览。
 
+Mint Tile 使用 360 × 360 的单币种原生窗口。浅色主题采用低饱和薄荷色，深色主题采用深灰绿；
+圆角渐变、细边框和柔和阴影由 Slint 原生绘制，避免单倍率材质图片在缩放和高 DPI 下变糊。
+价格保持最高信息层级，币对、来源、更新信息减轻字重，涨跌胶囊缩小并显示本地化 24 小时周期。
+价格栏按最多 8 个显示字符适配，包括 PEPE 压缩价格；没有就绪价格时，价格与涨跌均使用中性占位，
+图表就绪状态独立判断。无行情时在图表区域显示宿主 `updated-text` 状态；有行情时来源与更新
+状态在底部各占一行，不使用始终绿色的连接指示点。软件渲染器不支持圆角渐变裁剪和 BoxShadow，
+因此使用原生圆角分层实现渐变与阴影，保持缩放时的清晰边缘。
+锁定控件采用锁图标，只在悬浮或键盘聚焦时显示，已锁定也不常显；它不占布局空间，
+支持空格、回车和可见焦点。主题 ID 与单币种限制保持兼容。
+
 Market Compass 的默认浅色主题采用香槟金表盘、陶瓷徽章和独立币种图稿。
 同款深色主题使用石墨黑陶瓷、烟金拉丝边框和暖灰白文字，保持相同几何、交互和预滤波素材规格；
 深色 XRP、ADA 图标采用更亮色调以保持辨识度。既有主题 ID 保持兼容，新实例默认使用浅色。
@@ -560,18 +570,29 @@ mise run check
 powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```
 
-Mint Tile 的聚焦验证使用隔离状态和离线行情；原生 smoke 会检查当前桌面 DPI 下的完整
-窗口尺寸、鼠标锁定/解锁、拖动和无障碍操作：
+Mint Tile 的聚焦测试检查真实 Slint 渲染、文字适配、数据状态及交互。
+运行时 smoke 使用隔离状态和离线行情，检查插件加载、数据行、锁定状态以及当前桌面 DPI 下的
+窗口尺寸，通过应用计时器退出，不调用桌面截图、输入或 UI Automation：
 
 ```powershell
 cargo +1.96.0 test --locked -p crypto-hud mint_tile
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -Theme both
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -FirstAsset PEPE -ScalePercent 30
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -Theme dark -ScalePercent 200 -Language ar -RedUp -Locked -NoLogos
+```
+
+运行时 smoke 还支持 `-OpacityPercent` 和 `-KeepOpen`；后者保留预览窗口一小时。
+在可使用桌面截图与输入自动化的会话中，可以额外运行交互 smoke，检查鼠标锁定/解锁、拖动和
+无障碍操作：
+
+```powershell
 powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop
 powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -ScalePercent 30
 powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -Language ar -RedUp -LockLight
 ```
 
 需要同步浅色和深色预览图时，以默认 100% 组件缩放运行 `-PaperBackdrop -UpdatePreviews`；
-脚本会从完整原生窗口截图生成预览，避免 DPI 裁切和相邻卡片透入透明边缘。
+交互脚本会从完整原生窗口截图生成 360 × 360 预览，避免 DPI 裁切和相邻卡片透入透明边缘。
 
 手动 GUI smoke：
 

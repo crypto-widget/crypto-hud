@@ -66,7 +66,7 @@ $widgets = @(
             locked = [bool]$LockLight
             scale_percent = 100
             width = 360
-            height = 440
+            height = 360
         }
         symbols = @("BTC")
         config = [ordered]@{ theme = "light" }
@@ -84,7 +84,7 @@ $widgets = @(
             locked = $true
             scale_percent = 100
             width = 360
-            height = 440
+            height = 360
         }
         symbols = @("ETH")
         config = [ordered]@{ theme = "dark" }
@@ -93,7 +93,7 @@ $widgets = @(
 foreach ($widget in $widgets) {
     $widget.layout.scale_percent = $ScalePercent
     $widget.layout.width = [int][Math]::Round(360 * $ScalePercent / 100.0)
-    $widget.layout.height = [int][Math]::Round(440 * $ScalePercent / 100.0)
+    $widget.layout.height = [int][Math]::Round(360 * $ScalePercent / 100.0)
 }
 
 $state = [ordered]@{
@@ -229,7 +229,7 @@ function Capture-Widget([object]$Window, [string]$Name) {
     $physicalScale = $Window.ScaleFactor * $ScalePercent / 100.0
     if ($Window.ScaleFactor -le 0 -or
         [Math]::Abs($Window.Width - 360 * $physicalScale) -gt 1 -or
-        [Math]::Abs($Window.Height - 440 * $physicalScale) -gt 1) {
+        [Math]::Abs($Window.Height - 360 * $physicalScale) -gt 1) {
         throw "$Name has incorrect physical dimensions: $($Window.Width)x$($Window.Height), scale=$physicalScale"
     }
 
@@ -368,16 +368,16 @@ function Send-WidgetPointer([object]$Window, [double]$X, [double]$Y, [uint32]$Me
 }
 
 function Click-WidgetLock([object]$Window) {
-    Send-WidgetPointer $Window 312 55 0x0200
-    Send-WidgetPointer $Window 312 55 0x0201 1
-    Send-WidgetPointer $Window 312 55 0x0202
+    Send-WidgetPointer $Window 312 48 0x0200
+    Send-WidgetPointer $Window 312 48 0x0201 1
+    Send-WidgetPointer $Window 312 48 0x0202
 }
 
 function Drag-Widget([object]$Window) {
-    Send-WidgetPointer $Window 120 230 0x0200
-    Send-WidgetPointer $Window 120 230 0x0201 1
-    Send-WidgetPointer $Window 150 245 0x0200 1
-    Send-WidgetPointer $Window 150 245 0x0202
+    Send-WidgetPointer $Window 120 220 0x0200
+    Send-WidgetPointer $Window 120 220 0x0201 1
+    Send-WidgetPointer $Window 150 235 0x0200 1
+    Send-WidgetPointer $Window 150 235 0x0202
     Start-Sleep -Milliseconds 400
 }
 
@@ -415,12 +415,12 @@ function Assert-AccessibleLock([object]$Window) {
 
 function Save-Preview([string]$Capture, [string]$Theme) {
     $source = [System.Drawing.Image]::FromFile($Capture)
-    $preview = [System.Drawing.Bitmap]::new(360, 440)
+    $preview = [System.Drawing.Bitmap]::new(360, 360)
     $graphics = [System.Drawing.Graphics]::FromImage($preview)
     try {
         $graphics.Clear([System.Drawing.Color]::FromArgb(247, 249, 248))
         $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $graphics.DrawImage($source, 0, 0, 360, 440)
+        $graphics.DrawImage($source, 0, 0, 360, 360)
         $pluginDir = Join-Path $RepoRoot "crates/crypto-hud/plugins/com.cryptohud.mint-tile"
         foreach ($directory in @($pluginDir, (Join-Path $pluginDir "ui"))) {
             $preview.Save((Join-Path $directory "preview-$Theme.png"), [System.Drawing.Imaging.ImageFormat]::Png)
@@ -519,12 +519,14 @@ try {
         }
         $lightCapture = Capture-Widget $lightWindow "mint-tile-light"
         $darkCapture = Capture-Widget $darkWindow "mint-tile-dark"
-        Send-WidgetPointer $lightWindow 312 55 0x0200
+        Send-WidgetPointer $lightWindow 312 48 0x0200
         $hoverCapture = Capture-Widget $lightWindow "mint-tile-light-hover"
         if ($LockLight) { Click-WidgetLock $lightWindow; Assert-WidgetLock $false }
         Click-WidgetLock $lightWindow
         Assert-WidgetLock $true
-        $lockedCapture = Capture-Widget $lightWindow "mint-tile-light-locked"
+        # The locked control is visible here because the pointer is still over it.
+        # Lock persistence does not imply that the control stays visible on leave.
+        $lockedCapture = Capture-Widget $lightWindow "mint-tile-light-locked-hover"
         Drag-Widget $lightWindow
         $afterLockedDrag = Get-WidgetWindow $app.Id "mint-tile-light"
         if ($afterLockedDrag.Left -ne $lightWindow.Left -or $afterLockedDrag.Top -ne $lightWindow.Top) {
@@ -536,7 +538,7 @@ try {
         $afterDrag = Get-WidgetWindow $app.Id "mint-tile-light"
         $physicalScale = $lightWindow.ScaleFactor * $ScalePercent / 100.0
         $expectedX = [Math]::Round(150 * $physicalScale) - [Math]::Round(120 * $physicalScale)
-        $expectedY = [Math]::Round(245 * $physicalScale) - [Math]::Round(230 * $physicalScale)
+        $expectedY = [Math]::Round(235 * $physicalScale) - [Math]::Round(220 * $physicalScale)
         if ([Math]::Abs($afterDrag.Left - $lightWindow.Left - $expectedX) -gt 1 -or
             [Math]::Abs($afterDrag.Top - $lightWindow.Top - $expectedY) -gt 1) {
             throw "Unlocked Mint Tile did not follow the pointer: expected ($expectedX, $expectedY), got ($($afterDrag.Left - $lightWindow.Left), $($afterDrag.Top - $lightWindow.Top))"
