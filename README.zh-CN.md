@@ -32,6 +32,7 @@
 </p>
 
 <p align="center">
+  <a href="ms-windows-store://pdp/?productid=9NCLXCSR8N2W"><strong>从 Microsoft Store 下载</strong></a> ·
   <a href="#快速开始"><strong>本地运行</strong></a> ·
   <a href="#组件效果"><strong>查看组件</strong></a> ·
   <a href="CUSTOM_UI_PLUGIN_DEVELOPMENT.md"><strong>开发组件</strong></a>

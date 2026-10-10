@@ -32,6 +32,10 @@
 </p>
 
 <p align="center">
+  <a href="ms-windows-store://pdp/?productid=9NCLXCSR8N2W"><strong>從 Microsoft Store 下載</strong></a>
+</p>
+
+<p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-light.png">

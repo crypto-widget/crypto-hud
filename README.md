@@ -32,6 +32,7 @@
 </p>
 
 <p align="center">
+  <a href="ms-windows-store://pdp/?productid=9NCLXCSR8N2W"><strong>Get it from Microsoft Store</strong></a> ·
   <a href="#quick-start"><strong>Run it locally</strong></a> ·
   <a href="#widget-gallery"><strong>Explore widgets</strong></a> ·
   <a href="CUSTOM_UI_PLUGIN_DEVELOPMENT.md"><strong>Build a widget</strong></a>

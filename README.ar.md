@@ -31,6 +31,10 @@
   <img alt="ترخيص MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square">
 </p>
 
+<p align="center" dir="rtl">
+  <a href="ms-windows-store://pdp/?productid=9NCLXCSR8N2W"><strong>تنزيل من <bdi dir="ltr">Microsoft Store</bdi></strong></a>
+</p>
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-dark.png">
