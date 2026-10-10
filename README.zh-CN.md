@@ -178,6 +178,10 @@ Crypto HUD 的内置组件由本地插件系统驱动。组件可以声明币种
 
 ## 开发
 
+针对 `main` 的推送和 Pull Request 会运行格式、严格 Clippy、workspace 测试、
+PowerShell 语法检查、Linux 非 GUI crate 测试和依赖安全审计。原生 GUI、打包和
+升级 smoke 仅在 tag 触发的发布流程中运行，通过后才会发布产物。
+
 ```powershell
 mise run format-check
 mise run check

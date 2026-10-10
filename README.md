@@ -193,6 +193,11 @@ without owning network or filesystem access.
 
 ## Development
 
+Pushes and pull requests targeting `main` run formatting, strict Clippy,
+workspace tests, PowerShell syntax checks, Linux toolkit-free crate tests, and
+dependency auditing. Native GUI, packaging, and update smoke checks run only
+in the tag-triggered release workflow, before release assets are published.
+
 ```powershell
 mise run format-check
 mise run check
