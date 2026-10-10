@@ -4,6 +4,36 @@ All notable changes to Crypto HUD will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## 1.0.4 - 2026-10-10
+
+### Added
+
+- Add the Mint Tile widget with light and dark themes and accessible layout locking.
+- Add a compact feedback entry to the settings window.
+
+### Changed
+
+- Refresh Focus Ticker, Market Compass, Status Strip, and Trust Card with compact
+  layouts, matching themes, and floating keyboard-accessible lock controls.
+- Format widget and taskbar prices consistently within eight display characters
+  while preserving cached values and alert calculations.
+- Expose optional per-quote chart endpoints and scoped market-health warnings
+  without breaking older plugin contracts or serialized runtime views.
+
+### Fixed
+
+- Improve widget-management spacing, keyboard access, localized default names,
+  and previews that follow each selected widget theme.
+- Show explicit symbol-catalog loading and failure states and reset transient
+  menus and scroll positions when navigating or creating widgets.
+- Keep native smoke interactions reliable in constrained viewports and align
+  legacy-layout checks with the compact Trust Card and square Mint Tile designs.
+
+### Documentation
+
+- Add Microsoft Store links across all supported README languages and document
+  the compact widget presentation contract.
+
 ## 1.0.3 - 2026-10-01
 
 ### Changed
