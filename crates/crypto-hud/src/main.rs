@@ -27,6 +27,8 @@ mod focus_ticker_tests;
 mod market_compass_tests;
 #[cfg(test)]
 mod trust_card_tests;
+#[cfg(test)]
+mod widget_price_tests;
 
 #[cfg(test)]
 mod status_strip_tests;

@@ -203,6 +203,11 @@ in property <[float]> quote-chart-end-y-ratios;
 价格栏应按 8 个数字预留宽度，不能依靠省略号截断数值；字符数不能按 UTF-8 字节
 或 RTL 隔离控制符计数。
 
+`cargo +1.96.0 test --locked -p crypto-hud widget_price_tests` 使用真实 Slint 字体
+测量各组件的价格栏，覆盖浅深主题、30%–200% 缩放、主流币种、PEPE 和超长数值。
+`scripts/gui-eight-slot-prices-smoke.ps1` 在隔离状态下验证全部组件的原生窗口；
+可用 `-SymbolCount 1` / `-SymbolCount 8` 和 `-ScalePercent 30` / `200` 检查边界。
+
 Status Strip 保持每格 122 × 84、窗口四周 4px 留白及 1–5 个币对的横条布局。
 保留旧配置的 `default` 主题 ID 并赋予浅色角色，新增 `dark` 深色主题。
 价格按最多 8 位预留固定宽度；未就绪行情用中性占位，涨跌幅带本地化 24 小时周期。
