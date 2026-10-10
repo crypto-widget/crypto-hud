@@ -171,6 +171,10 @@ Once running:
 
 Positions and preferences are saved automatically.
 
+Use **Feedback & suggestions** at the bottom of the settings sidebar to open a new
+GitHub issue in your default browser. GitHub may ask you to sign in before
+submitting your report.
+
 ## Make it yours
 
 Crypto HUD's bundled widgets are powered by a local plugin system. A widget can

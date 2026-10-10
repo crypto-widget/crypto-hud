@@ -110,6 +110,7 @@ const LEGACY_DEFAULT_POSITION_STEP: i32 = settings::LEGACY_DEFAULT_POSITION_STEP
 #[cfg(test)]
 const DEFAULT_LAYOUT_GAP: i32 = settings::DEFAULT_LAYOUT_GAP;
 pub(crate) const ABOUT_REPOSITORY_URL: &str = "https://github.com/crypto-widget/crypto-hud";
+pub(crate) const NEW_ISSUE_URL: &str = "https://github.com/crypto-widget/crypto-hud/issues/new";
 pub(crate) const RELEASES_URL: &str = "https://github.com/crypto-widget/crypto-hud/releases";
 pub(crate) const WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT: Duration = Duration::from_millis(500);
 

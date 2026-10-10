@@ -30,7 +30,8 @@ use crate::{
         install_settings_drag_handler, open_external_url, open_path, refresh_tray_text,
     },
     feature_flags, i18n, notifications, plugin, shortcuts, taskbar_market, updater, AppTray,
-    SettingsWindow, ABOUT_REPOSITORY_URL, RELEASES_URL, WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT,
+    SettingsWindow, ABOUT_REPOSITORY_URL, NEW_ISSUE_URL, RELEASES_URL,
+    WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT,
 };
 use crate::{
     runtime_bridge::{
@@ -2220,6 +2221,19 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         }
     });
 
+    ui.on_open_issue_link({
+        let weak = ui.as_weak();
+        move || {
+            let result = open_external_url(NEW_ISSUE_URL);
+            if let Some(ui) = weak.upgrade() {
+                ui.set_issue_link_open_failed(result.is_err());
+            }
+            if let Err(error) = result {
+                eprintln!("failed to open issue link: {error:#}");
+            }
+        }
+    });
+
     ui.on_clear_icon_cache({
         let commit = commit_context.clone();
         let weak = ui.as_weak();
@@ -3447,6 +3461,8 @@ pub(crate) fn refresh_settings_window(
         );
     }
     ui.set_about_us_text(text.about_us.into());
+    ui.set_submit_issue_text(text.submit_issue.into());
+    ui.set_issue_link_error_text(text.status_issue_link_open_failed.into());
     ui.set_icon_cache_text(text.icon_cache.into());
     ui.set_icon_cache_help_text(text.icon_cache_help.into());
     ui.set_clear_icon_cache_text(text.clear_icon_cache.into());
@@ -5585,6 +5601,70 @@ mod tests {
     }
 
     #[test]
+    fn issue_entry_is_always_visible_and_opens_new_issue_independently_of_updates() {
+        let source = settings_window_ui_source();
+        let sidebar = source.split("widget_tab := Rectangle {").next().unwrap();
+        let issue_button = sidebar
+            .split("issue_link := SidebarFeedbackLink {")
+            .nth(1)
+            .unwrap()
+            .split("GithubProjectSignature {")
+            .next()
+            .unwrap();
+        assert!(issue_button.contains("text: root.submit-issue-text;"));
+        assert!(issue_button.contains("clicked => { root.open-issue-link(); }"));
+        assert!(!issue_button.contains("visible:"));
+        assert!(sidebar.contains("visible: root.issue-link-open-failed;"));
+        assert!(sidebar.contains("text: root.issue-link-error-text;"));
+
+        assert_eq!(NEW_ISSUE_URL, format!("{ABOUT_REPOSITORY_URL}/issues/new"));
+        let source = settings_window_rs_source();
+        let handler = source
+            .split("ui.on_open_issue_link({")
+            .nth(1)
+            .unwrap()
+            .split("ui.on_clear_icon_cache({")
+            .next()
+            .unwrap();
+        assert!(handler.contains("open_external_url(NEW_ISSUE_URL)"));
+        assert!(handler.contains("ui.set_issue_link_open_failed(result.is_err());"));
+        assert!(!handler.contains("get_update_available"));
+        assert!(!handler.contains("get_update_release_url"));
+    }
+
+    #[test]
+    fn sidebar_footer_links_support_keyboard_focus_and_rtl_layout() {
+        let source = settings_window_ui_source();
+        let feedback = source
+            .split("component SidebarFeedbackLink inherits Rectangle {")
+            .nth(1)
+            .unwrap()
+            .split("component GithubProjectSignature inherits Rectangle {")
+            .next()
+            .unwrap();
+        let signature = source
+            .split("component GithubProjectSignature inherits Rectangle {")
+            .nth(1)
+            .unwrap()
+            .split("component PluginPreviewCarousel")
+            .next()
+            .unwrap();
+        for (component, focus) in [(feedback, "feedback_focus"), (signature, "signature_focus")] {
+            assert!(component.contains("accessible-role: button;"));
+            assert!(component.contains("accessible-action-default => { root.clicked(); }"));
+            assert!(component.contains("event.text == Key.Space || event.text == Key.Return"));
+            assert!(component.contains(&format!("forward-focus: {focus};")));
+            assert!(component.contains(&format!("border-width: {focus}.has-focus ? 1px : 0px;")));
+            assert!(component.contains("horizontal-alignment: root.rtl-layout ? right : left;"));
+        }
+        assert!(feedback.contains("accessible-label: root.text;"));
+        assert!(feedback.contains("x: root.rtl-layout ? parent.width - 26px : 10px;"));
+        assert!(feedback.contains("wrap: word-wrap;"));
+        assert!(signature.contains("x: root.rtl-layout ? parent.width - 30px : 12px;"));
+        assert!(signature.contains("x: root.rtl-layout ? parent.width - 8px : 0px;"));
+    }
+
+    #[test]
     fn github_signature_marks_available_update_without_replacing_current_version() {
         let source = settings_window_ui_source();
         let component_start = source
@@ -5600,7 +5680,8 @@ mod tests {
         assert!(signature_component.contains("text: root.version-text;"));
         assert!(signature_component.contains("version_row := Rectangle {"));
         assert!(signature_component.contains("y: (parent.height - 8px) / 2;"));
-        assert!(signature_component.contains("x: root.update-available ? 12px : 0px;"));
+        assert!(signature_component
+            .contains("x: root.update-available && !root.rtl-layout ? 12px : 0px;"));
         assert!(signature_component.contains("vertical-alignment: center;"));
         assert!(signature_component.contains("visible: root.update-available;"));
         assert!(!signature_component.contains("update-version-text"));

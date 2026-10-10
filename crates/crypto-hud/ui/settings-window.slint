@@ -639,7 +639,81 @@ component CompactSwitch inherits Rectangle {
     }
 }
 
+component SidebarFeedbackLink inherits Rectangle {
+    in property <bool> rtl-layout;
+    in property <string> text;
+    in property <color> label-color;
+    in property <color> muted-color;
+    in property <color> accent-color;
+    in property <color> hover-color;
+    callback clicked();
+
+    height: 34px;
+    border-radius: 4px;
+    background: feedback_touch.has-hover || feedback_focus.has-focus ? root.hover-color : transparent;
+    border-width: feedback_focus.has-focus ? 1px : 0px;
+    border-color: root.accent-color;
+    forward-focus: feedback_focus;
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    Image {
+        x: root.rtl-layout ? parent.width - 26px : 10px;
+        y: (parent.height - 18px) / 2;
+        width: 18px;
+        height: 18px;
+        source: @image-url("icons/feather/message-circle.svg");
+        colorize: root.accent-color;
+    }
+
+    Text {
+        x: root.rtl-layout ? 28px : 45px;
+        y: 2px;
+        width: parent.width - 73px;
+        height: parent.height - 4px;
+        text: root.text;
+        color: root.label-color;
+        font-size: 12px;
+        font-weight: 500;
+        horizontal-alignment: root.rtl-layout ? right : left;
+        vertical-alignment: center;
+        wrap: word-wrap;
+        overflow: elide;
+    }
+
+    Image {
+        x: root.rtl-layout ? 6px : parent.width - 22px;
+        y: (parent.height - 16px) / 2;
+        width: 16px;
+        height: 16px;
+        source: @image-url("icons/feather/external-link.svg");
+        colorize: root.muted-color;
+    }
+
+    feedback_touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    feedback_focus := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
 component GithubProjectSignature inherits Rectangle {
+    in property <bool> rtl-layout;
     in property <string> project-name;
     in property <string> version-text;
     in property <bool> update-available;
@@ -647,14 +721,18 @@ component GithubProjectSignature inherits Rectangle {
     in property <color> label-color;
     in property <color> muted-color;
     in property <color> accent-color;
+    in property <color> hover-color;
     callback clicked();
 
-    property <color> active-label-color: signature_touch.has-hover ? root.accent-color : root.label-color;
-    property <length> lockup-width: 96px;
-    property <length> lockup-x: (root.width - root.lockup-width) / 2;
-    property <length> lockup-y: (root.height - 32px) / 2;
+    property <color> active-label-color: signature_touch.has-hover || signature_focus.has-focus ? root.accent-color : root.label-color;
+    property <length> text-x: root.rtl-layout ? 8px : 45px;
+    property <length> text-width: root.width - 53px;
+    property <length> lockup-y: (root.height - 30px) / 2;
 
-    background: transparent;
+    border-radius: 4px;
+    background: signature_touch.has-hover || signature_focus.has-focus ? root.hover-color : transparent;
+    border-width: signature_focus.has-focus ? 1px : 0px;
+    border-color: root.accent-color;
     forward-focus: signature_focus;
 
     accessible-role: button;
@@ -662,10 +740,10 @@ component GithubProjectSignature inherits Rectangle {
     accessible-action-default => { root.clicked(); }
 
     Path {
-        x: root.lockup-x;
-        y: root.lockup-y + 6px;
-        width: 19px;
-        height: 19px;
+        x: root.rtl-layout ? parent.width - 30px : 12px;
+        y: (parent.height - 20px) / 2;
+        width: 20px;
+        height: 20px;
         viewbox-width: 16;
         viewbox-height: 16;
         commands: "M 8 0 C 3.58 0 0 3.58 0 8 C 0 11.54 2.29 14.53 5.47 15.59 C 5.87 15.66 6.02 15.42 6.02 15.21 C 6.02 15.02 6.01 14.39 6.01 13.72 C 4 14.09 3.48 13.23 3.32 12.78 C 3.23 12.55 2.84 11.84 2.5 11.65 C 2.22 11.5 1.82 11.13 2.49 11.12 C 3.12 11.11 3.57 11.7 3.72 11.94 C 4.44 13.15 5.59 12.81 6.05 12.6 C 6.12 12.08 6.33 11.73 6.56 11.53 C 4.78 11.33 2.92 10.64 2.92 7.58 C 2.92 6.71 3.23 5.99 3.74 5.43 C 3.66 5.23 3.38 4.41 3.82 3.31 C 3.82 3.31 4.49 3.1 6.02 4.13 C 6.66 3.95 7.34 3.86 8.02 3.86 C 8.7 3.86 9.38 3.95 10.02 4.13 C 11.55 3.09 12.22 3.31 12.22 3.31 C 12.66 4.41 12.38 5.23 12.3 5.43 C 12.81 5.99 13.12 6.7 13.12 7.58 C 13.12 10.65 11.25 11.33 9.47 11.53 C 9.76 11.78 10.01 12.26 10.01 13.01 C 10.01 14.08 10 14.94 10 15.21 C 10 15.42 10.15 15.67 10.55 15.59 C 13.71 14.53 16 11.53 16 8 C 16 3.58 12.42 0 8 0 Z";
@@ -674,26 +752,28 @@ component GithubProjectSignature inherits Rectangle {
     }
 
     Text {
-        x: root.lockup-x + 29px;
-        y: root.lockup-y + 1px;
-        width: root.lockup-width - 29px;
+        x: root.text-x;
+        y: root.lockup-y;
+        width: root.text-width;
         height: 16px;
         text: root.project-name;
         color: root.active-label-color;
-        font-size: 11px;
-        font-weight: 800;
+        font-size: 12px;
+        font-weight: 600;
+        horizontal-alignment: root.rtl-layout ? right : left;
+        vertical-alignment: center;
         overflow: elide;
     }
 
     version_row := Rectangle {
-        x: root.lockup-x + 29px;
-        y: root.lockup-y + 19px;
-        width: root.lockup-width - 29px;
-        height: 14px;
+        x: root.text-x;
+        y: root.lockup-y + 17px;
+        width: root.text-width;
+        height: 13px;
         background: transparent;
 
         Rectangle {
-            x: 0px;
+            x: root.rtl-layout ? parent.width - 8px : 0px;
             y: (parent.height - 8px) / 2;
             width: 8px;
             height: 8px;
@@ -714,14 +794,15 @@ component GithubProjectSignature inherits Rectangle {
         }
 
         Text {
-            x: root.update-available ? 12px : 0px;
+            x: root.update-available && !root.rtl-layout ? 12px : 0px;
             y: 0px;
             width: root.update-available ? parent.width - 12px : parent.width;
             height: parent.height;
             text: root.version-text;
             color: root.muted-color;
-            font-size: 9px;
-            font-weight: 600;
+            font-size: 10px;
+            font-weight: 400;
+            horizontal-alignment: root.rtl-layout ? right : left;
             vertical-alignment: center;
             overflow: elide;
         }
@@ -1233,6 +1314,9 @@ export component SettingsWindow inherits Window {
     in property <string> update-release-url;
     in property <string> update-available-accessible-text;
     in property <string> about-us-text;
+    in property <string> submit-issue-text;
+    in property <string> issue-link-error-text;
+    in-out property <bool> issue-link-open-failed: false;
     in property <string> icon-cache-text;
     in property <string> icon-cache-help-text;
     in property <string> clear-icon-cache-text;
@@ -1395,6 +1479,7 @@ export component SettingsWindow inherits Window {
     callback close-settings();
     callback drag-settings(length, length);
     callback open-about-link();
+    callback open-issue-link();
     callback clear-icon-cache();
     callback open-custom-components-folder();
     callback reload-custom-components();
@@ -1729,16 +1814,55 @@ export component SettingsWindow inherits Window {
             }
 
             Rectangle {
+                x: 14px;
+                y: parent.height - 106px;
+                width: parent.width - 28px;
+                height: 1.5px;
+                background: root.settings-border-color;
+            }
+
+            Text {
                 x: 6px;
-                y: parent.height - 65px;
+                y: parent.height - 154px;
                 width: parent.width - 17px;
-                height: 1px;
-                background: root.settings-divider-color;
+                height: 38px;
+                visible: root.issue-link-open-failed;
+                text: root.issue-link-error-text;
+                color: root.settings-label-color;
+                font-size: 12px;
+                horizontal-alignment: root.rtl-layout ? right : left;
+                vertical-alignment: bottom;
+                wrap: word-wrap;
+                overflow: elide;
+                accessible-role: text;
+                accessible-label: root.issue-link-error-text;
+            }
+
+            issue_link := SidebarFeedbackLink {
+                rtl-layout: root.rtl-layout;
+                x: 6px;
+                y: parent.height - 100px;
+                width: parent.width - 17px;
+                text: root.submit-issue-text;
+                label-color: root.settings-label-color;
+                muted-color: root.settings-muted-color;
+                accent-color: root.settings-accent-color;
+                hover-color: root.settings-selected-background;
+                clicked => { root.open-issue-link(); }
+            }
+
+            Rectangle {
+                x: 14px;
+                y: parent.height - 58px;
+                width: parent.width - 28px;
+                height: 1.5px;
+                background: root.settings-border-color;
             }
 
             GithubProjectSignature {
+                rtl-layout: root.rtl-layout;
                 x: 6px;
-                y: parent.height - 51px;
+                y: parent.height - 49px;
                 width: parent.width - 17px;
                 height: 36px;
                 project-name: "crypto-hud";
@@ -1748,6 +1872,7 @@ export component SettingsWindow inherits Window {
                 label-color: root.settings-heading-color;
                 muted-color: root.settings-muted-color;
                 accent-color: root.settings-accent-color;
+                hover-color: root.settings-selected-background;
                 clicked => { root.open-about-link(); }
             }
 
