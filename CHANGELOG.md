@@ -22,6 +22,8 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ### Fixed
 
+- Check rounded corners using alpha-preserving Slint snapshots while retaining
+  native DPI and scaled-content checks.
 - Improve widget-management spacing, keyboard access, localized default names,
   and previews that follow each selected widget theme.
 - Show explicit symbol-catalog loading and failure states and reset transient

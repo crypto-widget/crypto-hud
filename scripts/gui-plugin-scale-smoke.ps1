@@ -206,58 +206,6 @@ function Wait-ForFile([string]$Path, [int]$TimeoutMilliseconds) {
     }
 }
 
-function Assert-RoundedOuterCorners([System.Drawing.Bitmap]$Bitmap, [string]$Title) {
-    $background = $Bitmap.GetPixel(0, 0)
-    $minimumVisiblePixels = [Math]::Max(3, [int]($Bitmap.Width / 2))
-    $visibleRows = [System.Collections.Generic.List[object]]::new()
-
-    for ($y = 0; $y -lt $Bitmap.Height; $y += 1) {
-        $left = -1
-        $right = -1
-        $count = 0
-        for ($x = 0; $x -lt $Bitmap.Width; $x += 1) {
-            $pixel = $Bitmap.GetPixel($x, $y)
-            $distance =
-                [Math]::Abs([int]$pixel.R - [int]$background.R) +
-                [Math]::Abs([int]$pixel.G - [int]$background.G) +
-                [Math]::Abs([int]$pixel.B - [int]$background.B)
-            if ($distance -gt 75) {
-                if ($left -lt 0) {
-                    $left = $x
-                }
-                $right = $x
-                $count += 1
-            }
-        }
-
-        if ($count -ge $minimumVisiblePixels) {
-            $visibleRows.Add([pscustomobject]@{
-                Y = $y
-                Left = $left
-                Right = $right
-                Count = $count
-            })
-        }
-    }
-
-    if ($visibleRows.Count -lt 3) {
-        throw "$Title screenshot does not contain enough visible card rows to inspect its corners"
-    }
-
-    $top = $visibleRows[0]
-    $bottom = $visibleRows[$visibleRows.Count - 1]
-    $widest = $visibleRows | Sort-Object Count -Descending | Select-Object -First 1
-    $insets = @(
-        ([int]$top.Left - [int]$widest.Left)
-        ([int]$widest.Right - [int]$top.Right)
-        ([int]$bottom.Left - [int]$widest.Left)
-        ([int]$widest.Right - [int]$bottom.Right)
-    )
-    if (@($insets | Where-Object { $_ -lt 1 }).Count -gt 0) {
-        throw "$Title outer corners are square; expected visible top-left, top-right, bottom-left, and bottom-right insets, saw $($insets -join ', ')"
-    }
-}
-
 function Assert-ScaledContentVisible([object]$Window, [string]$Title, [int]$ExpectedWidth, [int]$ExpectedHeight) {
     $scaleFactor = [double]$Window.ScaleFactor
     if ($scaleFactor -le 0) {
@@ -324,21 +272,10 @@ function Assert-ScaledContentVisible([object]$Window, [string]$Title, [int]$Expe
             }
         }
     }
-    $roundedCornerFailure = $null
-    if ($Title -like "status-strip-*") {
-        try {
-            Assert-RoundedOuterCorners $bitmap $Title
-        } catch {
-            $roundedCornerFailure = $_.Exception.Message
-        }
-    }
     $bitmap.Dispose()
 
     if ($detailPixels -lt 6) {
         throw "$Title screenshot looks clipped; expected scaled detail pixels, saw $detailPixels. Capture: $capturePath"
-    }
-    if ($roundedCornerFailure) {
-        throw "$roundedCornerFailure Capture: $capturePath"
     }
 }
 
@@ -355,6 +292,14 @@ if ($previousDpiContext -eq [IntPtr]::Zero) {
 }
 Push-Location $RepoRoot
 try {
+    # Native RGB captures can include a nonuniform desktop behind transparent
+    # pixels. Check the real Slint component's alpha shape deterministically;
+    # retain native capture checks for DPI geometry and visible scaled content.
+    cargo +1.96.0 test --locked -p crypto-hud status_strip_keeps_rounded_corners_in_software_snapshots
+    if ($LASTEXITCODE -ne 0) {
+        throw "Status Strip rounded-corner regression exited with code $LASTEXITCODE"
+    }
+
     cargo build -p crypto-hud
     if ($LASTEXITCODE -ne 0) {
         throw "GUI plugin scale smoke build exited with code $LASTEXITCODE"

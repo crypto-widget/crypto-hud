@@ -73,12 +73,13 @@ jobs:
           & .\scripts\gui-widget-scale-smoke.ps1 -SettingsViewportHeight 400
           & .\scripts\single-instance-smoke.ps1 -SkipBuild
 
-      - name: Upload widget scale failure diagnostics
+      - name: Upload native smoke failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: widget-scale-failure-diagnostics
+          name: native-smoke-failure-diagnostics
           path: |
+            target/tmp/gui-plugin-scale-smoke-state/*.png
             target/tmp/gui-widget-scale-smoke-state/failure-geometry.json
             target/tmp/gui-widget-scale-smoke-state/failure-settings.png
           if-no-files-found: warn

@@ -3476,7 +3476,12 @@ export component ExamplePriceCard inherits Window {
             for count in 0..=5 {
                 for scale in [0.3_f64, 1.0] {
                     for dpi in [1.0_f32, 1.25, 1.5, 2.0] {
-                        for theme in ["light", "dark"] {
+                        for (theme, opacity) in [
+                            ("light", 96.0),
+                            ("light", 100.0),
+                            ("dark", 96.0),
+                            ("dark", 100.0),
+                        ] {
                             for locked in [false, true] {
                                 let component = definition.create().unwrap();
                                 let width = ((122 * count.max(1) + 8) as f64 * scale).round();
@@ -3485,7 +3490,7 @@ export component ExamplePriceCard inherits Window {
                                     ("widget-width", Value::Number(width)),
                                     ("widget-height", Value::Number(height)),
                                     ("widget-scale", Value::Number(scale)),
-                                    ("content-opacity", Value::Number(100.0)),
+                                    ("content-opacity", Value::Number(opacity)),
                                     ("theme-name", Value::String(theme.into())),
                                     ("layout-locked", Value::Bool(locked)),
                                     ("empty-text", Value::String("No data".into())),
@@ -3533,7 +3538,7 @@ export component ExamplePriceCard inherits Window {
                                     .set_size(LogicalSize::new(width as f32, height as f32));
                                 component.show().unwrap();
                                 let snapshot = component.window().take_snapshot().unwrap();
-                                let context = format!("count={count}, scale={scale}, dpi={dpi}, theme={theme}, locked={locked}");
+                                let context = format!("count={count}, scale={scale}, dpi={dpi}, theme={theme}, opacity={opacity}, locked={locked}");
                                 assert_eq!(snapshot.as_slice()[0].a, 0, "{context}");
                                 let visible_rows = snapshot
                                     .as_slice()
@@ -3572,6 +3577,7 @@ export component ExamplePriceCard inherits Window {
                                     && scale == 1.0
                                     && dpi == 1.0
                                     && theme == "light"
+                                    && opacity == 100.0
                                     && !locked
                                     && std::env::var("CRYPTO_HUD_UPDATE_STATUS_STRIP_PREVIEW")
                                         .as_deref()
