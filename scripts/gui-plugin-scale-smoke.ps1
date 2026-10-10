@@ -376,10 +376,10 @@ try {
         $windows = @(Get-ProcessWindows $app.Id)
         $expected = @(
             [pscustomobject]@{ Title = "focus-ticker-30"; Width = 147; Height = 30 },
-            [pscustomobject]@{ Title = "trust-card-30"; Width = 156; Height = 116 },
+            [pscustomobject]@{ Title = "trust-card-30"; Width = 78; Height = 54 },
             [pscustomobject]@{ Title = "status-strip-30"; Width = 112; Height = 28 },
             [pscustomobject]@{ Title = "status-strip-100-single"; Width = 130; Height = 92 },
-            [pscustomobject]@{ Title = "mint-tile-30"; Width = 108; Height = 132 }
+            [pscustomobject]@{ Title = "mint-tile-30"; Width = 108; Height = 108 }
         )
 
         foreach ($widget in $expected) {

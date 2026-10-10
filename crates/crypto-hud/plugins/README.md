@@ -633,6 +633,10 @@ powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -Language ar -Re
 需要同步浅色和深色预览图时，以默认 100% 组件缩放运行 `-PaperBackdrop -UpdatePreviews`；
 交互脚本会从完整原生窗口截图生成 360 × 360 预览，避免 DPI 裁切和相邻卡片透入透明边缘。
 
+Status Strip 的圆角装饰使用物理像素对齐的原生切片，避免软件渲染器的渐变矩形覆盖圆角。
+修改后可运行 `scripts/update-status-strip-preview.ps1`，从带透明通道的离屏快照
+重建浅色预览图；该脚本同时检查空数据、1–5 个币对、浅色/深色、锁定状态、缩放和 DPI。
+
 手动 GUI smoke：
 
 - 运行 `mise run run-app`。

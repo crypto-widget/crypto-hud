@@ -63,13 +63,26 @@ jobs:
       - name: Run isolated native smoke checks
         shell: pwsh
         run: |
+          & .\scripts\gui-widget-scale-geometry-check.ps1
           & .\scripts\gui-smoke.ps1
           & .\scripts\gui-settings-interaction-smoke.ps1
           & .\scripts\gui-dynamic-layout-smoke.ps1
           & .\scripts\gui-quote-board-layout-smoke.ps1
           & .\scripts\gui-plugin-scale-smoke.ps1
           & .\scripts\gui-widget-scale-smoke.ps1
+          & .\scripts\gui-widget-scale-smoke.ps1 -SettingsViewportHeight 400
           & .\scripts\single-instance-smoke.ps1 -SkipBuild
+
+      - name: Upload widget scale failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: widget-scale-failure-diagnostics
+          path: |
+            target/tmp/gui-widget-scale-smoke-state/failure-geometry.json
+            target/tmp/gui-widget-scale-smoke-state/failure-settings.png
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Run isolated package and update smoke checks
         shell: pwsh

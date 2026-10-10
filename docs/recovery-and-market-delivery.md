@@ -78,6 +78,9 @@ layout sizes using each window's `windowScaleFactor`, allowing one physical pixe
 for rounding. Plugin screenshot checks use a per-monitor DPI-aware capture thread,
 so the bitmap includes the full physical window instead of cropping it to the
 virtualized logical size.
+The interactive widget-scale smoke keeps persisted dimensions in logical pixels
+and checks live window bounds against DPI-scaled physical dimensions rounded to
+the nearest pixel. Its capture thread also uses per-monitor DPI awareness.
 
 ## Dependency checks
 
