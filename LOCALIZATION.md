@@ -133,6 +133,12 @@ names, remain unchanged in every locale; show the author's string exactly as
 written.
 User-entered display names such as custom widget names follow the same rule.
 
+Repo-bundled widgets with built-in catalogue metadata localize their generated
+default instance names in the settings list and name editor. Keep the canonical
+saved name when applying those localized defaults, and preserve custom names and
+third-party manifest names. Instance thumbnails show the selected widget theme;
+only the widget library cycles through the available preview images.
+
 Known plugin status reasons from the host, such as Slint compilation failures
 or missing required properties/callbacks, should be formatted in the locale
 layer. Keep dynamic technical details intact, and isolate them for RTL locales.

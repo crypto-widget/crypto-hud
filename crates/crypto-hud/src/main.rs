@@ -179,7 +179,31 @@ fn install_gui_smoke_settings_interaction_timer(
                 ui.invoke_confirm_symbol_picker(0, 0);
             }
             let interaction_complete = interaction_complete.clone();
+            let settings_window = settings_window.clone();
+            if let Some(ui) = settings_window.upgrade() {
+                ui.set_widget_action_menu_index(0);
+                ui.set_settings_tab_index(1);
+            }
             Timer::single_shot(Duration::from_millis(140), move || {
+                let Some(ui) = settings_window.upgrade() else {
+                    return;
+                };
+                if ui.get_widget_action_menu_index() != -1 {
+                    eprintln!("GUI settings smoke retained an instance menu after navigation");
+                    return;
+                }
+                ui.set_widget_settings_scroll_y(-24.0);
+                ui.set_widget_action_menu_index(0);
+                ui.invoke_add_widget(0);
+                if ui.get_widget_action_menu_index() != -1
+                    || ui.get_widget_settings_scroll_y().abs() > 0.01
+                    || ui.get_selected_widget_index() != 1
+                {
+                    eprintln!("GUI settings smoke did not reset context for the added instance");
+                    return;
+                }
+                ui.invoke_delete_widget(1);
+                ui.set_settings_tab_index(0);
                 interaction_complete.set(true);
             });
         },

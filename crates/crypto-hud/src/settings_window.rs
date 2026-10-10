@@ -61,11 +61,11 @@ use settings_actions::{
 pub(crate) use settings_models::widget_type_usage_text;
 use settings_models::{
     bool_model, image_model, int_model, owned_string_model, plugin_market_items_model,
-    string_model, widget_instance_detail_options, widget_instance_options,
-    widget_parameter_options, widget_plugin_needs_relink, widget_plugin_relink_options,
-    widget_preview_image_options, widget_preview_kind_options, widget_scale_max_options,
-    widget_scale_min_options, widget_scale_options, widget_theme_index, widget_theme_options,
-    widget_visibility_options,
+    string_model, widget_display_name_for_catalog, widget_instance_detail_options,
+    widget_instance_options, widget_parameter_options, widget_plugin_needs_relink,
+    widget_plugin_relink_options, widget_preview_image_options, widget_preview_kind_options,
+    widget_scale_max_options, widget_scale_min_options, widget_scale_options, widget_theme_index,
+    widget_theme_options, widget_visibility_options,
 };
 use settings_theme::apply_theme_to_settings_window;
 
@@ -574,8 +574,6 @@ pub(crate) fn install_preview_carousel_timer(
     let timer = Timer::default();
     let schedules = Rc::new(RefCell::new(Vec::<PreviewCarouselSchedule>::new()));
     let random_seed = Rc::new(RefCell::new(preview_carousel_seed()));
-    let widget_preview_schedules = Rc::new(RefCell::new(Vec::<PreviewCarouselSchedule>::new()));
-    let widget_preview_random_seed = Rc::new(RefCell::new(preview_carousel_seed()));
 
     timer.start(
         TimerMode::Repeated,
@@ -606,36 +604,6 @@ pub(crate) fn install_preview_carousel_timer(
 
                     item.preview_frame_index = (item.preview_frame_index + 1) % 10_000;
                     items.set_row_data(row, item);
-                }
-
-                let widget_preview_counts = ui.get_widget_preview_image_counts();
-                let widget_preview_indices = ui.get_widget_preview_frame_indices();
-                let widget_row_count = widget_preview_counts
-                    .row_count()
-                    .min(widget_preview_indices.row_count());
-                let mut widget_preview_schedules = widget_preview_schedules.borrow_mut();
-                let mut widget_preview_random_seed = widget_preview_random_seed.borrow_mut();
-                sync_preview_carousel_schedules(
-                    &mut widget_preview_schedules,
-                    widget_row_count,
-                    now,
-                    &mut widget_preview_random_seed,
-                );
-
-                for row in 0..widget_row_count {
-                    if now < widget_preview_schedules[row].next_switch_at {
-                        continue;
-                    }
-
-                    widget_preview_schedules[row].next_switch_at =
-                        now + preview_carousel_interval(&mut widget_preview_schedules[row].seed);
-
-                    if widget_preview_counts.row_data(row).unwrap_or_default() <= 1 {
-                        continue;
-                    }
-
-                    let frame_index = widget_preview_indices.row_data(row).unwrap_or_default();
-                    widget_preview_indices.set_row_data(row, (frame_index + 1) % 10_000);
                 }
             }
         },
@@ -871,9 +839,7 @@ struct WidgetReorderState {
 struct SymbolCatalogState {
     catalog: market::SymbolCatalog,
     warnings: Vec<market::SymbolCatalogWarning>,
-    fallback_symbols: Vec<String>,
     loading: bool,
-    fallback_only: bool,
     last_error: Option<String>,
 }
 
@@ -884,7 +850,6 @@ struct SymbolCatalogRequest {
     weak: slint::Weak<SettingsWindow>,
     proxy_url: Option<String>,
     sources: Vec<settings::MarketDataSource>,
-    fallback_symbols: Vec<String>,
     locale: i18n::Locale,
 }
 
@@ -938,18 +903,13 @@ fn shared_symbol_catalog_coordinator() -> &'static Arc<SymbolCatalogCoordinator>
     })
 }
 
-pub(crate) fn request_symbol_catalog_refresh_from_store(
-    ui: &SettingsWindow,
-    store: &LayoutStore,
-    plugin_catalog: &plugin::PluginCatalog,
-) {
+pub(crate) fn request_symbol_catalog_refresh_from_store(ui: &SettingsWindow, store: &LayoutStore) {
     let settings = store.settings.clone().normalized();
     let locale = i18n::resolve_locale(settings.language);
     request_symbol_catalog_refresh(
         ui.as_weak(),
         settings::effective_network_proxy_url(&settings),
         settings::enabled_market_sources(&settings),
-        collect_symbol_fallback_symbols(store, plugin_catalog),
         locale,
     );
     let state = symbol_catalog_snapshot();
@@ -960,29 +920,19 @@ fn request_symbol_catalog_refresh(
     weak: slint::Weak<SettingsWindow>,
     proxy_url: Option<String>,
     sources: Vec<settings::MarketDataSource>,
-    fallback_symbols: Vec<String>,
     locale: i18n::Locale,
 ) {
     let coordinator = shared_symbol_catalog_coordinator();
     if let Ok(mut requests) = coordinator.requests.lock() {
-        if let Ok(mut state) = shared_symbol_catalog_state().lock() {
-            prepare_symbol_catalog_refresh(&mut state);
-            state.fallback_symbols = sorted_symbol_values(
-                state
-                    .fallback_symbols
-                    .iter()
-                    .cloned()
-                    .chain(fallback_symbols.clone())
-                    .collect(),
-            );
-        }
         requests.replace(SymbolCatalogRequest {
             weak,
             proxy_url,
             sources,
-            fallback_symbols,
             locale,
         });
+        if let Ok(mut state) = shared_symbol_catalog_state().lock() {
+            prepare_symbol_catalog_refresh(&mut state);
+        }
         coordinator.ready.notify_one();
     }
 }
@@ -1041,14 +991,6 @@ fn run_symbol_catalog_worker(coordinator: Arc<SymbolCatalogCoordinator>) {
         }
         if let Ok(mut state) = shared_symbol_catalog_state().lock() {
             apply_symbol_catalog_fetch_result(&mut state, result);
-            state.fallback_symbols = sorted_symbol_values(
-                state
-                    .fallback_symbols
-                    .iter()
-                    .cloned()
-                    .chain(request.fallback_symbols.iter().cloned())
-                    .collect(),
-            );
         }
 
         queue_symbol_catalog_model_refresh(&request, generation);
@@ -1094,7 +1036,6 @@ fn apply_symbol_catalog_progress(
         .entries
         .extend(fetch.catalog.entries.iter().cloned());
     state.warnings = fetch.warnings.clone();
-    state.fallback_only = false;
     state.last_error = None;
 }
 
@@ -1107,12 +1048,10 @@ fn apply_symbol_catalog_fetch_result(
         Ok(fetch) => {
             state.catalog = fetch.catalog;
             state.warnings = fetch.warnings;
-            state.fallback_only = false;
             state.last_error = None;
         }
         Err(error) => {
             state.warnings.clear();
-            state.fallback_only = true;
             state.last_error = Some(error.to_string());
         }
     }
@@ -1120,8 +1059,8 @@ fn apply_symbol_catalog_fetch_result(
 
 fn symbol_catalog_status_text(state: &SymbolCatalogState, locale: i18n::Locale) -> Option<String> {
     let text = i18n::text(locale);
-    if state.fallback_only {
-        return Some(text.status_symbol_catalog_fallback.to_string());
+    if state.last_error.is_some() {
+        return Some(text.status_symbol_catalog_unavailable.to_string());
     }
     if state.warnings.is_empty() {
         return None;
@@ -1204,7 +1143,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
         Some(settings_status.borrow().as_str()),
     );
     schedule_widget_layout_lock_sync(ui.as_weak(), layouts.clone());
-    request_symbol_catalog_refresh_from_store(&ui, &layouts.borrow(), &plugin_catalog);
+    request_symbol_catalog_refresh_from_store(&ui, &layouts.borrow());
     let commit_context = SettingsCommitContext {
         widgets: widgets.clone(),
         layouts: layouts.clone(),
@@ -1350,11 +1289,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
                 != settings::enabled_market_sources(&settings)
             {
                 if let Some(ui) = weak.upgrade() {
-                    request_symbol_catalog_refresh_from_store(
-                        &ui,
-                        &commit.layouts.borrow(),
-                        &commit.plugin_catalog,
-                    );
+                    request_symbol_catalog_refresh_from_store(&ui, &commit.layouts.borrow());
                 }
             }
             schedule_widget_shell_window_configuration();
@@ -1400,11 +1335,7 @@ pub(crate) fn install_settings_window(deps: SettingsWindowDeps) -> Result<Settin
             commit.set_saved_status(settings);
             commit.refresh_settings_window(&weak);
             if let Some(ui) = weak.upgrade() {
-                request_symbol_catalog_refresh_from_store(
-                    &ui,
-                    &commit.layouts.borrow(),
-                    &commit.plugin_catalog,
-                );
+                request_symbol_catalog_refresh_from_store(&ui, &commit.layouts.borrow());
             }
         }
     });
@@ -2868,30 +2799,6 @@ fn replace_symbol_with_limit(
     settings::normalized_symbols_with_limit(symbols, limit, fallback)
 }
 
-fn collect_symbol_fallback_symbols(
-    store: &LayoutStore,
-    plugin_catalog: &plugin::PluginCatalog,
-) -> Vec<String> {
-    let definitions = widget_definitions_from_catalog(plugin_catalog);
-    let mut symbols = settings::default_market_symbols();
-    symbols.extend(store.settings.clone().normalized().market_default_symbols);
-    symbols.extend(store.settings.clone().normalized().tray_market_symbols);
-    for widget in &store.widgets {
-        symbols.extend(settings::normalized_symbols_for_instance(
-            widget,
-            &definitions,
-        ));
-    }
-    if feature_flags::ALERT_RULES_ENABLED {
-        for rule in &store.settings.alert_rules {
-            if let Some(symbol) = settings::normalize_market_pair_key(&rule.symbol) {
-                symbols.push(symbol);
-            }
-        }
-    }
-    sorted_symbol_values(symbols)
-}
-
 fn refresh_symbol_selector_models_from_ui(
     ui: &SettingsWindow,
     state: &SymbolCatalogState,
@@ -3000,18 +2907,23 @@ fn refresh_symbol_picker_models_from_ui(
     ui.set_symbol_picker_candidate_values(owned_string_model(options.clone()));
     ui.set_symbol_picker_candidate_index(0);
     ui.set_symbol_picker_title_text(symbol_picker_title_text(mode, locale).into());
-    ui.set_symbol_picker_status_text(
+    let status = if state.loading {
+        i18n::symbol_catalog_loading_status_text(locale).to_string()
+    } else if state.last_error.is_some() {
+        i18n::text(locale)
+            .status_symbol_catalog_unavailable
+            .to_string()
+    } else {
         symbol_picker_status_text(
             mode,
             selected_symbols.len(),
             max,
             options.len(),
             &query,
-            state.fallback_only,
             locale,
         )
-        .into(),
-    );
+    };
+    ui.set_symbol_picker_status_text(status.into());
 }
 
 fn refresh_alert_symbol_options(
@@ -3022,11 +2934,7 @@ fn refresh_alert_symbol_options(
     locale: i18n::Locale,
 ) {
     let alert_values = if feature_flags::ALERT_RULES_ENABLED {
-        symbol_pick_options(
-            state,
-            enabled_sources,
-            alert_symbol.into_iter().map(str::to_string),
-        )
+        symbol_pick_options(state, enabled_sources)
     } else {
         Vec::new()
     };
@@ -3066,7 +2974,7 @@ fn symbol_add_options_with_query(
         .iter()
         .filter_map(|symbol| settings::normalize_market_pair_key(symbol))
         .collect::<Vec<_>>();
-    symbol_pick_options_with_query(state, enabled_sources, selected.clone(), query)
+    symbol_pick_options_with_query(state, enabled_sources, query)
         .into_iter()
         .filter(|symbol| !selected.contains(symbol))
         .collect()
@@ -3075,34 +2983,23 @@ fn symbol_add_options_with_query(
 fn symbol_pick_options(
     state: &SymbolCatalogState,
     enabled_sources: &[settings::MarketDataSource],
-    extra_symbols: impl IntoIterator<Item = String>,
 ) -> Vec<String> {
-    symbol_pick_options_with_query(state, enabled_sources, extra_symbols, "")
+    symbol_pick_options_with_query(state, enabled_sources, "")
 }
 
 fn symbol_pick_options_with_query(
     state: &SymbolCatalogState,
     enabled_sources: &[settings::MarketDataSource],
-    extra_symbols: impl IntoIterator<Item = String>,
     query: &str,
 ) -> Vec<String> {
-    let mut symbols = state
+    let symbols = state
         .catalog
         .entries
         .iter()
         .filter(|entry| enabled_sources.contains(&entry.source))
         .map(|entry| entry.key.clone())
         .collect::<Vec<_>>();
-    if symbols.is_empty() {
-        symbols.extend(settings::default_market_symbols());
-    }
-    symbols.extend(state.fallback_symbols.iter().cloned());
-    symbols.extend(extra_symbols);
     ranked_symbol_values(symbols, query)
-}
-
-fn sorted_symbol_values(symbols: Vec<String>) -> Vec<String> {
-    ranked_symbol_values(symbols, "")
 }
 
 fn ranked_symbol_values(symbols: Vec<String>, query: &str) -> Vec<String> {
@@ -3322,8 +3219,8 @@ fn format_symbol_chip_label(symbol: &str, locale: i18n::Locale) -> String {
 }
 
 const WIDGET_SYMBOL_CHIP_START_X: i32 = 17;
-const WIDGET_SYMBOL_CHIP_START_Y: i32 = 315;
-const WIDGET_SYMBOL_CHIP_AVAILABLE_WIDTH: i32 = 485;
+const WIDGET_SYMBOL_CHIP_START_Y: i32 = 235;
+const WIDGET_SYMBOL_CHIP_AVAILABLE_WIDTH: i32 = 531;
 const WIDGET_SYMBOL_CHIP_ROW_HEIGHT: i32 = 36;
 const WIDGET_SYMBOL_CHIP_GAP: i32 = 8;
 const WIDGET_SYMBOL_ADD_BUTTON_WIDTH: i32 = 69;
@@ -3377,7 +3274,7 @@ fn widget_symbol_chip_layout(labels: &[String]) -> (Vec<i32>, Vec<i32>, Vec<i32>
 
 fn symbol_chip_width(label: &str) -> i32 {
     let text_width = label.chars().map(symbol_chip_char_width).sum::<i32>();
-    (text_width + 32).clamp(76, 84)
+    (text_width + 34).clamp(96, 200)
 }
 
 fn symbol_chip_char_width(ch: char) -> i32 {
@@ -3464,17 +3361,6 @@ pub(crate) fn refresh_settings_window(
     let symbol_picker_mode = ui.get_symbol_picker_mode();
     let symbol_picker_replace_index = ui.get_symbol_picker_replace_index();
     let symbol_picker_search_text = ui.get_symbol_picker_search_text().to_string();
-    let fallback_symbols = collect_symbol_fallback_symbols(&store, plugin_catalog);
-    if let Ok(mut state) = shared_symbol_catalog_state().lock() {
-        state.fallback_symbols = sorted_symbol_values(
-            state
-                .fallback_symbols
-                .iter()
-                .cloned()
-                .chain(fallback_symbols)
-                .collect(),
-        );
-    }
     let symbol_catalog_state = symbol_catalog_snapshot();
     ui.set_rtl_layout(i18n::is_rtl(locale));
     ui.set_window_title_text(text.settings_title.into());
@@ -3603,6 +3489,9 @@ pub(crate) fn refresh_settings_window(
     ui.set_close_text(text.close.into());
     ui.set_widget_library_text(text.widget_library.into());
     ui.set_my_widgets_text(text.my_widgets.into());
+    ui.set_widget_actions_text(text.widget_actions.into());
+    ui.set_replace_pair_text(text.replace_pair.into());
+    ui.set_remove_pair_text(text.remove_pair.into());
     ui.set_selected_widget_text(text.selected_widget.into());
     let selected_widget_plugin_missing =
         selected_widget.is_some_and(|widget| widget_plugin_needs_relink(widget, plugin_catalog));
@@ -3673,6 +3562,26 @@ pub(crate) fn refresh_settings_window(
     ui.set_language_options(string_model(i18n::language_options(locale)));
     ui.set_alert_condition_options(string_model(i18n::alert_condition_options(locale)));
     ui.set_plugin_market_items(plugin_market_items_model(plugin_catalog, &store, locale));
+    let widget_ids = store
+        .widgets
+        .iter()
+        .map(|widget| widget.id.clone())
+        .collect::<Vec<_>>();
+    let selected_id = selected_widget
+        .map(|widget| widget.id.as_str())
+        .unwrap_or_default();
+    let previous_ids = ui.get_widget_id_options();
+    let collection_changed = previous_ids.row_count() != widget_ids.len()
+        || widget_ids.iter().enumerate().any(|(index, id)| {
+            previous_ids
+                .row_data(index)
+                .is_none_or(|previous| previous.as_str() != id)
+        });
+    if collection_changed || ui.get_selected_widget_id().as_str() != selected_id {
+        ui.invoke_reset_widget_context();
+    }
+    ui.set_widget_id_options(owned_string_model(widget_ids));
+    ui.set_selected_widget_id(selected_id.into());
     ui.set_widget_list_options(owned_string_model(widget_instance_options(
         &store,
         locale,
@@ -3705,7 +3614,9 @@ pub(crate) fn refresh_settings_window(
     ui.set_selected_widget_index(selected_widget.map(|_| selected_index as i32).unwrap_or(-1));
     ui.set_widget_name_input_text(
         selected_widget
-            .map(|widget| widget_display_name(widget, selected_index, locale))
+            .map(|widget| {
+                widget_display_name_for_catalog(widget, selected_index, locale, plugin_catalog)
+            })
             .unwrap_or_default()
             .into(),
     );
@@ -4451,7 +4362,6 @@ fn symbol_picker_status_text(
     max: usize,
     candidate_count: usize,
     query: &str,
-    fallback_only: bool,
     locale: i18n::Locale,
 ) -> String {
     i18n::symbol_picker_status_text(
@@ -4461,7 +4371,6 @@ fn symbol_picker_status_text(
         max,
         candidate_count,
         query,
-        fallback_only,
     )
 }
 
@@ -5155,7 +5064,7 @@ mod tests {
             "text: plugin.title;",
             "text: plugin.description;",
             "text: plugin.usage;",
-            "x: 324px;\n                        y: 67px;\n                        width: parent.width - 438px;\n                        text: plugin.status;",
+            "text: plugin.status;",
         ] {
             let block = block_before_anchor(&source, "Text {", anchor);
             assert!(
@@ -5348,7 +5257,7 @@ mod tests {
         assert!(
             source.contains("property <int> widget-display-section-y: root.widget-symbol-status-y + 10;")
                 && source.contains(
-                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 293 + root.widget-theme-settings-offset + root.widget-header-settings-offset + root.widget-parameter-settings-offset) * 1px;"
+                    "property <length> selected-widget-content-height: (root.widget-display-section-y + 249 + root.widget-theme-settings-offset + root.widget-header-settings-offset + root.widget-parameter-settings-offset) * 1px;"
                 ),
             "removing pair limit help should tighten the spacing below the pair chips"
         );
@@ -5590,13 +5499,13 @@ mod tests {
                 "text: root.text;",
                 ["height: 20px;", "vertical-alignment: center;"],
             ),
-            ("text: root.title;", ["height: 18px;", "overflow: elide;"]),
+            ("text: root.title;", ["height: 28px;", "overflow: elide;"]),
             (
                 "text: root.subtitle;",
-                ["height: 14px;", "overflow: elide;"],
+                ["height: 16px;", "overflow: elide;"],
             ),
-            ("text: root.label;", ["height: 16px;", "overflow: elide;"]),
-            ("text: root.help;", ["height: 15px;", "overflow: elide;"]),
+            ("text: root.label;", ["height: 18px;", "overflow: elide;"]),
+            ("text: root.help;", ["height: 32px;", "wrap: word-wrap;"]),
         ] {
             let block = block_before_anchor(&source, "Text {", anchor);
             for expected in required {
@@ -5807,11 +5716,11 @@ mod tests {
     #[test]
     fn widget_symbol_chip_layout_keeps_five_chips_in_one_row() {
         let labels = vec![
-            "BTC/USDT · Binance · Bitcoin".to_string(),
-            "ETH/USDT · Binance · Ethereum".to_string(),
-            "SOL/USDT · Binance · Solana".to_string(),
-            "XRP/USDT · Binance · Ripple".to_string(),
-            "BNB/USDT · Binance · BNB".to_string(),
+            "BTC/USDT".to_string(),
+            "ETH/USDT".to_string(),
+            "SOL/USDT".to_string(),
+            "XRP/USDT".to_string(),
+            "BNB/USDT".to_string(),
         ];
 
         let (x_values, y_values, widths, add_x, add_y, status_y) =
@@ -5819,7 +5728,10 @@ mod tests {
 
         assert_eq!(x_values[0], WIDGET_SYMBOL_CHIP_START_X);
         assert_eq!(y_values[0], WIDGET_SYMBOL_CHIP_START_Y);
-        assert!(widths.iter().all(|width| *width >= 76 && *width <= 84));
+        assert!(widths.iter().all(|width| *width >= 96));
+        assert!(x_values.iter().zip(&widths).all(|(x, width)| {
+            x + width <= WIDGET_SYMBOL_CHIP_START_X + WIDGET_SYMBOL_CHIP_AVAILABLE_WIDTH
+        }));
         assert!(y_values.iter().all(|y| *y == WIDGET_SYMBOL_CHIP_START_Y));
         assert_eq!(add_x, WIDGET_SYMBOL_CHIP_START_X);
         assert_eq!(
@@ -5850,6 +5762,16 @@ mod tests {
             WIDGET_SYMBOL_CHIP_START_Y + WIDGET_SYMBOL_CHIP_ROW_HEIGHT * 2
         );
         assert_eq!(status_y, add_y + WIDGET_SYMBOL_CHIP_ROW_HEIGHT + 8);
+    }
+
+    #[test]
+    fn long_pair_chips_reserve_space_for_the_full_pair_label() {
+        assert!(symbol_chip_width("1000PEPE/USDT") > symbol_chip_width("BTC/USDT"));
+        let labels = vec!["1000PEPE/USDT".into(); 20];
+        let (x_values, _, widths, _, _, _) = widget_symbol_chip_layout(&labels);
+        assert!(x_values.iter().zip(widths).all(|(x, width)| {
+            x + width <= WIDGET_SYMBOL_CHIP_START_X + WIDGET_SYMBOL_CHIP_AVAILABLE_WIDTH
+        }));
     }
 
     #[test]
@@ -6483,7 +6405,6 @@ mod tests {
         );
 
         assert!(!state.loading);
-        assert!(!state.fallback_only);
         assert_eq!(state.catalog.entries, vec![entry]);
         assert_eq!(state.warnings, vec![warning]);
         assert!(state.last_error.is_none());
@@ -6516,7 +6437,7 @@ mod tests {
 
         assert_eq!(state.catalog.entries.len(), 1);
         assert_eq!(
-            symbol_pick_options(&state, &[settings::MarketDataSource::Binance], Vec::new()),
+            symbol_pick_options(&state, &[settings::MarketDataSource::Binance]),
             vec!["binance:spot:BTC/USDT"]
         );
         assert!(state.warnings.is_empty());
@@ -6543,53 +6464,13 @@ mod tests {
 
         assert!(!state.loading);
         assert_eq!(
-            symbol_pick_options(&state, &[settings::MarketDataSource::Binance], Vec::new()),
+            symbol_pick_options(&state, &[settings::MarketDataSource::Binance]),
             vec!["binance:spot:BTC/USDT"]
         );
         assert_eq!(state.last_error.as_deref(), Some("offline"));
         assert_eq!(
             symbol_catalog_status_text(&state, i18n::Locale::ZhHans).as_deref(),
-            Some(i18n::text(i18n::Locale::ZhHans).status_symbol_catalog_fallback)
-        );
-    }
-
-    #[test]
-    fn symbol_catalog_progress_replaces_completed_sources_and_keeps_pending_sources() {
-        let binance = settings::MarketDataSource::Binance;
-        let okx = settings::MarketDataSource::Okx;
-        let mut state = SymbolCatalogState {
-            catalog: market::SymbolCatalog {
-                entries: vec![
-                    catalog_entry(binance, settings::MarketType::Spot, "BTC", "USDT"),
-                    catalog_entry(okx, settings::MarketType::Spot, "BTC", "USDT"),
-                ],
-            },
-            loading: true,
-            ..SymbolCatalogState::default()
-        };
-        let fetch = market::SymbolCatalogFetch {
-            catalog: market::SymbolCatalog {
-                entries: vec![catalog_entry(
-                    binance,
-                    settings::MarketType::Spot,
-                    "ETH",
-                    "USDT",
-                )],
-            },
-            warnings: Vec::new(),
-        };
-        apply_symbol_catalog_progress(&mut state, &fetch);
-        apply_symbol_catalog_progress(&mut state, &fetch);
-
-        assert!(state.loading);
-        assert_eq!(state.catalog.entries.len(), 2);
-        assert_eq!(
-            symbol_pick_options(&state, &[binance], Vec::new()),
-            vec!["binance:spot:ETH/USDT"]
-        );
-        assert_eq!(
-            symbol_pick_options(&state, &[okx], Vec::new()),
-            vec!["okx:spot:BTC/USDT"]
+            Some("交易对目录暂不可用")
         );
     }
 
@@ -6654,8 +6535,7 @@ mod tests {
                     settings::MarketDataSource::Okx,
                     settings::MarketDataSource::Hyperliquid,
                     settings::MarketDataSource::Bitget,
-                ]),
-                Vec::new()
+                ])
             ),
             vec![
                 "binance:spot:BTC/USDT",
@@ -6670,49 +6550,49 @@ mod tests {
         assert_eq!(
             symbol_pick_options(
                 &state,
-                &enabled_sources(&[settings::MarketDataSource::Binance]),
-                Vec::new()
+                &enabled_sources(&[settings::MarketDataSource::Binance])
             ),
             vec!["binance:spot:BTC/USDT", "binance:spot:BNB/USDT"]
         );
         assert_eq!(
-            symbol_pick_options(
-                &state,
-                &enabled_sources(&[settings::MarketDataSource::Okx]),
-                Vec::new()
-            ),
+            symbol_pick_options(&state, &enabled_sources(&[settings::MarketDataSource::Okx])),
             vec!["okx:spot:BTC/USDT", "okx:spot:OKB/USDT"]
         );
         assert_eq!(
             symbol_pick_options(
                 &state,
-                &enabled_sources(&[settings::MarketDataSource::Coinbase]),
-                Vec::new()
+                &enabled_sources(&[settings::MarketDataSource::Coinbase])
             ),
             vec!["coinbase:spot:BTC/USD"]
         );
         assert_eq!(
             symbol_pick_options(
                 &state,
-                &enabled_sources(&[settings::MarketDataSource::Bitget]),
-                Vec::new()
+                &enabled_sources(&[settings::MarketDataSource::Bitget])
             ),
             vec!["bitget:spot:BTC/USDT"]
         );
     }
 
     #[test]
-    fn symbol_add_options_exclude_selected_and_keep_saved_fallbacks() {
+    fn symbol_add_options_only_include_unselected_online_catalog_entries() {
         let state = SymbolCatalogState {
             catalog: market::SymbolCatalog {
-                entries: vec![catalog_entry(
-                    settings::MarketDataSource::Binance,
-                    settings::MarketType::Spot,
-                    "BTC",
-                    "USDT",
-                )],
+                entries: vec![
+                    catalog_entry(
+                        settings::MarketDataSource::Binance,
+                        settings::MarketType::Spot,
+                        "BTC",
+                        "USDT",
+                    ),
+                    catalog_entry(
+                        settings::MarketDataSource::Binance,
+                        settings::MarketType::Spot,
+                        "ETH",
+                        "USDT",
+                    ),
+                ],
             },
-            fallback_symbols: vec!["binance:spot:DELISTED/USDT".to_string()],
             ..SymbolCatalogState::default()
         };
 
@@ -6723,8 +6603,86 @@ mod tests {
                 &["binance:spot:BTC/USDT".to_string()],
                 "",
             ),
-            vec!["binance:spot:DELISTED/USDT"]
+            vec!["binance:spot:ETH/USDT"]
         );
+    }
+
+    #[test]
+    fn loading_symbol_catalog_keeps_online_candidates_without_local_fallbacks() {
+        let sources = enabled_sources(&[settings::MarketDataSource::Binance]);
+        let loading = SymbolCatalogState {
+            catalog: market::SymbolCatalog {
+                entries: vec![catalog_entry(
+                    settings::MarketDataSource::Binance,
+                    settings::MarketType::Spot,
+                    "BTC",
+                    "USDT",
+                )],
+            },
+            loading: true,
+            ..SymbolCatalogState::default()
+        };
+        let unavailable = SymbolCatalogState {
+            last_error: Some("offline".to_string()),
+            ..SymbolCatalogState::default()
+        };
+
+        assert_eq!(
+            symbol_add_options_with_query(&loading, &sources, &[], ""),
+            vec!["binance:spot:BTC/USDT"]
+        );
+        assert!(symbol_add_options_with_query(&unavailable, &sources, &[], "").is_empty());
+        assert!(symbol_add_options_with_query(
+            &SymbolCatalogState {
+                loading: true,
+                ..SymbolCatalogState::default()
+            },
+            &sources,
+            &[],
+            ""
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn symbol_catalog_progress_replaces_completed_sources_and_keeps_pending_sources() {
+        let binance = settings::MarketDataSource::Binance;
+        let okx = settings::MarketDataSource::Okx;
+        let mut state = SymbolCatalogState {
+            catalog: market::SymbolCatalog {
+                entries: vec![
+                    catalog_entry(binance, settings::MarketType::Spot, "BTC", "USDT"),
+                    catalog_entry(okx, settings::MarketType::Spot, "BTC", "USDT"),
+                ],
+            },
+            loading: true,
+            ..SymbolCatalogState::default()
+        };
+        let fetch = market::SymbolCatalogFetch {
+            catalog: market::SymbolCatalog {
+                entries: vec![catalog_entry(
+                    binance,
+                    settings::MarketType::Spot,
+                    "ETH",
+                    "USDT",
+                )],
+            },
+            warnings: Vec::new(),
+        };
+        apply_symbol_catalog_progress(&mut state, &fetch);
+        apply_symbol_catalog_progress(&mut state, &fetch);
+
+        assert!(state.loading);
+        assert_eq!(state.catalog.entries.len(), 2);
+        assert_eq!(
+            symbol_pick_options(&state, &[binance]),
+            vec!["binance:spot:ETH/USDT"]
+        );
+        assert_eq!(
+            symbol_pick_options(&state, &[okx]),
+            vec!["okx:spot:BTC/USDT"]
+        );
+        assert!(symbol_pick_options(&state, &[settings::MarketDataSource::Coinbase]).is_empty());
     }
 
     #[test]
@@ -6764,8 +6722,7 @@ mod tests {
         assert_eq!(
             symbol_pick_options(
                 &state,
-                &enabled_sources(&[settings::MarketDataSource::Binance]),
-                Vec::new()
+                &enabled_sources(&[settings::MarketDataSource::Binance])
             ),
             vec![
                 "binance:spot:DOGE/USDT",
@@ -6824,112 +6781,92 @@ mod tests {
         let sources = enabled_sources(&[settings::MarketDataSource::Binance]);
 
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "btcusdt"),
+            symbol_pick_options_with_query(&state, &sources, "btcusdt"),
             vec!["binance:spot:BTC/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "bitcoin"),
+            symbol_pick_options_with_query(&state, &sources, "bitcoin"),
             vec!["binance:spot:BTC/USDT", "binance:spot:BCH/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "doge"),
+            symbol_pick_options_with_query(&state, &sources, "doge"),
             vec!["binance:spot:DOGE/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "Dogecoin"),
+            symbol_pick_options_with_query(&state, &sources, "Dogecoin"),
             vec!["binance:spot:DOGE/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "bitcóin"),
+            symbol_pick_options_with_query(&state, &sources, "bitcóin"),
             vec!["binance:spot:BTC/USDT", "binance:spot:BCH/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "bitkoin"),
+            symbol_pick_options_with_query(&state, &sources, "bitkoin"),
             vec!["binance:spot:BTC/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "moneda binance"),
+            symbol_pick_options_with_query(&state, &sources, "moneda binance"),
             vec!["binance:spot:BNB/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "moeda binance"),
+            symbol_pick_options_with_query(&state, &sources, "moeda binance"),
             vec!["binance:spot:BNB/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "koin binance"),
+            symbol_pick_options_with_query(&state, &sources, "koin binance"),
             vec!["binance:spot:BNB/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "đồng binance"),
+            symbol_pick_options_with_query(&state, &sources, "đồng binance"),
             vec!["binance:spot:BNB/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "dong binance"),
+            symbol_pick_options_with_query(&state, &sources, "dong binance"),
             vec!["binance:spot:BNB/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "binance coini"),
+            symbol_pick_options_with_query(&state, &sources, "binance coini"),
             vec!["binance:spot:BNB/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "BİNANCE COİNİ"),
+            symbol_pick_options_with_query(&state, &sources, "BİNANCE COİNİ"),
             vec!["binance:spot:BNB/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "etereo"),
+            symbol_pick_options_with_query(&state, &sources, "etereo"),
             vec!["binance:spot:ETH/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "狗"),
+            symbol_pick_options_with_query(&state, &sources, "狗"),
             vec!["binance:spot:DOGE/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "БИТКОИН"),
+            symbol_pick_options_with_query(&state, &sources, "БИТКОИН"),
             vec!["binance:spot:BTC/USDT", "binance:spot:BCH/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "イーサ"),
+            symbol_pick_options_with_query(&state, &sources, "イーサ"),
             vec!["binance:spot:ETH/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "도지"),
+            symbol_pick_options_with_query(&state, &sources, "도지"),
             vec!["binance:spot:DOGE/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "إيثريوم"),
+            symbol_pick_options_with_query(&state, &sources, "إيثريوم"),
             vec!["binance:spot:ETH/USDT"]
         );
         assert_eq!(
-            symbol_pick_options_with_query(&state, &sources, Vec::new(), "萊特幣"),
+            symbol_pick_options_with_query(&state, &sources, "萊特幣"),
             vec!["binance:spot:LTC/USDT"]
         );
     }
 
     #[test]
-    fn symbol_picker_status_reports_limits_and_fallback_catalog() {
+    fn symbol_picker_status_reports_limits_and_online_candidates() {
         assert_eq!(
-            symbol_picker_status_text(
-                SYMBOL_PICKER_MODE_WIDGET,
-                5,
-                5,
-                0,
-                "",
-                false,
-                i18n::Locale::ZhHans,
-            ),
+            symbol_picker_status_text(SYMBOL_PICKER_MODE_WIDGET, 5, 5, 0, "", i18n::Locale::ZhHans,),
             "已选 5/5，已达上限，先移除一个交易对"
-        );
-        assert_eq!(
-            symbol_picker_status_text(
-                SYMBOL_PICKER_MODE_DEFAULT,
-                2,
-                5,
-                3,
-                "",
-                true,
-                i18n::Locale::ZhHans,
-            ),
-            "候选目录暂不可用，已使用本地候选，找到 3 个"
         );
         assert_eq!(
             symbol_picker_status_text(
@@ -6938,7 +6875,6 @@ mod tests {
                 5,
                 0,
                 "not-a-pair",
-                false,
                 i18n::Locale::En,
             ),
             "Selected 2/5. No matching pairs"
@@ -6950,7 +6886,6 @@ mod tests {
                 1,
                 4,
                 "",
-                false,
                 i18n::Locale::ZhHans,
             ),
             "找到 4 个可更换交易对，会立即影响当前小组件"
@@ -6962,7 +6897,6 @@ mod tests {
                 8,
                 4,
                 "",
-                false,
                 i18n::Locale::ZhHans,
             ),
             "找到 4 个可添加交易对，会立即应用到托盘"

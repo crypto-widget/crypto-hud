@@ -211,17 +211,17 @@ export component PanelTitle inherits Rectangle {
     in property <color> muted-color;
 
     width: 258px;
-    height: 40px;
+    height: 48px;
     background: transparent;
 
     Text {
         x: 0px;
         y: 0px;
         width: parent.width;
-        height: 18px;
+        height: 28px;
         text: root.title;
         color: root.title-color;
-        font-size: 14px;
+        font-size: 22px;
         font-weight: 500;
         horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
@@ -229,12 +229,12 @@ export component PanelTitle inherits Rectangle {
 
     Text {
         x: 0px;
-        y: 22px;
+        y: 32px;
         width: parent.width;
-        height: 14px;
+        height: 16px;
         text: root.subtitle;
         color: root.muted-color;
-        font-size: 9px;
+        font-size: 12px;
         horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
     }
@@ -253,10 +253,10 @@ export component SettingSectionTitle inherits Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
-        height: 15px;
+        height: 20px;
         text: root.title;
         color: root.title-color;
-        font-size: 11px;
+        font-size: 14px;
         font-weight: 500;
         horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
@@ -279,17 +279,17 @@ export component SettingLabel inherits Rectangle {
     in property <color> muted-color;
 
     width: 158px;
-    height: 33px;
+    height: 52px;
     background: transparent;
 
     Text {
         x: 0px;
         y: 0px;
         width: parent.width;
-        height: 16px;
+        height: 18px;
         text: root.label;
         color: root.label-color;
-        font-size: 12px;
+        font-size: 14px;
         font-weight: 500;
         horizontal-alignment: root.rtl-layout ? right : left;
         overflow: elide;
@@ -297,13 +297,14 @@ export component SettingLabel inherits Rectangle {
 
     Text {
         x: 0px;
-        y: 18px;
+        y: 20px;
         width: parent.width;
-        height: 15px;
+        height: 32px;
         text: root.help;
+        wrap: word-wrap;
         color: root.muted-color;
-        font-size: 11px;
+        font-size: 12px;
         horizontal-alignment: root.rtl-layout ? right : left;
-        overflow: elide;
+
     }
 }

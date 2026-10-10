@@ -3,13 +3,14 @@ use crypto_hud_shell_state::{
 };
 use slint::{Image, ModelRc, SharedString, VecModel};
 
-use crate::{i18n, plugin, PluginMarketItem};
+use crate::{i18n, plugin, theme, PluginMarketItem};
 
 use super::{
-    format_symbols_input, widget_display_name, widget_scale_percent, widget_scale_percent_bounds,
-    widget_type_description, widget_type_title, PREVIEW_KIND_FOCUS_TICKER, PREVIEW_KIND_GENERIC,
-    PREVIEW_KIND_MARKET_BOARD, PREVIEW_KIND_MARKET_COMPASS, PREVIEW_KIND_STATUS_STRIP,
-    PREVIEW_KIND_TRUST_CARD, STATUS_STRIP_PLUGIN_ID,
+    format_symbols_input, widget_default_number, widget_display_name, widget_scale_percent,
+    widget_scale_percent_bounds, widget_type_description, widget_type_title,
+    PREVIEW_KIND_FOCUS_TICKER, PREVIEW_KIND_GENERIC, PREVIEW_KIND_MARKET_BOARD,
+    PREVIEW_KIND_MARKET_COMPASS, PREVIEW_KIND_STATUS_STRIP, PREVIEW_KIND_TRUST_CARD,
+    STATUS_STRIP_PLUGIN_ID,
 };
 
 pub(super) fn string_model(values: Vec<&'static str>) -> ModelRc<SharedString> {
@@ -45,14 +46,77 @@ pub(super) fn image_model(values: Vec<Image>) -> ModelRc<Image> {
 pub(super) fn widget_instance_options(
     store: &LayoutStore,
     locale: i18n::Locale,
-    _plugin_catalog: &plugin::PluginCatalog,
+    plugin_catalog: &plugin::PluginCatalog,
 ) -> Vec<String> {
     store
         .widgets
         .iter()
         .enumerate()
-        .map(|(index, widget)| widget_display_name(widget, index, locale))
+        .map(|(index, widget)| {
+            widget_display_name_for_catalog(widget, index, locale, plugin_catalog)
+        })
         .collect()
+}
+
+pub(super) fn widget_display_name_for_catalog(
+    widget: &WidgetInstance,
+    index: usize,
+    locale: i18n::Locale,
+    catalog: &plugin::PluginCatalog,
+) -> String {
+    let Some(definition) = catalog.find(&widget.plugin_id) else {
+        return widget_display_name(widget, index, locale);
+    };
+    let number = widget_default_number(widget, index);
+    localized_bundled_default_name(widget, &definition, number, locale)
+        .unwrap_or_else(|| widget_display_name(widget, index, locale))
+}
+
+fn localized_bundled_default_name(
+    widget: &WidgetInstance,
+    definition: &plugin::PluginDefinition,
+    number: u64,
+    locale: i18n::Locale,
+) -> Option<String> {
+    if widget.builtin_widget_type().is_some() || definition.source != plugin::PluginSource::Builtin
+    {
+        return None;
+    }
+    let title = i18n::builtin_plugin_title(locale, &definition.id)?;
+    let canonical = format!("{} {number}", definition.name);
+    if !widget.name.trim().is_empty() && widget.name != canonical {
+        return None;
+    }
+    Some(format!(
+        "{title} {}",
+        i18n::ltr_isolate_for_locale(locale, &number.to_string())
+    ))
+}
+
+pub(super) fn normalize_widget_name_for_catalog(
+    widget: &WidgetInstance,
+    raw: &str,
+    index: usize,
+    locale: i18n::Locale,
+    catalog: &plugin::PluginCatalog,
+) -> String {
+    let number = widget_default_number(widget, index);
+    if let Some(definition) = catalog.find(&widget.plugin_id) {
+        if widget.builtin_widget_type().is_none()
+            && definition.source == plugin::PluginSource::Builtin
+            && i18n::builtin_plugin_title(locale, &definition.id).is_some()
+            && raw.trim().is_empty()
+        {
+            return format!("{} {number}", definition.name);
+        }
+        if let Some(localized) = localized_bundled_default_name(widget, &definition, number, locale)
+        {
+            if raw.trim().is_empty() || raw == localized {
+                return format!("{} {number}", definition.name);
+            }
+        }
+    }
+    super::normalize_widget_name(raw, widget.widget_type(), number, locale)
 }
 
 pub(super) fn widget_instance_detail_options(
@@ -152,7 +216,15 @@ pub(super) fn widget_preview_image_options(
         .map(|widget| {
             plugin_catalog
                 .find(&widget.plugin_id)
-                .map(|definition| plugin_preview_images(&definition))
+                .map(|definition| {
+                    widget_preview_path(
+                        widget,
+                        &definition,
+                        theme::resolve_theme(settings::ThemePreference::System),
+                    )
+                    .map(|path| load_preview_images(std::slice::from_ref(path)))
+                    .unwrap_or_else(empty_preview_images)
+                })
                 .unwrap_or_else(empty_preview_images)
         })
         .collect::<Vec<_>>();
@@ -487,8 +559,48 @@ fn empty_preview_images() -> PreviewImages {
 }
 
 fn plugin_preview_images(definition: &plugin::PluginDefinition) -> PreviewImages {
-    let mut loaded = definition
+    load_preview_images(&definition.preview_images)
+}
+
+fn widget_preview_path<'a>(
+    widget: &WidgetInstance,
+    definition: &'a plugin::PluginDefinition,
+    system_theme: theme::ResolvedTheme,
+) -> Option<&'a std::path::PathBuf> {
+    let preference = settings::widget_theme_preference(widget);
+    let theme_id = if preference == settings::WIDGET_THEME_SYSTEM {
+        let role = match system_theme {
+            theme::ResolvedTheme::Light => plugin::PluginThemeRole::Light,
+            theme::ResolvedTheme::Dark => plugin::PluginThemeRole::Dark,
+        };
+        definition
+            .themes
+            .iter()
+            .find(|theme| theme.role == role)
+            .map(|theme| theme.id.as_str())
+            .unwrap_or_else(|| plugin::default_theme_id(definition))
+    } else {
+        definition
+            .themes
+            .iter()
+            .find(|theme| theme.id == preference)
+            .map(|theme| theme.id.as_str())
+            .unwrap_or_else(|| plugin::default_theme_id(definition))
+    };
+    let suffix = format!("-{theme_id}");
+    definition
         .preview_images
+        .iter()
+        .find(|path| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| stem.ends_with(&suffix))
+        })
+        .or_else(|| definition.preview_images.first())
+}
+
+fn load_preview_images(paths: &[std::path::PathBuf]) -> PreviewImages {
+    let mut loaded = paths
         .iter()
         .take(plugin::MAX_PREVIEW_IMAGES)
         .filter_map(|path| match Image::load_from_path(path) {
@@ -593,6 +705,110 @@ fn plugin_market_status(definition: &plugin::PluginDefinition, locale: i18n::Loc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bundled_widget_fixture() -> (WidgetInstance, plugin::PluginDefinition) {
+        let mut definition = plugin::builtin_plugins().remove(0);
+        definition.id = "com.cryptohud.focus-ticker".into();
+        definition.name = "Focus Ticker".into();
+        definition.preview_images = vec!["preview-light.png".into(), "preview-dark.png".into()];
+        let widget = WidgetInstance {
+            id: "focus-ticker-7".into(),
+            plugin_id: definition.id.clone(),
+            legacy_widget_type: None,
+            name: "Focus Ticker 7".into(),
+            visible: true,
+            layout: settings::WidgetLayout::default(),
+            symbols: vec!["BTC".into()],
+            config: settings::default_widget_config(),
+        };
+        (widget, definition)
+    }
+
+    #[test]
+    fn bundled_default_names_localize_without_changing_saved_names() {
+        let (mut widget, definition) = bundled_widget_fixture();
+        let catalog = plugin::PluginCatalog::from_plugins_for_tests(vec![definition.clone()]);
+        for locale in i18n::Locale::ALL {
+            let expected = format!(
+                "{} {}",
+                i18n::builtin_plugin_title(locale, &definition.id).unwrap(),
+                i18n::ltr_isolate_for_locale(locale, "7")
+            );
+            assert_eq!(
+                widget_display_name_for_catalog(&widget, 0, locale, &catalog),
+                expected
+            );
+            assert_eq!(
+                normalize_widget_name_for_catalog(&widget, &expected, 0, locale, &catalog),
+                "Focus Ticker 7"
+            );
+            assert_eq!(widget.name, "Focus Ticker 7");
+        }
+        widget.name = "My trading desk".into();
+        for locale in i18n::Locale::ALL {
+            assert_eq!(
+                widget_display_name_for_catalog(&widget, 0, locale, &catalog),
+                "My trading desk"
+            );
+            assert_eq!(
+                normalize_widget_name_for_catalog(&widget, "My desk Alpha", 0, locale, &catalog),
+                "My desk Alpha"
+            );
+            assert_eq!(
+                normalize_widget_name_for_catalog(&widget, "", 0, locale, &catalog),
+                "Focus Ticker 7"
+            );
+        }
+        widget.name = "Focus Ticker 99".into();
+        assert_eq!(
+            widget_display_name_for_catalog(&widget, 0, i18n::Locale::ZhHans, &catalog),
+            "Focus Ticker 99"
+        );
+    }
+
+    #[test]
+    fn third_party_default_looking_names_remain_manifest_exact() {
+        let (widget, mut definition) = bundled_widget_fixture();
+        definition.source = plugin::PluginSource::LocalUnsigned;
+        let catalog = plugin::PluginCatalog::from_plugins_for_tests(vec![definition]);
+        for locale in i18n::Locale::ALL {
+            assert_eq!(
+                widget_display_name_for_catalog(&widget, 0, locale, &catalog),
+                "Focus Ticker 7"
+            );
+        }
+    }
+
+    #[test]
+    fn instance_preview_matches_explicit_and_system_themes() {
+        let (mut widget, mut definition) = bundled_widget_fixture();
+        settings::set_widget_theme_preference(&mut widget, "light");
+        assert_eq!(
+            widget_preview_path(&widget, &definition, theme::ResolvedTheme::Dark),
+            definition.preview_images.first()
+        );
+        settings::set_widget_theme_preference(&mut widget, "dark");
+        assert_eq!(
+            widget_preview_path(&widget, &definition, theme::ResolvedTheme::Light),
+            definition.preview_images.get(1)
+        );
+        settings::set_widget_theme_preference(&mut widget, "system");
+        assert_eq!(
+            widget_preview_path(&widget, &definition, theme::ResolvedTheme::Light),
+            definition.preview_images.first()
+        );
+        assert_eq!(
+            widget_preview_path(&widget, &definition, theme::ResolvedTheme::Dark),
+            definition.preview_images.get(1)
+        );
+        definition.preview_images = vec!["author-cover.png".into()];
+        assert_eq!(
+            widget_preview_path(&widget, &definition, theme::ResolvedTheme::Dark),
+            definition.preview_images.first()
+        );
+        definition.preview_images.clear();
+        assert!(widget_preview_path(&widget, &definition, theme::ResolvedTheme::Dark).is_none());
+    }
 
     #[test]
     fn custom_plugin_theme_labels_preserve_manifest_names_in_every_locale() {
