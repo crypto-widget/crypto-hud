@@ -3612,6 +3612,88 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
+    fn trust_card_compact_manifest_and_saved_layouts_keep_user_preferences() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let plugin = catalog.find("com.cryptohud.trust-card").unwrap();
+        assert_eq!(
+            (plugin.default_size.width, plugin.default_size.height),
+            (260, 180)
+        );
+        assert_eq!((plugin.min_symbol_limit, plugin.symbol_limit), (1, 1));
+        assert_eq!(plugin.preview_images.len(), 2);
+        for path in &plugin.preview_images {
+            let image = slint::Image::load_from_path(path).unwrap();
+            assert_eq!((image.size().width, image.size().height), (260, 180));
+        }
+        let definitions = crate::state_bridge::widget_definitions_from_catalog(&catalog);
+        for (width, height, scale, expected_width, expected_height, expected_scale) in [
+            (520, 386, Some(100), 260, 180, 100),
+            (650, 483, Some(125), 325, 225, 125),
+            // Legacy layouts without an explicit scale retain the host's
+            // established inference from the smaller width/height ratio.
+            (520, 386, None, 520, 360, 200),
+            (650, 483, None, 650, 450, 250),
+        ] {
+            let mut saved = serde_json::json!({
+                "widgets": [{
+                    "id": "trust-card-1", "plugin_id": plugin.id,
+                    "name": "My Trust Card",
+                    "layout": {
+                        "x": 210, "y": 130, "always_on_top": false,
+                        "opacity_percent": 85, "locked": true,
+                        "width": width, "height": height
+                    },
+                    "symbols": ["binance:spot:PEPE/USDT"],
+                    "config": {"theme": "dark"}
+                }]
+            });
+            if let Some(scale) = scale {
+                saved["widgets"][0]["layout"]["scale_percent"] = scale.into();
+            }
+            let mut store: crypto_hud_shell_state::LayoutStore =
+                serde_json::from_value(saved).unwrap();
+            let mut expected = store.widgets[0].clone();
+            expected.layout.width = expected_width;
+            expected.layout.height = expected_height;
+            expected.layout.scale_percent = expected_scale;
+            crypto_hud_shell_state::normalize_store_with_catalog(
+                &mut store,
+                0,
+                &definitions,
+                (1920, 1080),
+            );
+            assert_eq!(
+                store.widgets[0], expected,
+                "saved {width}x{height}, scale={scale:?}"
+            );
+        }
+        for count in 1..=8 {
+            let symbols: Vec<_> = ["BTC", "ETH", "SOL", "BNB", "PEPE", "DOGE", "ADA", "XRP"]
+                .into_iter()
+                .take(count)
+                .map(|asset| format!("binance:spot:{asset}/USDT"))
+                .collect();
+            let mut store: crypto_hud_shell_state::LayoutStore =
+                serde_json::from_value(serde_json::json!({
+                    "widgets": [{"id": "trust-card-1", "plugin_id": plugin.id, "symbols": symbols}]
+                }))
+                .unwrap();
+            crypto_hud_shell_state::normalize_store_with_catalog(
+                &mut store,
+                0,
+                &definitions,
+                (1920, 1080),
+            );
+            assert_eq!(
+                store.widgets[0].symbols,
+                ["binance:spot:BTC/USDT"],
+                "{count} configured pairs must normalize to the single-pair contract"
+            );
+        }
+    }
+
+    #[test]
     fn trust_card_chart_omits_horizontal_dotted_grid() {
         let source = repo_plugin_ui_source("com.cryptohud.trust-card");
 
@@ -3620,7 +3702,7 @@ export component ExamplePriceCard inherits Window {
             "trust card chart should not render horizontal dotted guide lines"
         );
         assert!(source.contains("commands: root.chart-line-path;"));
-        assert!(source.contains("commands: root.chart-fill-path;"));
+        assert!(!source.contains("commands: root.chart-fill-path;"));
     }
 
     #[test]

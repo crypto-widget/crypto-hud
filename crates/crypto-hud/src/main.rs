@@ -25,6 +25,8 @@ mod focus_ticker_tests;
 
 #[cfg(test)]
 mod market_compass_tests;
+#[cfg(test)]
+mod trust_card_tests;
 
 #[cfg(test)]
 use std::collections::HashMap;

@@ -280,6 +280,37 @@ leaves the preview windows open for one hour. This runtime smoke reads the app's
 ready marker and does not capture the desktop or send input. Use the focused
 `mint_tile` tests for real Slint rendering, text fit, data states, and interaction.
 
+### Trust Card reference implementation
+
+Trust Card uses a compact 260 × 180 window with a 240 × 160 card. A host-supplied
+coin icon and pair label sit above an eight-slot price; the bottom row combines
+the localized 24-hour change with a small live sparkline. Light ivory-mint and
+dark graphite-green themes share the same geometry and retain their existing
+theme IDs and default dark selection. Mint Tile remains a separate 360 × 360
+card with its existing full chart and source footer.
+
+The floating lock appears on hover or keyboard focus and supports Space/Return.
+Hovering the coin/pair header or using keyboard focus reveals source/freshness details in place of the bottom
+row without changing window size or blocking dragging. Missing prices use a
+neutral placeholder. Loading, chart unavailability, and `market-status-warning`
+keep localized status details visible even without hover; cached prices remain
+readable. Native gradient layers use physical-pixel-aligned origins and clips
+to avoid seams during partial redraw at fractional display DPI. The sparkline
+has no area fill. A one-physical-pixel change to its transparent outer clip guard
+on lock reveal invalidates the whole plot without moving its line or endpoint;
+this works around Slint 1.17 software Path rendering outside the dirty region.
+
+Run `cargo +1.96.0 test --locked -p crypto-hud trust_card` for real Slint rendering,
+text fitting, data states, mouse/keyboard locking and saved-layout normalization.
+Set `CRYPTO_HUD_TRUST_CARD_CAPTURE_DIR` to capture deterministic PPM images for
+visual verification. `scripts/gui-trust-card-runtime-smoke.ps1` checks isolated
+offline native loading, old-size normalization and desktop DPI geometry. It
+accepts themes, scale, opacity, language, color direction, lock/logo settings,
+and 1–8 requested pairs (normalized to the single-pair limit). `-PreviewMatrix`
+shows BTC and PEPE in both themes; `-IconCacheDir` optionally supplies public
+coin artwork for offline previews, and `-KeepOpen` leaves the windows open for
+one hour. The smoke does not capture or automate desktop input.
+
 ### Market Compass reference implementation
 
 Market Compass uses a 480 × 480 circular dial for one to eight pairs. Its default
