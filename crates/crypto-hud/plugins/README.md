@@ -160,6 +160,7 @@ in property <string> change-period-text;
 in property <[string]> quote-base-labels;
 in property <[string]> quote-quote-labels;
 in property <[bool]> quote-price-ready;
+in property <bool> market-status-warning: false;
 in property <[string]> quote-compact-prices;
 in property <[string]> quote-full-prices;
 in property <bool> rtl-layout: false;
@@ -169,10 +170,15 @@ in property <string> chart-line-path;
 in property <string> chart-fill-path;
 in property <bool> chart-ready;
 in property <bool> chart-positive;
+in property <[float]> quote-chart-end-y-ratios;
 ```
 
 `layout-lock-text` 是宿主提供的本地化“锁定位置”标签，属于可选属性，旧插件仍可继续运行。
 锁定控件应提供可勾选的无障碍角色、`layout-locked` 状态、可见焦点，以及空格/回车操作。
+
+`quote-chart-end-y-ratios` 与 `quote-rows` 顺序一致，表示每个币种最后一个图表点的纵坐标，
+单位为绘图区高度的千分之一（顶部 0，底部 1000），没有图表时为 500。
+它是可选输入，轮播组件可用它放置所选币种的尾点，旧插件保持兼容。
 
 `change-period-text` 是本地化的 24 小时涨跌周期标签。上述 `quote-*` 数组
 与 `quote-rows` 一一对应：基础币标签只含基础币；报价币标签包含分隔符（如 `/ USDT`），
@@ -180,12 +186,23 @@ in property <bool> chart-positive;
 不代表数据新鲜；新鲜度和错误提示使用 `updated-text`，图表可用性使用 `chart-ready`。
 这些属性均可选，旧插件继续兼容，不应通过比较翻译字符串推断状态。
 
+`market-status-warning` 是可选结构化状态：所选币种缺少行情、缓存过期，或受数据源/图表错误
+影响时为真；空选择和不影响这些币种的错误不设置该标记。使用已有 `source-text`、
+`updated-text` 展示本地化说明，不能解析其文案判断异常。旧运行时 JSON 默认该字段为假，
+旧插件可以不声明这个输入。
+
 `quote-compact-prices` 将价格限制在 8 个显示字符以内，小数点、正负号和每个下标数字
 均按 1 位计算。连续 4 个及以上前导小数零使用下标压缩，例如 `0.000004110` 显示为
 `0.0₅4110`，下标表示首个非零数字前的零总数。其他超长价格调整小数精度，超长整数
 使用科学计数法。`quote-full-prices` 保留缓存 `f64` 的数值精度，不进行显示舍入，
 极端数量级使用科学计数法；它不是交易所返回的原始字符串。两个数组均保留 RTL 隔离，
-方向控制字符不占显示位；没有缓存价格时为空字符串，不改变行情数据和原有行价格。
+方向控制字符不占显示位；没有缓存价格时为空字符串。
+所有内置组件和插件的 `quote-rows[index].price` 数值统一采用同一套最多 8 位的格式，
+只使用原有 `quote-rows` 的旧插件也会收到紧凑价格。短价格不补零；加载和错误文案
+继续本地化，不受数值 8 位限制。缓存行情、告警计算和完整价格数值保持不变。
+价格栏应按 8 个数字预留宽度，不能依靠省略号截断数值；字符数不能按 UTF-8 字节
+或 RTL 隔离控制符计数。
+
 
 Focus Ticker 提供浅色和深色主题，自然窗口尺寸为 490 × 100，卡片为 470 × 80。
 币对按可用宽度调整字号，折线宽 146px、无底色。锁定按钮默认隐藏，

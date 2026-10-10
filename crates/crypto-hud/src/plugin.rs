@@ -3512,7 +3512,8 @@ export component ExamplePriceCard inherits Window {
 
     #[test]
     fn repo_plugin_visible_text_literals_are_limited_to_non_localized_tokens() {
-        let allowed = [" · "];
+        // Punctuation-only separators and neutral missing-value placeholders.
+        let allowed = [" · ", "—"];
 
         for plugin_id in HOST_SCALE_REPO_PLUGIN_IDS {
             let source = repo_plugin_ui_source(plugin_id);

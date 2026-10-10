@@ -1,9 +1,10 @@
 use anyhow::{bail, Context, Result};
 pub use crypto_hud_core::{evaluate_alerts, AlertCondition, AlertEvaluation, AlertRule};
 mod compact_price;
+pub use compact_price::compact_price as format_compact_price;
 use crypto_hud_core::{
-    format_market_pair_symbol, format_pair_change, format_price, market_pair_source,
-    normalize_market_pair_key, parse_market_pair, AlertQuote, MarketDataSource,
+    format_market_pair_symbol, format_pair_change, market_pair_source, normalize_market_pair_key,
+    parse_market_pair, AlertQuote, MarketDataSource,
 };
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
@@ -1179,9 +1180,13 @@ pub struct WidgetRuntimeView {
     #[serde(default)]
     pub quote_chart_positive: Vec<bool>,
     #[serde(default)]
+    pub quote_chart_end_y_ratios: Vec<i32>,
+    #[serde(default)]
     pub source_name_text: String,
     pub source_text: String,
     pub updated_text: String,
+    #[serde(default)]
+    pub market_status_warning: bool,
     pub chart_line_path: String,
     pub chart_fill_path: String,
     #[serde(default)]
@@ -1280,7 +1285,7 @@ impl QuoteRowView {
     ) -> Self {
         Self {
             symbol: format_pair_symbol_with_options(&snapshot.symbol, display_options),
-            price: format_price(snapshot.price),
+            price: format_compact_price(snapshot.price),
             change: format_pair_change(snapshot.change_percent_24h),
             positive: snapshot.change_percent_24h >= 0.0,
         }
@@ -1297,7 +1302,7 @@ impl QuoteRowView {
     ) -> Self {
         Self {
             symbol: format_pair_symbol_with_options(symbol, display_options),
-            price: format_price(state.price),
+            price: format_compact_price(state.price),
             change: format_pair_change(state.change_percent_24h),
             positive: state.change_percent_24h >= 0.0,
         }
@@ -1351,6 +1356,7 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
         params.has_market_error,
         params.now,
     );
+    let data_health = data_health_for_symbols(params.symbols, params.quote_cache, params.now);
     WidgetRuntimeView {
         widget_id: params.widget_id.to_string(),
         quote_rows: quote_rows_for_symbols_with_options(
@@ -1387,6 +1393,7 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             .collect(),
         quote_chart_ready: quote_charts.iter().map(|chart| chart.ready).collect(),
         quote_chart_positive: quote_charts.iter().map(|chart| chart.positive).collect(),
+        quote_chart_end_y_ratios: quote_charts.iter().map(|chart| chart.end_y_ratio).collect(),
         source_name_text: source_name_text_for_symbols(
             params.symbols,
             params.quote_cache,
@@ -1399,7 +1406,7 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             params.quote_cache,
             params.provider_labels,
             params.labels,
-            data_health_for_symbols(params.symbols, params.quote_cache, params.now),
+            data_health,
             has_market_error,
         ),
         updated_text: updated_text_for_symbols(
@@ -1409,6 +1416,9 @@ pub fn build_widget_runtime_view(params: WidgetRuntimeViewParams<'_>) -> WidgetR
             has_market_error,
             params.now,
         ),
+        market_status_warning: has_market_error
+            || data_health.stale > 0
+            || data_health.connected < data_health.total,
         chart_line_path: chart.line_path,
         chart_fill_path: chart.fill_path,
         chart_up_candle_path: chart.up_candle_path,
@@ -2801,9 +2811,62 @@ mod tests {
         let row = QuoteRowView::from_snapshot(&snapshot);
 
         assert_eq!(row.symbol, "BTC/USDT");
-        assert_eq!(row.price, "106800");
+        assert_eq!(row.price, "106800.1");
         assert_eq!(row.change, "+1.23%");
         assert!(row.positive);
+    }
+
+    #[test]
+    fn all_widget_quote_rows_share_the_eight_slot_price_budget() {
+        let now = Instant::now();
+        for (price, expected) in [
+            (68000.12, "68000.12"),
+            (3420.56, "3420.56"),
+            (152.3478, "152.3478"),
+            (602.45, "602.45"),
+            (0.000004110, "0.0₅4110"),
+            (88888888.0, "88888888"),
+            (99999999.9, "1.0000e8"),
+            (-0.000004110, "-0.0₅411"),
+        ] {
+            let symbol = "binance:spot:PEPE/USDT".to_string();
+            let snapshot = MarketQuoteSnapshot {
+                symbol: symbol.clone(),
+                price,
+                change_percent_24h: -4.86,
+                chart_closes_24h: vec![],
+                chart_candles_24h: vec![],
+                source: MarketDataSource::Binance,
+            };
+            assert_eq!(QuoteRowView::from_snapshot(&snapshot).price, expected);
+            let state = QuoteState::new(price, -4.86, vec![], MarketDataSource::Binance, now);
+            assert_eq!(QuoteRowView::from_state(&symbol, &state).price, expected);
+            let mut cache = QuoteCache::new();
+            cache.insert(symbol.clone(), state);
+            for rtl in [false, true] {
+                let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+                    widget_id: "any-plugin",
+                    symbols: std::slice::from_ref(&symbol),
+                    quote_cache: &cache,
+                    source_prefix: "",
+                    provider_labels: Default::default(),
+                    labels: RuntimeTextLabels {
+                        isolate_numeric_values: rtl,
+                        ..Default::default()
+                    },
+                    has_market_error: false,
+                    now,
+                    display_options: Default::default(),
+                });
+                assert_eq!(view.quote_rows[0].price, view.quote_compact_prices[0]);
+                let visible = view.quote_rows[0]
+                    .price
+                    .replace(['\u{2066}', '\u{2069}'], "");
+                assert_eq!(visible, expected);
+                assert!(visible.chars().count() <= 8);
+                assert_eq!(cache.get(&symbol).unwrap().price, price);
+            }
+        }
     }
 
     #[test]
@@ -2895,7 +2958,7 @@ mod tests {
         assert_eq!(view.source_text, "live feed · Binance · 1/2 live");
         assert_eq!(view.updated_text, "Updated 42s · 1/2 live");
         assert_eq!(view.quote_rows[0].symbol, "BTC/USDT");
-        assert_eq!(view.quote_rows[0].price, "106800");
+        assert_eq!(view.quote_rows[0].price, "106800.1");
         assert_eq!(view.quote_rows[1].symbol, "ETH/USDT");
         assert_eq!(view.quote_rows[1].price, "Connecting");
         assert_eq!(view.quote_price_ready, vec![true, false]);
@@ -2908,6 +2971,73 @@ mod tests {
         assert!(view.chart_line_path.starts_with("M 0.0"));
         assert!(view.chart_fill_path.ends_with(" Z"));
         assert_eq!(view.chart_end_y_ratio, 150);
+        assert_eq!(view.quote_chart_end_y_ratios, vec![150, 500]);
+    }
+
+    #[test]
+    fn per_quote_chart_endpoints_follow_symbol_order_and_missing_data() {
+        let now = Instant::now();
+        let mut cache = QuoteCache::new();
+        for (symbol, closes) in [
+            ("binance:spot:BTC/USDT", vec![100.0, 110.0]),
+            ("binance:spot:ETH/USDT", vec![110.0, 100.0]),
+            ("binance:spot:SOL/USDT", Vec::new()),
+        ] {
+            cache.insert(
+                symbol.to_string(),
+                QuoteState::new(100.0, 0.0, closes, MarketDataSource::Binance, now),
+            );
+        }
+        for (assets, expected, expected_ready) in [
+            (
+                vec!["ETH", "BTC", "SOL", "PEPE"],
+                vec![850, 150, 500, 500],
+                vec![true, true, false, false],
+            ),
+            (
+                vec!["PEPE", "BTC", "ETH"],
+                vec![500, 150, 850],
+                vec![false, true, true],
+            ),
+            (Vec::new(), Vec::new(), Vec::new()),
+        ] {
+            let symbols = assets
+                .iter()
+                .map(|asset| format!("binance:spot:{asset}/USDT"))
+                .collect::<Vec<_>>();
+            let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+                widget_id: "compass-endpoints",
+                symbols: &symbols,
+                quote_cache: &cache,
+                source_prefix: "",
+                provider_labels: ProviderLabels::default(),
+                labels: RuntimeTextLabels::default(),
+                has_market_error: false,
+                now,
+                display_options: WidgetDisplayOptions::default(),
+            });
+            assert_eq!(view.quote_chart_end_y_ratios, expected);
+            assert_eq!(view.quote_chart_end_y_ratios.len(), view.quote_rows.len());
+            assert_eq!(
+                view.quote_chart_end_y_ratios.len(),
+                view.quote_chart_line_paths.len()
+            );
+            assert_eq!(view.quote_chart_ready, expected_ready);
+            assert_eq!(
+                view.chart_end_y_ratio,
+                expected.first().copied().unwrap_or(500)
+            );
+
+            // Views saved before this optional input existed still deserialize.
+            let mut legacy = serde_json::to_value(&view).unwrap();
+            legacy
+                .as_object_mut()
+                .unwrap()
+                .remove("quote_chart_end_y_ratios");
+            let restored: WidgetRuntimeView = serde_json::from_value(legacy).unwrap();
+            assert!(restored.quote_chart_end_y_ratios.is_empty());
+            assert_eq!(restored.quote_rows, view.quote_rows);
+        }
     }
 
     #[test]
@@ -2987,7 +3117,7 @@ mod tests {
 
     #[test]
     fn compact_and_full_prices_preserve_cached_values_and_rtl_isolation() {
-        let now = Instant::now();
+        let now = Instant::now() + Duration::from_secs(3600);
         let symbols = vec!["binance:spot:PEPE/USDT".to_string(), "ETH/USDT".to_string()];
         let mut cache = QuoteCache::new();
         cache.insert(
@@ -3254,7 +3384,7 @@ mod tests {
             "تدفق مباشر · \u{2066}Binance\u{2069} · \u{2066}1/2\u{2069} مباشر"
         );
         assert_eq!(view.quote_rows[0].symbol, "\u{2066}BTC/USDT\u{2069}");
-        assert_eq!(view.quote_rows[0].price, "\u{2066}106800\u{2069}");
+        assert_eq!(view.quote_rows[0].price, "\u{2066}106800.1\u{2069}");
         assert_eq!(view.quote_rows[0].change, "\u{2066}+1.23%\u{2069}");
         assert_eq!(view.quote_rows[1].symbol, "\u{2066}ETH/USDT\u{2069}");
         assert_eq!(view.quote_rows[1].price, "جار الاتصال");
@@ -3344,6 +3474,85 @@ mod tests {
             "live feed · OKX · source issue · 0/1 live"
         );
         assert_eq!(missing_view.updated_text, "Connection failed");
+    }
+
+    #[test]
+    fn runtime_view_market_status_warning_tracks_scoped_data_health() {
+        let now = Instant::now() + Duration::from_secs(STALE_DATA_SECONDS + 1);
+        let mut cache = QuoteCache::new();
+        for (asset, quote_age, chart_error) in [
+            ("BTC", 2, None),
+            ("ETH", STALE_DATA_SECONDS + 1, None),
+            ("SOL", 2, Some("candle request timed out".to_string())),
+        ] {
+            cache.insert(
+                format!("binance:spot:{asset}/USDT"),
+                QuoteState::new_with_chart_status(
+                    100.0,
+                    1.0,
+                    vec![99.0, 100.0],
+                    vec![],
+                    MarketDataSource::Binance,
+                    now - Duration::from_secs(quote_age),
+                    Some(now),
+                    chart_error,
+                ),
+            );
+        }
+
+        for (assets, has_market_error, expected_warning, expected_chart_ready) in [
+            (vec!["BTC"], false, false, true),
+            // Errors on other symbols must not mark a fresh widget as unhealthy.
+            (vec!["BTC"], true, false, true),
+            // A fresh chart cannot hide an expired cached price.
+            (vec!["ETH"], false, true, true),
+            (vec!["ETH"], true, true, true),
+            (vec!["SOL"], false, true, false),
+            (vec!["SOL"], true, true, false),
+            (vec!["PEPE"], false, true, false),
+            (vec!["PEPE"], true, true, false),
+            // All selected quotes count, even when the first one is healthy.
+            (vec!["BTC", "ETH"], false, true, true),
+            (vec!["BTC", "SOL"], false, true, true),
+            (vec!["BTC", "PEPE"], false, true, true),
+            (vec![], false, false, false),
+            (vec![], true, false, false),
+        ] {
+            let symbols = assets
+                .iter()
+                .map(|asset| format!("binance:spot:{asset}/USDT"))
+                .collect::<Vec<_>>();
+            let view = build_widget_runtime_view(WidgetRuntimeViewParams {
+                widget_id: "status-warning",
+                symbols: &symbols,
+                quote_cache: &cache,
+                source_prefix: "live feed",
+                provider_labels: Default::default(),
+                labels: Default::default(),
+                has_market_error,
+                now,
+                display_options: Default::default(),
+            });
+            assert_eq!(
+                view.market_status_warning, expected_warning,
+                "assets={assets:?}, has_market_error={has_market_error}"
+            );
+            assert_eq!(view.chart_ready, expected_chart_ready);
+
+            let serialized = serde_json::to_value(&view).unwrap();
+            let restored: WidgetRuntimeView = serde_json::from_value(serialized.clone()).unwrap();
+            assert_eq!(restored, view);
+
+            let mut legacy = serialized;
+            legacy
+                .as_object_mut()
+                .unwrap()
+                .remove("market_status_warning");
+            let restored_legacy: WidgetRuntimeView = serde_json::from_value(legacy).unwrap();
+            let mut expected_legacy = view;
+            expected_legacy.market_status_warning = false;
+            assert_eq!(restored_legacy, expected_legacy);
+        }
     }
 
     #[test]

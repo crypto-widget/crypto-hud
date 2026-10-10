@@ -19,7 +19,8 @@ pub(crate) fn full_price(price: f64) -> String {
     }
 }
 
-pub(crate) fn compact_price(price: f64) -> String {
+/// Format a widget price using at most eight visible characters.
+pub fn compact_price(price: f64) -> String {
     if !price.is_finite() || price == 0.0 {
         return full_price(price);
     }

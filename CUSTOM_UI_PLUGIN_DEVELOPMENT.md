@@ -168,6 +168,7 @@ in property <string> change-period-text;
 in property <[string]> quote-base-labels;
 in property <[string]> quote-quote-labels;
 in property <[bool]> quote-price-ready;
+in property <bool> market-status-warning: false;
 in property <[string]> quote-compact-prices;
 in property <[string]> quote-full-prices;
 in property <[image]> quote-icons;
@@ -175,9 +176,16 @@ in property <string> chart-line-path;
 in property <string> chart-fill-path;
 in property <bool> chart-ready;
 in property <bool> chart-positive;
+in property <[float]> quote-chart-end-y-ratios;
 ```
 
 `quote-icons[index]` aligns with `quote-rows[index]`. If the icon array is empty or too short, hide icons or render an empty placeholder.
+
+`quote-chart-end-y-ratios[index]` is the selected quote's final chart point,
+in thousandths of the plot height (0 at the top, 1000 at the bottom). It aligns
+with `quote-rows`; missing chart data uses 500. This optional array complements
+the existing per-quote chart paths and lets rotating widgets place their endpoint
+marker correctly instead of reusing the first quote's `chart-end-y-ratio`.
 
 `layout-lock-text` is the localized label for a layout-lock control. It is optional;
 existing plugins remain compatible. Expose a checkable accessibility role and the
@@ -192,6 +200,13 @@ Use `updated-text` for freshness/failure messages and `chart-ready` for chart
 availability. Never infer these states by comparing translated strings. These
 inputs are optional for plugins; older plugins remain compatible.
 
+`market-status-warning` is an optional structured flag for missing or stale
+selected quotes and source/chart failures affecting those symbols. Empty
+selections and unrelated source failures do not set it. Use the existing
+localized `source-text` and `updated-text` to explain the condition; never parse
+those labels to decide whether a warning is present. Older serialized runtime
+views default the flag to `false`, and older plugins may omit the input.
+
 `quote-compact-prices` limits prices to eight visible characters, counting the
 decimal point, sign, and each subscript digit as one. Tiny prices compress four
 or more leading fractional zeros (`0.000004110` → `0.0₅4110`); the subscript is
@@ -200,7 +215,15 @@ to fit; oversized integers use scientific notation. `quote-full-prices` preserve
 the cached `f64` value without display rounding (scientific notation for extreme
 magnitudes), not the original exchange's decimal string. Both arrays preserve RTL
 isolation; directional controls do not consume display slots. Missing cached
-prices have empty strings. Neither array changes quote data or legacy row prices.
+prices have empty strings. Every numeric `quote-rows[index].price` now uses the
+same eight-character formatter, including built-in widgets and older plugins
+that only consume `quote-rows`. Short prices are not padded. Loading/error labels
+remain localized text and are not subject to the numeric character limit.
+Cached market values, alert calculations, and full-price labels remain unchanged.
+Reserve enough width for eight digits at the chosen font size; do not rely on
+ellipsis to shorten numeric prices. This budget counts visible characters, not
+UTF-8 bytes or RTL isolation controls.
+
 
 ### Focus Ticker reference implementation
 
