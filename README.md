@@ -32,6 +32,7 @@
 </p>
 
 <p align="center">
+  <a href="ms-windows-store://pdp/?productid=9NCLXCSR8N2W"><strong>Get it from Microsoft Store</strong></a> ·
   <a href="#quick-start"><strong>Run it locally</strong></a> ·
   <a href="#widget-gallery"><strong>Explore widgets</strong></a> ·
   <a href="CUSTOM_UI_PLUGIN_DEVELOPMENT.md"><strong>Build a widget</strong></a>
@@ -170,6 +171,10 @@ Once running:
 4. Press <kbd>Alt</kbd> + <kbd>C</kbd> whenever you want a clean desktop.
 
 Positions and preferences are saved automatically.
+
+Use **Feedback & suggestions** at the bottom of the settings sidebar to open a new
+GitHub issue in your default browser. GitHub may ask you to sign in before
+submitting your report.
 
 ## Make it yours
 

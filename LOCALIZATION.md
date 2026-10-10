@@ -133,6 +133,12 @@ names, remain unchanged in every locale; show the author's string exactly as
 written.
 User-entered display names such as custom widget names follow the same rule.
 
+Repo-bundled widgets with built-in catalogue metadata localize their generated
+default instance names in the settings list and name editor. Keep the canonical
+saved name when applying those localized defaults, and preserve custom names and
+third-party manifest names. Instance thumbnails show the selected widget theme;
+only the widget library cycles through the available preview images.
+
 Known plugin status reasons from the host, such as Slint compilation failures
 or missing required properties/callbacks, should be formatted in the locale
 layer. Keep dynamic technical details intact, and isolate them for RTL locales.
@@ -230,6 +236,7 @@ cargo +1.96.0 test -p crypto-hud arabic_update_notification_isolates_ltr_release
 cargo +1.96.0 test -p crypto-hud alert_notification_copy_is_localized_for_every_non_english_locale
 cargo +1.96.0 test -p crypto-hud arabic_alert_notification_isolates_ltr_market_values
 cargo +1.96.0 test -p crypto-hud alert_24h_terms_are_locale_appropriate
+cargo +1.96.0 test -p crypto-hud change_period_labels_cover_all_locales
 cargo +1.96.0 test -p crypto-hud runtime_text_bridge_uses_selected_locale_labels
 cargo +1.96.0 test -p crypto-hud runtime_refresh_tracks_locale_sensitive_widget_labels
 cargo +1.96.0 test -p crypto-hud initial_widget_apply_sets_locale_sensitive_widget_labels

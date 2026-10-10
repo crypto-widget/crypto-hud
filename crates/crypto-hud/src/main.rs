@@ -18,6 +18,22 @@ mod widget_host;
 mod window_manager;
 
 #[cfg(test)]
+mod mint_tile_tests;
+
+#[cfg(test)]
+mod focus_ticker_tests;
+
+#[cfg(test)]
+mod market_compass_tests;
+#[cfg(test)]
+mod trust_card_tests;
+#[cfg(test)]
+mod widget_price_tests;
+
+#[cfg(test)]
+mod status_strip_tests;
+
+#[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
 use std::path::PathBuf;
@@ -94,6 +110,7 @@ const LEGACY_DEFAULT_POSITION_STEP: i32 = settings::LEGACY_DEFAULT_POSITION_STEP
 #[cfg(test)]
 const DEFAULT_LAYOUT_GAP: i32 = settings::DEFAULT_LAYOUT_GAP;
 pub(crate) const ABOUT_REPOSITORY_URL: &str = "https://github.com/crypto-widget/crypto-hud";
+pub(crate) const NEW_ISSUE_URL: &str = "https://github.com/crypto-widget/crypto-hud/issues/new";
 pub(crate) const RELEASES_URL: &str = "https://github.com/crypto-widget/crypto-hud/releases";
 pub(crate) const WIDGET_REORDER_DOUBLE_CLICK_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -163,7 +180,31 @@ fn install_gui_smoke_settings_interaction_timer(
                 ui.invoke_confirm_symbol_picker(0, 0);
             }
             let interaction_complete = interaction_complete.clone();
+            let settings_window = settings_window.clone();
+            if let Some(ui) = settings_window.upgrade() {
+                ui.set_widget_action_menu_index(0);
+                ui.set_settings_tab_index(1);
+            }
             Timer::single_shot(Duration::from_millis(140), move || {
+                let Some(ui) = settings_window.upgrade() else {
+                    return;
+                };
+                if ui.get_widget_action_menu_index() != -1 {
+                    eprintln!("GUI settings smoke retained an instance menu after navigation");
+                    return;
+                }
+                ui.set_widget_settings_scroll_y(-24.0);
+                ui.set_widget_action_menu_index(0);
+                ui.invoke_add_widget(0);
+                if ui.get_widget_action_menu_index() != -1
+                    || ui.get_widget_settings_scroll_y().abs() > 0.01
+                    || ui.get_selected_widget_index() != 1
+                {
+                    eprintln!("GUI settings smoke did not reset context for the added instance");
+                    return;
+                }
+                ui.invoke_delete_widget(1);
+                ui.set_settings_tab_index(0);
                 interaction_complete.set(true);
             });
         },
@@ -289,6 +330,43 @@ fn deterministic_gui_smoke_market_events(
                 source: crypto_hud_core::market_pair_source(&subscription.symbol)
                     .unwrap_or_default(),
             })
+        })
+        .collect()
+}
+
+// Precision and trend fixtures used only by the explicitly offline GUI smoke.
+fn focus_ticker_gui_smoke_events(
+    subscriptions: &[market::MarketSubscription],
+) -> Vec<market::MarketEvent> {
+    deterministic_gui_smoke_market_events(subscriptions)
+        .into_iter()
+        .map(|event| {
+            let market::MarketEvent::Snapshot(mut snapshot) = event else {
+                return event;
+            };
+            snapshot.price = match crypto_hud_core::parse_market_pair(&snapshot.symbol)
+                .map(|pair| pair.base)
+                .as_deref()
+            {
+                Some("BTC") => 68000.12,
+                Some("ETH") => 3420.56,
+                Some("SOL") => 152.3478,
+                Some("BNB") => 602.45,
+                _ => 0.000004110,
+            };
+            snapshot.change_percent_24h = -4.86;
+            if !snapshot.chart_closes_24h.is_empty() {
+                snapshot.chart_closes_24h = vec![
+                    106.0, 107.0, 106.5, 107.8, 107.2, 108.0, 107.0, 107.5, 106.3, 106.9, 105.2,
+                    105.7, 105.3, 105.6, 105.1, 105.5, 105.0, 105.6, 104.9, 105.4, 101.0, 101.3,
+                    100.4, 101.1, 100.7, 101.6, 101.9, 101.5, 102.0, 101.1, 100.7,
+                ]
+                .into_iter()
+                .map(|value| value / 100.7 * snapshot.price)
+                .collect();
+                snapshot.chart_candles_24h.clear();
+            }
+            market::MarketEvent::Snapshot(snapshot)
         })
         .collect()
 }
@@ -486,9 +564,12 @@ fn main() -> Result<()> {
     );
 
     let market_updates = if offline_gui_smoke {
-        market::MarketFeed::from_events(deterministic_gui_smoke_market_events(
-            &market_subscriptions,
-        ))
+        let events = if env::var("CRYPTO_HUD_GUI_SMOKE_FOCUS_TICKER").as_deref() == Ok("1") {
+            focus_ticker_gui_smoke_events(&market_subscriptions)
+        } else {
+            deterministic_gui_smoke_market_events(&market_subscriptions)
+        };
+        market::MarketFeed::from_events(events)
     } else {
         market::spawn_market_feed(market_feed_config)
     };

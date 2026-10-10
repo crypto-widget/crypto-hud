@@ -12,8 +12,8 @@ use crate::{
 };
 
 use super::{
-    apply_widget_scale_to_instance, normalize_widget_name,
-    settings_models::widget_theme_preference_for_index, widget_default_number,
+    apply_widget_scale_to_instance,
+    settings_models::{normalize_widget_name_for_catalog, widget_theme_preference_for_index},
     widget_scale_percent_for_definitions,
 };
 
@@ -78,9 +78,13 @@ pub(super) fn apply_widget_settings_to_store(
         .as_deref()
         .and_then(|id| store.widgets.iter_mut().find(|instance| instance.id == id))
     {
-        let fallback_number = widget_default_number(instance, selected_index.max(0) as usize);
-        instance.name =
-            normalize_widget_name(widget_name, instance.widget_type(), fallback_number, locale);
+        instance.name = normalize_widget_name_for_catalog(
+            instance,
+            widget_name,
+            selected_index.max(0) as usize,
+            locale,
+            plugin_catalog,
+        );
         instance.layout.always_on_top = always_on_top;
         instance.layout.locked = layout_locked;
         instance.layout.opacity_percent = clamp_opacity(opacity_percent);

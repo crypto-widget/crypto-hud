@@ -12,7 +12,6 @@ use slint_interpreter::{ComponentInstance, Struct as SlintStruct, Value};
 use crate::{i18n, plugin, PriceCardWindow, QuoteRow};
 
 const STATUS_STRIP_DEFAULT_CELL_WIDTH: i32 = 122;
-const STATUS_STRIP_MIN_CELL_WIDTH: i32 = 112;
 const STATUS_STRIP_MAX_VISIBLE_ROWS: usize = 5;
 // The Slint window keeps a transparent edge around the visible 84px strip so
 // rounded corners can be antialiased by Slint instead of hard-clipped by Win32.
@@ -219,6 +218,12 @@ impl WidgetUi {
         }
     }
 
+    fn set_quote_chart_end_y_ratios(&self, values: &[i32]) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("quote-chart-end-y-ratios", int_model_value(values.to_vec()));
+        }
+    }
+
     pub(crate) fn set_pairs_heading_text(&self, value: SharedString) {
         match self {
             Self::BuiltinPriceCard(ui) => ui.set_pairs_heading_text(value),
@@ -251,10 +256,53 @@ impl WidgetUi {
         }
     }
 
+    fn set_market_status_warning(&self, value: bool) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("market-status-warning", Value::Bool(value));
+        }
+    }
+
     pub(crate) fn set_empty_text(&self, value: SharedString) {
         match self {
             Self::BuiltinPriceCard(ui) => ui.set_empty_text(value),
             Self::DynamicSlint(ui) => ui.set_required_property("empty-text", Value::from(value)),
+        }
+    }
+
+    fn set_quote_labels_and_readiness(&self, view: &widget_runtime::WidgetRuntimeView) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property(
+                "quote-base-labels",
+                string_model_value(&view.quote_base_labels),
+            );
+            ui.set_optional_property(
+                "quote-quote-labels",
+                string_model_value(&view.quote_quote_labels),
+            );
+            ui.set_optional_property(
+                "quote-price-ready",
+                bool_model_value(&view.quote_price_ready),
+            );
+            ui.set_optional_property(
+                "quote-compact-prices",
+                string_model_value(&view.quote_compact_prices),
+            );
+            ui.set_optional_property(
+                "quote-full-prices",
+                string_model_value(&view.quote_full_prices),
+            );
+        }
+    }
+
+    pub(crate) fn set_change_period_text(&self, value: SharedString) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("change-period-text", Value::from(value));
+        }
+    }
+
+    pub(crate) fn set_layout_lock_text(&self, value: SharedString) {
+        if let Self::DynamicSlint(ui) = self {
+            ui.set_optional_property("layout-lock-text", Value::from(value));
         }
     }
 
@@ -488,32 +536,9 @@ fn quote_cell_widths(rows: &[QuoteRowView], total_width: i32) -> Vec<i32> {
     } else {
         STATUS_STRIP_DEFAULT_CELL_WIDTH * count as i32
     };
-    let min_total = STATUS_STRIP_MIN_CELL_WIDTH * count as i32;
-    if total_width <= min_total {
-        return split_even_width(total_width, count);
-    }
-
-    let weights = rows
-        .iter()
-        .take(count)
-        .map(|row| quote_price_width_weight(&row.price))
-        .collect::<Vec<_>>();
-    let weight_sum = weights.iter().sum::<i32>().max(1);
-    let extra_total = total_width - min_total;
-    let mut remaining_extra = extra_total;
-    weights
-        .iter()
-        .enumerate()
-        .map(|(index, weight)| {
-            let extra = if index + 1 == weights.len() {
-                remaining_extra
-            } else {
-                (extra_total * *weight) / weight_sum
-            };
-            remaining_extra -= extra;
-            STATUS_STRIP_MIN_CELL_WIDTH + extra
-        })
-        .collect()
+    // Every price has the same eight-slot budget. Keep columns stable when
+    // values, precision, localized loading labels, or RTL controls change.
+    split_even_width(total_width, count)
 }
 
 fn split_even_width(total_width: i32, count: usize) -> Vec<i32> {
@@ -531,10 +556,6 @@ fn split_even_width(total_width: i32, count: usize) -> Vec<i32> {
             base_width + extra
         })
         .collect()
-}
-
-fn quote_price_width_weight(price: &str) -> i32 {
-    (price.chars().count() as i32 - 3).clamp(1, 6)
 }
 
 pub(crate) fn logical_size_from_physical(
@@ -573,12 +594,14 @@ pub(crate) fn apply_runtime_view_to_widget(
     ui.set_hide_quote_asset(display_options.hide_quote_asset);
     ui.set_show_header(display_options.show_header);
     ui.set_quote_assets(&view.quote_assets);
+    ui.set_quote_labels_and_readiness(view);
     ui.set_quote_chart_line_paths(&view.quote_chart_line_paths);
     ui.set_quote_chart_fill_paths(&view.quote_chart_fill_paths);
     ui.set_quote_chart_up_candle_paths(&view.quote_chart_up_candle_paths);
     ui.set_quote_chart_down_candle_paths(&view.quote_chart_down_candle_paths);
     ui.set_quote_chart_ready(&view.quote_chart_ready);
     ui.set_quote_chart_positive(&view.quote_chart_positive);
+    ui.set_quote_chart_end_y_ratios(&view.quote_chart_end_y_ratios);
     ui.set_quote_cell_widths(quote_cell_widths(
         &view.quote_rows,
         cell_width_basis - STATUS_STRIP_WINDOW_PADDING * 2,
@@ -586,6 +609,7 @@ pub(crate) fn apply_runtime_view_to_widget(
     ui.set_source_text(view.source_text.clone().into());
     ui.set_source_name_text(view.source_name_text.clone().into());
     ui.set_updated_text(view.updated_text.clone().into());
+    ui.set_market_status_warning(view.market_status_warning);
     ui.set_chart_line_path(view.chart_line_path.clone().into());
     ui.set_chart_fill_path(view.chart_fill_path.clone().into());
     ui.set_chart_up_candle_path(view.chart_up_candle_path.clone().into());
@@ -655,8 +679,18 @@ mod tests {
         let widths = quote_cell_widths(&[row("59800"), row("1594"), row("100250")], 408);
 
         assert_eq!(widths.iter().sum::<i32>(), 408);
-        assert!(widths[2] > widths[1]);
-        assert!(widths[0] > widths[1]);
+        assert_eq!(widths, vec![136, 136, 136]);
+        assert_eq!(
+            quote_cell_widths(
+                &[row("0.0₅4110"), row("88888888"), row("\u{2066}1\u{2069}")],
+                408
+            ),
+            widths
+        );
+        assert_eq!(
+            quote_cell_widths(&[row("1"), row("Connecting")], 245),
+            vec![123, 122]
+        );
     }
 
     #[test]

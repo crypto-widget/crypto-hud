@@ -32,6 +32,7 @@
 </p>
 
 <p align="center">
+  <a href="ms-windows-store://pdp/?productid=9NCLXCSR8N2W"><strong>从 Microsoft Store 下载</strong></a> ·
   <a href="#快速开始"><strong>本地运行</strong></a> ·
   <a href="#组件效果"><strong>查看组件</strong></a> ·
   <a href="CUSTOM_UI_PLUGIN_DEVELOPMENT.md"><strong>开发组件</strong></a>
@@ -162,6 +163,9 @@ cargo run -p crypto-hud -- --widgets 3
 4. 想要干净桌面时，按 <kbd>Alt</kbd> + <kbd>C</kbd>。
 
 组件位置和偏好设置会自动保存。
+
+点击设置窗口左侧栏底部的 **反馈建议**，即可在默认浏览器中打开 GitHub
+的新建 Issue 页面。提交反馈前，GitHub 可能会要求登录。
 
 ## 做成你喜欢的样子
 

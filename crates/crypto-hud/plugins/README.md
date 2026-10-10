@@ -155,6 +155,14 @@ in property <int> content-opacity;
 
 ```slint
 in property <string> source-name-text;
+in property <string> layout-lock-text;
+in property <string> change-period-text;
+in property <[string]> quote-base-labels;
+in property <[string]> quote-quote-labels;
+in property <[bool]> quote-price-ready;
+in property <bool> market-status-warning: false;
+in property <[string]> quote-compact-prices;
+in property <[string]> quote-full-prices;
 in property <bool> rtl-layout: false;
 in property <float> widget-scale: 1.0;
 in property <[image]> quote-icons;
@@ -162,7 +170,126 @@ in property <string> chart-line-path;
 in property <string> chart-fill-path;
 in property <bool> chart-ready;
 in property <bool> chart-positive;
+in property <[float]> quote-chart-end-y-ratios;
 ```
+
+`layout-lock-text` 是宿主提供的本地化“锁定位置”标签，属于可选属性，旧插件仍可继续运行。
+锁定控件应提供可勾选的无障碍角色、`layout-locked` 状态、可见焦点，以及空格/回车操作。
+
+`quote-chart-end-y-ratios` 与 `quote-rows` 顺序一致，表示每个币种最后一个图表点的纵坐标，
+单位为绘图区高度的千分之一（顶部 0，底部 1000），没有图表时为 500。
+它是可选输入，轮播组件可用它放置所选币种的尾点，旧插件保持兼容。
+
+`change-period-text` 是本地化的 24 小时涨跌周期标签。上述 `quote-*` 数组
+与 `quote-rows` 一一对应：基础币标签只含基础币；报价币标签包含分隔符（如 `/ USDT`），
+隐藏报价币时为空，两个标签均保留 RTL 隔离。`quote-price-ready` 表示存在可显示的缓存价格，
+不代表数据新鲜；新鲜度和错误提示使用 `updated-text`，图表可用性使用 `chart-ready`。
+这些属性均可选，旧插件继续兼容，不应通过比较翻译字符串推断状态。
+
+`market-status-warning` 是可选结构化状态：所选币种缺少行情、缓存过期，或受数据源/图表错误
+影响时为真；空选择和不影响这些币种的错误不设置该标记。使用已有 `source-text`、
+`updated-text` 展示本地化说明，不能解析其文案判断异常。旧运行时 JSON 默认该字段为假，
+旧插件可以不声明这个输入。
+
+`quote-compact-prices` 将价格限制在 8 个显示字符以内，小数点、正负号和每个下标数字
+均按 1 位计算。连续 4 个及以上前导小数零使用下标压缩，例如 `0.000004110` 显示为
+`0.0₅4110`，下标表示首个非零数字前的零总数。其他超长价格调整小数精度，超长整数
+使用科学计数法。`quote-full-prices` 保留缓存 `f64` 的数值精度，不进行显示舍入，
+极端数量级使用科学计数法；它不是交易所返回的原始字符串。两个数组均保留 RTL 隔离，
+方向控制字符不占显示位；没有缓存价格时为空字符串。
+所有内置组件和插件的 `quote-rows[index].price` 数值统一采用同一套最多 8 位的格式，
+只使用原有 `quote-rows` 的旧插件也会收到紧凑价格。短价格不补零；加载和错误文案
+继续本地化，不受数值 8 位限制。缓存行情、告警计算和完整价格数值保持不变。
+价格栏应按 8 个数字预留宽度，不能依靠省略号截断数值；字符数不能按 UTF-8 字节
+或 RTL 隔离控制符计数。
+
+`cargo +1.96.0 test --locked -p crypto-hud widget_price_tests` 使用真实 Slint 字体
+测量各组件的价格栏，覆盖浅深主题、30%–200% 缩放、主流币种、PEPE 和超长数值。
+`scripts/gui-eight-slot-prices-smoke.ps1` 在隔离状态下验证全部组件的原生窗口；
+可用 `-SymbolCount 1` / `-SymbolCount 8` 和 `-ScalePercent 30` / `200` 检查边界。
+
+Status Strip 保持每格 122 × 84、窗口四周 4px 留白及 1–5 个币对的横条布局。
+保留旧配置的 `default` 主题 ID 并赋予浅色角色，新增 `dark` 深色主题。
+价格按最多 8 位预留固定宽度；未就绪行情用中性占位，涨跌幅带本地化 24 小时周期。
+保留原版青、蓝、橙、黄、绿的立体彩色分块、高光及暗边，深色主题采用同色系深色渐变。
+背景色用于装饰和分块识别；底行直接显示方向三角和涨跌幅，周期标签右对齐。
+箭头方向遵循实际涨跌，箭头与文字颜色共同遵守 `red-up-enabled`；浅色黄色块使用深色变体。
+行情未就绪时隐藏箭头。方向图标来自 [Bootstrap Icons 1.11.3](https://github.com/twbs/icons/tree/v1.11.3)，
+每个 SVG 保留 MIT 许可证。
+渐变采用对齐物理像素的圆角切片，避免透明窗口悬浮重绘产生细缝。
+正常状态仅显示币对、价格和涨跌幅，保留完整色块；来源和更新时间收进底部边缘的悬浮详情。
+宿主的 `market-status-warning` 控制右上角的小异常提示点，悬浮或无障碍读取可查看详情。
+详情不拦截拖动。锁按钮仅在悬浮或键盘焦点时浮现于右下角，临时覆盖最后一个周期标签，
+不遮挡币对、价格或涨跌幅，支持空格、回车及无障碍操作。
+运行 `cargo +1.96.0 test --locked -p crypto-hud status_strip` 验证，设置
+`CRYPTO_HUD_STATUS_STRIP_CAPTURE_DIR` 可输出真实 Slint PPM 渲染图。
+`scripts/gui-status-strip-runtime-smoke.ps1` 用隔离离线状态验证原生窗口、主题、缩放、
+DPI 和数量规范化，接受 1–8 个请求币对并限制显示为最多 5 个，不调用桌面截图或输入。
+
+Focus Ticker 提供浅色和深色主题，自然窗口尺寸为 490 × 100，卡片为 470 × 80。
+币对按可用宽度调整字号，折线宽 146px、无底色。锁定按钮默认隐藏，
+鼠标悬浮于组件或使用键盘聚焦时浮现在右上角，不预留横向空间，也不挤压图表。
+价格上边距为 6px，底行区域下边距为 8px，保持原有字号与图表高度。
+交易对栏宽 112px，交易对、价格和图表之间均留 8px 间距。
+价格栏宽 168px，以 8 个显示位适配，统一采用 38px 字号。悬浮价格显示完整缓存数值，
+提示浮层不改变卡片宽度，也不拦截价格区域的拖动。
+辅助信息对齐在同一底行；两套主题统一采用 Segoe UI，价格字重减轻，锁图标为 17px。
+该插件只显示一个币对，超过数量限制的配置由宿主规范化。
+锁图标采用 [Feather 4.29.2](https://github.com/feathericons/feather/tree/v4.29.2)，
+每个 SVG 内保留 MIT 许可证。
+
+可运行 `scripts/gui-focus-ticker-smoke.ps1` 验证隔离状态下的两个原生窗口，支持
+`-ScalePercent`、`-OpacityPercent`、`-Language`、`-RedUp` 和 `-SymbolCount 1..8`。
+`-KeepOpen` 将窗口保留一小时供检查。
+`-PriceMatrix` 可用固定离线价格同时展示 BTC、ETH、SOL、BNB、PEPE 的两套主题，
+建议使用 100% 缩放查看十个窗口。运行
+`cargo +1.96.0 test --locked -p crypto-hud focus_ticker` 检查文字适配、空数据、
+加载/失败状态及键盘/鼠标锁定；设置 `CRYPTO_HUD_FOCUS_CAPTURE_DIR` 后会额外输出
+真实 Slint 组件的两套 PPM 渲染图，可转换为插件 PNG 预览。
+
+Mint Tile 使用 360 × 360 的单币种原生窗口。浅色主题采用低饱和薄荷色，深色主题采用深灰绿；
+圆角渐变、细边框和柔和阴影由 Slint 原生绘制，避免单倍率材质图片在缩放和高 DPI 下变糊。
+价格保持最高信息层级，币对、来源、更新信息减轻字重，涨跌胶囊缩小并显示本地化 24 小时周期。
+价格栏按最多 8 个显示字符适配，包括 PEPE 压缩价格；没有就绪价格时，价格与涨跌均使用中性占位，
+图表就绪状态独立判断。无行情时在图表区域显示宿主 `updated-text` 状态；有行情时来源与更新
+状态在底部各占一行，不使用始终绿色的连接指示点。软件渲染器不支持圆角渐变裁剪和 BoxShadow，
+因此使用原生圆角分层实现渐变与阴影，保持缩放时的清晰边缘。
+锁定控件采用锁图标，只在悬浮或键盘聚焦时显示，已锁定也不常显；它不占布局空间，
+支持空格、回车和可见焦点。主题 ID 与单币种限制保持兼容。
+
+Trust Card 使用 260 × 180 的紧凑窗口，卡片为 240 × 160；上方为宿主币种图标和币对，
+中间价格按最多 8 位适配，下方并排显示本地化 24 小时涨跌与迷你趋势图。浅色采用奶白薄荷，
+深色采用石墨绿，保留既有主题 ID、默认深色和单币种限制。Mint Tile 继续保持现有的
+360 × 360 完整走势图与来源页脚。
+锁定控件仅在悬浮或键盘聚焦时浮现，支持空格/回车；来源与更新时间在悬浮币种/币对区域或键盘聚焦时
+替换底行显示，不改变尺寸或阻碍拖动。未就绪价格显示中性占位；加载、图表不可用或
+`market-status-warning` 为真时持续显示本地化状态，缓存价格仍然可见。原生渐变的全局起点
+和裁剪带都按物理像素对齐，避免分数 DPI 下局部重绘产生横缝。迷你折线不使用面积填充；
+锁显示切换时，其外层透明裁剪余量改变 1 个物理像素，让整个绘图区失效重绘，折线与尾点
+位置保持不变，以兼容 Slint 1.17 软件 Path 超出脏区域重复混色的问题。
+运行 `cargo +1.96.0 test --locked -p crypto-hud trust_card` 检查真实 Slint 渲染、文字适配、
+行情状态、锁定/拖动和旧尺寸规范化；设置 `CRYPTO_HUD_TRUST_CARD_CAPTURE_DIR` 可输出 PPM。
+运行 `scripts/gui-trust-card-runtime-smoke.ps1` 验证隔离原生窗口、离线数据和 DPI，支持主题、
+缩放、透明度、语言、配色方向、锁定、图标与 1–8 个请求币对（规范化为 1 个）。
+`-PreviewMatrix` 展示 BTC/PEPE 两套主题，`-IconCacheDir` 可提供离线币种图稿，
+`-KeepOpen` 保留窗口一小时；脚本不截取桌面或自动操作桌面输入。
+
+Market Compass 的默认浅色主题采用香槟金表盘、陶瓷徽章和独立币种图稿。
+同款深色主题使用石墨黑陶瓷、烟金拉丝边框和暖灰白文字，保持相同几何、交互和预滤波素材规格；
+深色 XRP、ADA 图标采用更亮色调以保持辨识度。既有主题 ID 保持兼容，新实例默认使用浅色。
+自然尺寸为 480 × 480，支持 1–8 个币种；价格栏宽 300px，采用固定 44px 字号适配最多 8 位，
+价格就绪和图表就绪相互独立。BTC、ETH、SOL、BNB、XRP、DOGE、ADA、PEPE 使用随插件提供的
+参考图稿；其他币种继续读取宿主图标，缺少图标时显示币种名称。
+点击徽章以最短弧线旋转至正上方，标签始终正立；悬浮或键盘聚焦时暂停自动轮播，方向键切换币种。
+锁定按钮悬浮显示，不占布局宽度，并支持键盘聚焦、空格和回车。
+软件渲染器采用最近邻纹理采样、不支持 Path 渐变，因此素材按 100/125/150/200% 预滤波，
+结合系统 DPI 和组件缩放选择；浅色表盘最高 896px，深色在 150% 以上复用 720px 素材，
+以满足单素材 1 MiB 和整个双主题插件目录 5 MiB 限制。
+动态图表填充使用物理像素对齐的裁剪带衰减透明度，价格、路径、尾点和涨跌方向来自真实宿主数据。
+运行 `scripts/gui-market-compass-smoke.ps1` 检查隔离原生窗口，支持主题、数量、PEPE、缩放、
+透明度、语言、涨跌配色、图标和锁定参数；`-KeepOpen` 保留窗口一小时。
+运行 `cargo +1.96.0 test --locked -p crypto-hud market_compass` 验证轮播、输入、渲染和素材限制；
+设置 `CRYPTO_HUD_MARKET_COMPASS_CAPTURE_DIR` 可输出真实 Slint 参考渲染图。
 
 插件 Slint 文件中需要定义 `QuoteRow`：
 
@@ -482,9 +609,33 @@ mise run check
 powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```
 
-Status Strip 的圆角装饰使用自包含 SVG，避免软件渲染器的渐变矩形覆盖圆角。
+Mint Tile 的聚焦测试检查真实 Slint 渲染、文字适配、数据状态及交互。
+运行时 smoke 使用隔离状态和离线行情，检查插件加载、数据行、锁定状态以及当前桌面 DPI 下的
+窗口尺寸，通过应用计时器退出，不调用桌面截图、输入或 UI Automation：
+
+```powershell
+cargo +1.96.0 test --locked -p crypto-hud mint_tile
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -Theme both
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -FirstAsset PEPE -ScalePercent 30
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -Theme dark -ScalePercent 200 -Language ar -RedUp -Locked -NoLogos
+```
+
+运行时 smoke 还支持 `-OpacityPercent` 和 `-KeepOpen`；后者保留预览窗口一小时。
+在可使用桌面截图与输入自动化的会话中，可以额外运行交互 smoke，检查鼠标锁定/解锁、拖动和
+无障碍操作：
+
+```powershell
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -ScalePercent 30
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -Language ar -RedUp -LockLight
+```
+
+需要同步浅色和深色预览图时，以默认 100% 组件缩放运行 `-PaperBackdrop -UpdatePreviews`；
+交互脚本会从完整原生窗口截图生成 360 × 360 预览，避免 DPI 裁切和相邻卡片透入透明边缘。
+
+Status Strip 的圆角装饰使用物理像素对齐的原生切片，避免软件渲染器的渐变矩形覆盖圆角。
 修改后可运行 `scripts/update-status-strip-preview.ps1`，从带透明通道的离屏快照
-重建预览图；该脚本同时检查空数据、1–5 个币对、浅色/深色、锁定状态、缩放和 DPI。
+重建浅色预览图；该脚本同时检查空数据、1–5 个币对、浅色/深色、锁定状态、缩放和 DPI。
 
 手动 GUI smoke：
 

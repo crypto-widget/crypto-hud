@@ -906,7 +906,13 @@ fn refresh_runtime_symbols_from_store(
             runtime
                 .ui
                 .set_empty_text(i18n::text(locale).empty_pairs.into());
+            runtime
+                .ui
+                .set_layout_lock_text(i18n::text(locale).always_on_top.into());
             runtime.ui.set_rtl_layout(i18n::is_rtl(locale));
+            runtime
+                .ui
+                .set_change_period_text(i18n::change_period_label(locale).into());
         }
     }
 }
@@ -954,7 +960,9 @@ fn apply_instance_to_widget(request: ApplyInstanceRequest<'_>) {
     });
     ui.set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());
     ui.set_empty_text(text.empty_pairs.into());
+    ui.set_layout_lock_text(text.always_on_top.into());
     ui.set_rtl_layout(i18n::is_rtl(locale));
+    ui.set_change_period_text(i18n::change_period_label(locale).into());
     ui.set_pin_to_top(instance.layout.always_on_top);
     ui.set_layout_locked(instance.layout.locked);
     ui.set_theme_name(widget_theme_name(instance, plugin_catalog).into());
@@ -1514,6 +1522,7 @@ mod tests {
             "runtime.locale = locale;",
             ".set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());",
             ".set_empty_text(i18n::text(locale).empty_pairs.into());",
+            ".set_layout_lock_text(i18n::text(locale).always_on_top.into());",
             "runtime.ui.set_rtl_layout(i18n::is_rtl(locale));",
         ] {
             assert!(
@@ -1539,6 +1548,7 @@ mod tests {
             "let text = i18n::text(locale);",
             "ui.set_pairs_heading_text(widget_heading(instance.widget_type(), locale).into());",
             "ui.set_empty_text(text.empty_pairs.into());",
+            "ui.set_layout_lock_text(text.always_on_top.into());",
             "ui.set_rtl_layout(i18n::is_rtl(locale));",
         ] {
             assert!(

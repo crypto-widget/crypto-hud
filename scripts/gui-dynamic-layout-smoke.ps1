@@ -46,8 +46,8 @@ $seedWidgets = @(
             always_on_top = $false
             opacity_percent = 96
             locked = $false
-            width = 1025
-            height = 195
+            width = 613
+            height = 125
         }
         symbols = @("ETH")
         config = [ordered]@{}
@@ -184,9 +184,10 @@ try {
     }
 
     Assert-Widget $widgets["quote-board-1"] 274 80 1 1.00 100
-    Assert-Widget $widgets["plugin-ticker-2"] 1025 195 1 1.25 125
+    Assert-Widget $widgets["plugin-ticker-2"] 613 125 1 1.25 125
     Assert-Widget $widgets["plugin-strip-3"] 561 138 3 1.50 150
-    Assert-Widget $widgets["plugin-card-4"] 520 386 1 1.00 100
+    # The legacy 520px-wide card now maps to 200% of the compact 260x180 design.
+    Assert-Widget $widgets["plugin-card-4"] 520 360 1 2.00 200
 } finally {
     Pop-Location
     Remove-Item Env:\CRYPTO_HUD_STATE_DIR -ErrorAction SilentlyContinue

@@ -14,8 +14,8 @@
     "filesystem": false
   },
   "defaultSize": {
-    "width": 520,
-    "height": 386
+    "width": 260,
+    "height": 180
   },
   "minSymbolLimit": 1,
   "symbolLimit": 1,

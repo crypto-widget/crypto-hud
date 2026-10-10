@@ -22,8 +22,8 @@ $StateFile = Join-Path $StateDir "layouts.json"
 $StdoutFile = Join-Path $StateDir "stdout.log"
 $StderrFile = Join-Path $StateDir "stderr.log"
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-$OriginalCardBackgroundLine = `
-    "    property <color> card-background: root.light-theme ? #f7fcfff6 : #0d1826f6;"
+$OriginalSurfaceLine = `
+    "    property <color> surface: root.light-theme ? #f7faff : #1c222a;"
 
 function Assert-PathInside([string]$Path, [string]$Root, [string]$Label) {
     $fullPath = [System.IO.Path]::GetFullPath($Path)
@@ -45,9 +45,9 @@ if (-not (Test-Path -LiteralPath $FocusTickerSourceFile -PathType Leaf)) {
 $FocusTickerSourceTemplate = Get-Content -LiteralPath $FocusTickerSourceFile -Raw
 if ([regex]::Matches(
         $FocusTickerSourceTemplate,
-        [regex]::Escape($OriginalCardBackgroundLine)
+        [regex]::Escape($OriginalSurfaceLine)
     ).Count -ne 1) {
-    throw "Focus Ticker card-background fixture line changed unexpectedly"
+    throw "Focus Ticker surface fixture line changed unexpectedly"
 }
 
 if (Test-Path $StateDir) {
@@ -69,9 +69,9 @@ function Write-FocusTickerRevision(
     [string]$Revision
 ) {
     $replacement = `
-        "    property <color> card-background: root.light-theme ? $LightColor : $DarkColor;"
+        "    property <color> surface: root.light-theme ? $LightColor : $DarkColor;"
     $source = $FocusTickerSourceTemplate.Replace(
-        $OriginalCardBackgroundLine,
+        $OriginalSurfaceLine,
         $replacement
     ).TrimEnd()
     $source += "`r`n// hot-reload-smoke revision: $Revision`r`n"

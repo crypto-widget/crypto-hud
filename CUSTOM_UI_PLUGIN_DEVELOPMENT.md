@@ -163,14 +163,217 @@ Optional properties:
 ```slint
 in property <bool> rtl-layout: false;
 in property <string> source-name-text;
+in property <string> layout-lock-text;
+in property <string> change-period-text;
+in property <[string]> quote-base-labels;
+in property <[string]> quote-quote-labels;
+in property <[bool]> quote-price-ready;
+in property <bool> market-status-warning: false;
+in property <[string]> quote-compact-prices;
+in property <[string]> quote-full-prices;
 in property <[image]> quote-icons;
 in property <string> chart-line-path;
 in property <string> chart-fill-path;
 in property <bool> chart-ready;
 in property <bool> chart-positive;
+in property <[float]> quote-chart-end-y-ratios;
 ```
 
 `quote-icons[index]` aligns with `quote-rows[index]`. If the icon array is empty or too short, hide icons or render an empty placeholder.
+
+`quote-chart-end-y-ratios[index]` is the selected quote's final chart point,
+in thousandths of the plot height (0 at the top, 1000 at the bottom). It aligns
+with `quote-rows`; missing chart data uses 500. This optional array complements
+the existing per-quote chart paths and lets rotating widgets place their endpoint
+marker correctly instead of reusing the first quote's `chart-end-y-ratio`.
+
+`layout-lock-text` is the localized label for a layout-lock control. It is optional;
+existing plugins remain compatible. Expose a checkable accessibility role and the
+current `layout-locked` state, and support Space/Return with a visible focus indicator.
+
+`change-period-text` is the localized compact 24-hour change label. The
+`quote-*` arrays align with `quote-rows`: base labels contain the base asset;
+quote labels include the separator (for example `/ USDT`) and are empty when
+the user hides quote assets. Both labels preserve RTL isolation. `quote-price-ready`
+indicates whether a cached price exists; it does **not** guarantee freshness.
+Use `updated-text` for freshness/failure messages and `chart-ready` for chart
+availability. Never infer these states by comparing translated strings. These
+inputs are optional for plugins; older plugins remain compatible.
+
+`market-status-warning` is an optional structured flag for missing or stale
+selected quotes and source/chart failures affecting those symbols. Empty
+selections and unrelated source failures do not set it. Use the existing
+localized `source-text` and `updated-text` to explain the condition; never parse
+those labels to decide whether a warning is present. Older serialized runtime
+views default the flag to `false`, and older plugins may omit the input.
+
+`quote-compact-prices` limits prices to eight visible characters, counting the
+decimal point, sign, and each subscript digit as one. Tiny prices compress four
+or more leading fractional zeros (`0.000004110` → `0.0₅4110`); the subscript is
+the total zero count before the first nonzero digit. Other prices round decimals
+to fit; oversized integers use scientific notation. `quote-full-prices` preserves
+the cached `f64` value without display rounding (scientific notation for extreme
+magnitudes), not the original exchange's decimal string. Both arrays preserve RTL
+isolation; directional controls do not consume display slots. Missing cached
+prices have empty strings. Every numeric `quote-rows[index].price` now uses the
+same eight-character formatter, including built-in widgets and older plugins
+that only consume `quote-rows`. Short prices are not padded. Loading/error labels
+remain localized text and are not subject to the numeric character limit.
+Cached market values, alert calculations, and full-price labels remain unchanged.
+Reserve enough width for eight digits at the chosen font size; do not rely on
+ellipsis to shorten numeric prices. This budget counts visible characters, not
+UTF-8 bytes or RTL isolation controls.
+
+### Status Strip reference implementation
+
+Status Strip keeps its 122 × 84 cells, 4px window padding, and one-to-five-pair
+horizontal layout. The existing `default` theme ID now has the light role; `dark`
+adds the matching dark palette without invalidating saved default selections.
+Prices reserve eight characters at a consistent size. Missing quotes use neutral
+placeholders, and each change includes the localized 24-hour label. The original
+cyan, blue, orange, yellow, and green faces retain their gloss and shaded edges;
+the dark theme uses deeper versions of the same colors. These decorative colors
+identify positions. The unboxed bottom row uses a filled direction caret followed
+by the signed change, with the period right-aligned. Caret direction follows the
+quote; caret and text colors follow `red-up-enabled`, with darker variants on the
+light yellow face. Missing quotes hide the caret.
+Physical-pixel-aligned rounded slices render the gradients without hover seams.
+
+Direction carets use Bootstrap Icons 1.11.3; each SVG includes its MIT license.
+
+The full-height colored faces show only pair, price, and change during normal use.
+Source and freshness details appear when hovering the lower edge. Data problems
+show a small amber indicator whose hover and accessibility label reveal the same
+details. These passive overlays never capture drag input. The floating lock
+appears only on hover or keyboard focus, temporarily covering the final period
+label, and supports Space/Return and accessibility actions.
+
+Run `cargo +1.96.0 test --locked -p crypto-hud status_strip` for rendering, data
+states, scale, DPI, input, and compatibility checks. Set
+`CRYPTO_HUD_STATUS_STRIP_CAPTURE_DIR` to export deterministic Slint PPM captures.
+`scripts/gui-status-strip-runtime-smoke.ps1` validates isolated native windows,
+both themes, and 1–8 requested pairs (normalized to at most five). It accepts
+scale, opacity, language, color direction, and lock settings; it does not capture
+the desktop or automate desktop input.
+
+### Focus Ticker reference implementation
+
+Focus Ticker has light and dark themes and a natural window size of 490 × 100.
+The 470 × 80 card uses fitted pair typography, a 146px-wide unfilled sparkline,
+and a floating keyboard-accessible lock control. The lock is hidden by default,
+appears while hovering the widget or using keyboard focus, and overlays the
+chart without reserving width or changing the layout. It supports one pair; the
+host normalizes larger selections to the manifest's single-pair limit.
+The card uses a 6px top inset for the price and an 8px bottom inset for the footer.
+The pair column is 112px wide, with 8px gaps between the pair, price, and chart.
+Prices use eight display slots in a 168px column with a consistent 38px type size.
+Hovering the price reveals its full cached value in a passive overlay that preserves
+dragging and does not resize the card. Supporting information shares a common footer row;
+both themes use Segoe UI with a lighter price weight and a 17px lock icon.
+Lock icons are unmodified [Feather 4.29.2](https://github.com/feathericons/feather/tree/v4.29.2)
+assets, with the MIT license included in each SVG.
+
+Run `scripts/gui-focus-ticker-smoke.ps1` for isolated offline native validation.
+It accepts `-ScalePercent`, `-OpacityPercent`, `-Language`, `-RedUp`, and
+`-SymbolCount 1..8`; `-KeepOpen` leaves both themes open for one hour of review.
+`-PriceMatrix` opens BTC, ETH, SOL, BNB, and PEPE in both themes using fixed offline
+prices; use 100% scale for the ten-window comparison layout.
+`cargo +1.96.0 test --locked -p crypto-hud focus_ticker` verifies text fitting,
+empty/loading/error states, and keyboard/mouse locking. Set
+`CRYPTO_HUD_FOCUS_CAPTURE_DIR` to an output directory to render both themes as
+PPM files for PNG preview conversion; captures come from the real Slint component.
+
+### Mint Tile reference implementation
+
+Mint Tile displays one pair in a 360 × 360 native window. The light theme uses a
+muted mint surface; the dark theme uses deep gray-green. Rounded Slint surfaces
+with a layered gradient, a subtle border, and a soft shadow replace the stretched
+material image so the
+surface stays crisp across widget scale and display DPI. Price remains the primary
+element, with lighter pair, source, and update labels and a smaller change badge.
+
+The price column accommodates eight visible characters without truncation,
+including compressed PEPE prices. The change badge includes the host's localized
+24-hour period. Without a ready price, price and change use neutral placeholders;
+chart readiness is independent. Without a price, the chart area shows localized
+`updated-text`; with a price, the footer shows it alongside the source on separate
+lines. There is no permanently green status indicator. Rounded gradients and
+shadows use native layers because the software renderer does not support rounded
+gradient clipping or `BoxShadow`.
+The layout-lock control uses a lock icon and appears only on hover or keyboard
+focus, including when already locked. It overlays the card without reserving
+space and supports Space/Return with a visible focus indicator.
+
+Run `scripts/gui-mint-tile-runtime-smoke.ps1` for isolated offline native loading
+and DPI geometry checks. It accepts light/dark/both themes, BTC/PEPE, scale,
+opacity, language, color direction, logo visibility, and lock state; `-KeepOpen`
+leaves the preview windows open for one hour. This runtime smoke reads the app's
+ready marker and does not capture the desktop or send input. Use the focused
+`mint_tile` tests for real Slint rendering, text fit, data states, and interaction.
+
+### Trust Card reference implementation
+
+Trust Card uses a compact 260 × 180 window with a 240 × 160 card. A host-supplied
+coin icon and pair label sit above an eight-slot price; the bottom row combines
+the localized 24-hour change with a small live sparkline. Light ivory-mint and
+dark graphite-green themes share the same geometry and retain their existing
+theme IDs and default dark selection. Mint Tile remains a separate 360 × 360
+card with its existing full chart and source footer.
+
+The floating lock appears on hover or keyboard focus and supports Space/Return.
+Hovering the coin/pair header or using keyboard focus reveals source/freshness details in place of the bottom
+row without changing window size or blocking dragging. Missing prices use a
+neutral placeholder. Loading, chart unavailability, and `market-status-warning`
+keep localized status details visible even without hover; cached prices remain
+readable. Native gradient layers use physical-pixel-aligned origins and clips
+to avoid seams during partial redraw at fractional display DPI. The sparkline
+has no area fill. A one-physical-pixel change to its transparent outer clip guard
+on lock reveal invalidates the whole plot without moving its line or endpoint;
+this works around Slint 1.17 software Path rendering outside the dirty region.
+
+Run `cargo +1.96.0 test --locked -p crypto-hud trust_card` for real Slint rendering,
+text fitting, data states, mouse/keyboard locking and saved-layout normalization.
+Set `CRYPTO_HUD_TRUST_CARD_CAPTURE_DIR` to capture deterministic PPM images for
+visual verification. `scripts/gui-trust-card-runtime-smoke.ps1` checks isolated
+offline native loading, old-size normalization and desktop DPI geometry. It
+accepts themes, scale, opacity, language, color direction, lock/logo settings,
+and 1–8 requested pairs (normalized to the single-pair limit). `-PreviewMatrix`
+shows BTC and PEPE in both themes; `-IconCacheDir` optionally supplies public
+coin artwork for offline previews, and `-KeepOpen` leaves the windows open for
+one hour. The smoke does not capture or automate desktop input.
+
+### Market Compass reference implementation
+
+Market Compass uses a 480 × 480 circular dial for one to eight pairs. Its default
+light theme reproduces the champagne-gold reference with separate dial, ceramic
+medallion, pointer, and coin artwork. The matching dark theme uses graphite ceramic,
+smoked-gold brushed metal, and warm off-white type with the same geometry and
+controls. Both themes use prefiltered material assets; existing theme IDs remain
+compatible, and new instances default to light. Dark XRP and ADA icons use lighter tints
+to remain readable against the ceramic medallions.
+The 300px price column uses a stable 44px eight-character type size, independently
+of chart readiness. BTC, ETH, SOL, BNB, XRP, DOGE, ADA, and PEPE have bundled
+reference artwork; other assets use host icons, with readable ticker fallbacks.
+
+Clicking a medallion brings it to twelve o'clock along the shortest circular path.
+Labels remain upright. The configured automatic switch interval pauses on hover
+or keyboard focus; arrow keys switch pairs, and the floating lock supports
+Space/Return. The lock appears on hover or keyboard focus and reserves no space.
+
+The software renderer uses nearest-neighbor image sampling and solid Path fills.
+Artwork therefore includes prefiltered 100%, 125%, 150%, and 200% variants chosen
+from widget scale and display DPI. The light dial reaches 896px; the dark dial
+reuses its 720px variant above 150% to keep the complete two-theme plugin below
+the 5 MiB directory limit. Each file also stays below 1 MiB. The live chart area
+fades through physical-pixel-aligned clipped
+path strips; prices, paths, endpoints, and colors still come from runtime data.
+
+Run `scripts/gui-market-compass-smoke.ps1` for isolated offline native validation.
+It accepts `-Theme`, `-SymbolCount`, `-FirstAsset`, `-ScalePercent`, `-OpacityPercent`,
+`-Language`, `-RedUp`, `-NoLogos`, `-Locked`, and `-KeepOpen`.
+`cargo +1.96.0 test --locked -p crypto-hud market_compass` exercises rendering,
+rotation, input, empty/error states, and resource limits. Set
+`CRYPTO_HUD_MARKET_COMPASS_CAPTURE_DIR` to capture reproducible rendered PPM files.
 
 ## Theme And Change Colors
 
@@ -415,3 +618,29 @@ cargo test -p crypto-hud discovers_repo_local_plugins
 cargo check -p crypto-hud
 powershell -File scripts/gui-plugin-hot-reload-smoke.ps1
 ```
+
+For Mint Tile, run the focused layout and interaction regression plus the runtime
+smoke. Both use deterministic data; the runtime smoke creates isolated state,
+checks native loading and physical window dimensions at the current desktop DPI,
+and exits through the app's smoke timer:
+
+```powershell
+cargo +1.96.0 test --locked -p crypto-hud mint_tile
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -Theme both
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -FirstAsset PEPE -ScalePercent 30
+powershell -File scripts/gui-mint-tile-runtime-smoke.ps1 -Theme dark -ScalePercent 200 -Language ar -RedUp -Locked -NoLogos
+```
+
+For a desktop session where capture and input automation are available, the
+additional native interaction smoke verifies mouse locking, dragging, and the
+accessibility action:
+
+```powershell
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -ScalePercent 30
+powershell -File scripts/gui-mint-tile-smoke.ps1 -PaperBackdrop -Language ar -RedUp -LockLight
+```
+
+To regenerate its light and dark preview assets from complete native captures,
+run the interaction smoke with `-PaperBackdrop -UpdatePreviews` at the default
+100% widget scale. The previews use the component's 360 × 360 natural size.

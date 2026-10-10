@@ -36,6 +36,24 @@ impl Locale {
     ];
 }
 
+/// Compact, explicitly localized period label for the quote's 24-hour change.
+pub fn change_period_label(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "24h",
+        Locale::ZhHans => "24小时",
+        Locale::ZhHant => "24小時",
+        Locale::Es419 => "24 h",
+        Locale::PtBr => "24 h",
+        Locale::Vi => "24 giờ",
+        Locale::Id => "24 jam",
+        Locale::Tr => "24 sa",
+        Locale::Ko => "24시간",
+        Locale::Ja => "24時間",
+        Locale::Ru => "24 ч",
+        Locale::Ar => "\u{2066}24\u{2069} ساعة",
+    }
+}
+
 #[cfg(test)]
 impl Locale {
     pub const NON_ENGLISH: [Self; 11] = [
@@ -125,6 +143,7 @@ pub struct UiText {
     pub network_proxy_help: &'static str,
     pub app_version: &'static str,
     pub about_us: &'static str,
+    pub submit_issue: &'static str,
     pub icon_cache: &'static str,
     pub icon_cache_help: &'static str,
     pub clear_icon_cache: &'static str,
@@ -152,6 +171,9 @@ pub struct UiText {
     pub apply: &'static str,
     pub widget_library: &'static str,
     pub my_widgets: &'static str,
+    pub widget_actions: &'static str,
+    pub replace_pair: &'static str,
+    pub remove_pair: &'static str,
     pub selected_widget: &'static str,
     pub selected_widget_description: &'static str,
     pub widget_name: &'static str,
@@ -214,7 +236,8 @@ pub struct UiText {
     pub status_network_proxy_invalid: &'static str,
     pub status_icon_cache_clear_failed: &'static str,
     pub status_custom_components_folder_open_failed: &'static str,
-    pub status_symbol_catalog_fallback: &'static str,
+    pub status_issue_link_open_failed: &'static str,
+    pub status_symbol_catalog_unavailable: &'static str,
     pub status_symbol_catalog_partial: &'static str,
 }
 
@@ -285,6 +308,7 @@ const EN_TEXT: UiText = UiText {
     network_proxy_help: "Routes quotes, symbol search, and updates through the proxy.",
     app_version: "Version",
     about_us: "About us",
+    submit_issue: "Feedback & suggestions",
     icon_cache: "Icon cache",
     icon_cache_help: "Removes locally cached coin logos.",
     clear_icon_cache: "Clear Icons",
@@ -295,7 +319,7 @@ const EN_TEXT: UiText = UiText {
     language: "Language",
     appearance_interface: "Interface",
     appearance_widget_defaults: "Widget Defaults",
-    theme_help: "Updates colors for the main window and desktop widgets.",
+    theme_help: "Main window theme; set each widget’s theme separately.",
     language_help: "Refreshes interface text right away.",
     red_up_color_help: "Shows gains in red and losses in green.",
     default_opacity_help: "Sets how transparent new widgets appear.",
@@ -306,12 +330,15 @@ const EN_TEXT: UiText = UiText {
     system_maintenance: "Maintenance",
     auto_start_help: "Runs Crypto HUD after you sign in.",
     show_main_window_on_startup_help: "Opens the main window on app launch.",
-    shortcut_help: "Use Alt+C to hide or restore widgets and taskbar content.",
+    shortcut_help: "Choose the shortcut to show or hide widgets and taskbar content.",
     tray_icon_help: "Keeps quick access for the main window and quit.",
     tray_hover_display_help: "Temporarily shows widgets while hovering the tray icon.",
     apply: "Apply",
     widget_library: "Widget Library",
     my_widgets: "My Widgets",
+    widget_actions: "Widget actions",
+    replace_pair: "Replace pair",
+    remove_pair: "Remove pair",
     selected_widget: "Selected Widget:",
     selected_widget_description: "The settings below only affect the selected widget.",
     widget_name: "Name",
@@ -343,8 +370,7 @@ const EN_TEXT: UiText = UiText {
     quote_board_title: "Quote Board",
     plugin_market_description: "Available built-in and local widgets.",
     my_widgets_description: "Manage added widgets, pairs, and window display.",
-    market_settings_description:
-        "Configure quote sources, refresh rate, default pairs, and alerts.",
+    market_settings_description: "Configure data sources, refresh interval and default pairs.",
     appearance_settings_description: "Adjust theme, language, and default widget display.",
     system_settings_description: "Manage startup behavior, proxy, tray, and app info.",
     quote_board_description: "Shows up to 20 pairs for tracking major markets together.",
@@ -375,7 +401,8 @@ const EN_TEXT: UiText = UiText {
     status_network_proxy_invalid: "Network proxy is invalid",
     status_icon_cache_clear_failed: "Icon cache clear failed",
     status_custom_components_folder_open_failed: "Could not open custom widgets folder",
-    status_symbol_catalog_fallback: "Using popular pairs list",
+    status_issue_link_open_failed: "Could not open the feedback page",
+    status_symbol_catalog_unavailable: "Market pair catalog unavailable",
     status_symbol_catalog_partial: "Some market sources could not be loaded",
 };
 
@@ -446,6 +473,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     network_proxy_help: "行情、交易对搜索和更新请求会走代理。",
     app_version: "版本",
     about_us: "关于我们",
+    submit_issue: "反馈建议",
     icon_cache: "图标缓存",
     icon_cache_help: "移除本地已缓存的币种 Logo。",
     clear_icon_cache: "清空图标",
@@ -456,7 +484,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     language: "语言",
     appearance_interface: "界面",
     appearance_widget_defaults: "小组件默认值",
-    theme_help: "同步调整主界面和桌面小组件配色。",
+    theme_help: "只调整主界面；小组件主题在各自的设置中选择。",
     language_help: "切换后界面文案会立即刷新。",
     red_up_color_help: "开启后上涨显示红色，下跌显示绿色。",
     default_opacity_help: "控制新建小组件默认透明度。",
@@ -467,12 +495,15 @@ const ZH_HANS_TEXT: UiText = UiText {
     system_maintenance: "维护",
     auto_start_help: "登录 Windows 后自动运行应用。",
     show_main_window_on_startup_help: "启动应用时同时打开主界面。",
-    shortcut_help: "按 Alt+C 快速隐藏或恢复小组件和任务栏内容。",
+    shortcut_help: "设置显示或隐藏小组件和任务栏内容的快捷键。",
     tray_icon_help: "保留托盘入口，方便打开主界面或退出。",
     tray_hover_display_help: "鼠标悬停托盘图标时临时显示小组件。",
     apply: "应用",
     widget_library: "小组件库",
     my_widgets: "我的小组件",
+    widget_actions: "小组件操作",
+    replace_pair: "更换交易对",
+    remove_pair: "移除交易对",
     selected_widget: "当前所选：",
     selected_widget_description: "以下设置仅影响当前选择的小组件，不影响其他小组件。",
     widget_name: "名称",
@@ -504,7 +535,7 @@ const ZH_HANS_TEXT: UiText = UiText {
     quote_board_title: "行情面板",
     plugin_market_description: "可用的内置和本地小组件。",
     my_widgets_description: "管理已添加的小组件、交易对和窗口显示。",
-    market_settings_description: "配置行情源、刷新频率、默认交易对和告警规则。",
+    market_settings_description: "配置行情源、刷新频率和默认交易对。",
     appearance_settings_description: "调整主题、语言和新建小组件默认显示。",
     system_settings_description: "管理启动行为、网络代理、托盘和应用信息。",
     quote_board_description: "最多显示 20 个交易对，适合同时观察主流市场价格。",
@@ -535,7 +566,8 @@ const ZH_HANS_TEXT: UiText = UiText {
     status_network_proxy_invalid: "网络代理无效",
     status_icon_cache_clear_failed: "图标缓存清理失败",
     status_custom_components_folder_open_failed: "无法打开自定义小组件目录",
-    status_symbol_catalog_fallback: "正在使用热门交易对目录",
+    status_issue_link_open_failed: "无法打开反馈页面",
+    status_symbol_catalog_unavailable: "交易对目录暂不可用",
     status_symbol_catalog_partial: "部分行情源目录加载失败",
 };
 
@@ -606,6 +638,7 @@ const ZH_HANT_TEXT: UiText = UiText {
     network_proxy_help: "行情、交易對搜尋和更新請求會透過代理。",
     app_version: "版本",
     about_us: "關於我們",
+    submit_issue: "回饋與建議",
     icon_cache: "圖示快取",
     icon_cache_help: "移除本機已快取的幣種 Logo。",
     clear_icon_cache: "清空圖示",
@@ -616,7 +649,7 @@ const ZH_HANT_TEXT: UiText = UiText {
     language: "語言",
     appearance_interface: "介面",
     appearance_widget_defaults: "小工具預設值",
-    theme_help: "同步調整主視窗與桌面小工具配色。",
+    theme_help: "只調整主視窗；小工具主題請在各自設定中選擇。",
     language_help: "切換後介面文案會立即更新。",
     red_up_color_help: "開啟後上漲顯示紅色，下跌顯示綠色。",
     default_opacity_help: "控制新工具預設透明度。",
@@ -627,12 +660,15 @@ const ZH_HANT_TEXT: UiText = UiText {
     system_maintenance: "維護",
     auto_start_help: "登入 Windows 後自動執行應用程式。",
     show_main_window_on_startup_help: "啟動應用程式時同時開啟主視窗。",
-    shortcut_help: "按 Alt+C 快速隱藏或還原小工具和工作列內容。",
+    shortcut_help: "設定顯示或隱藏小工具和工作列內容的快捷鍵。",
     tray_icon_help: "保留系統匣入口，方便開啟主視窗或結束。",
     tray_hover_display_help: "游標停在系統匣圖示時暫時顯示小工具。",
     apply: "套用",
     widget_library: "小工具庫",
     my_widgets: "我的小工具",
+    widget_actions: "小工具操作",
+    replace_pair: "更換交易對",
+    remove_pair: "移除交易對",
     selected_widget: "目前選取：",
     selected_widget_description: "以下設定只影響目前選取的小工具。",
     widget_name: "名稱",
@@ -664,7 +700,7 @@ const ZH_HANT_TEXT: UiText = UiText {
     quote_board_title: "行情面板",
     plugin_market_description: "可用的內建和本機小工具。",
     my_widgets_description: "管理已新增的小工具、交易對和視窗顯示。",
-    market_settings_description: "設定行情源、更新頻率、預設交易對和警示規則。",
+    market_settings_description: "設定行情源、更新頻率和預設交易對。",
     appearance_settings_description: "調整主題、語言和新工具預設顯示。",
     system_settings_description: "管理啟動行為、網路代理、系統匣和應用程式資訊。",
     quote_board_description: "最多顯示 20 個交易對，適合同時觀察主流市場價格。",
@@ -695,7 +731,8 @@ const ZH_HANT_TEXT: UiText = UiText {
     status_network_proxy_invalid: "網路代理無效",
     status_icon_cache_clear_failed: "圖示快取清理失敗",
     status_custom_components_folder_open_failed: "無法開啟自訂小工具目錄",
-    status_symbol_catalog_fallback: "正在使用熱門交易對目錄",
+    status_issue_link_open_failed: "無法開啟回饋頁面",
+    status_symbol_catalog_unavailable: "交易對目錄暫不可用",
     status_symbol_catalog_partial: "部分行情來源目錄載入失敗",
 };
 
@@ -766,6 +803,7 @@ const ES_419_TEXT: UiText = UiText {
     network_proxy_help: "Envía precios, búsqueda de pares y actualizaciones por el proxy.",
     app_version: "Versión",
     about_us: "Acerca de",
+    submit_issue: "Comentarios y sugerencias",
     icon_cache: "Caché de iconos",
     icon_cache_help: "Elimina logos de monedas guardados localmente.",
     clear_icon_cache: "Borrar iconos",
@@ -776,7 +814,7 @@ const ES_419_TEXT: UiText = UiText {
     language: "Idioma",
     appearance_interface: "Interfaz",
     appearance_widget_defaults: "Valores predeterminados",
-    theme_help: "Actualiza colores de la ventana principal y los widgets.",
+    theme_help: "Tema de la ventana principal; cada widget tiene su propio tema.",
     language_help: "Actualiza el texto de la interfaz al instante.",
     red_up_color_help: "Muestra subidas en rojo y caídas en verde.",
     default_opacity_help: "Define la transparencia de los widgets nuevos.",
@@ -787,12 +825,15 @@ const ES_419_TEXT: UiText = UiText {
     system_maintenance: "Mantenimiento",
     auto_start_help: "Ejecuta Crypto HUD después de iniciar sesión.",
     show_main_window_on_startup_help: "Abre la ventana principal al iniciar la app.",
-    shortcut_help: "Usa Alt+C para ocultar o restaurar widgets y el contenido de la barra de tareas.",
+    shortcut_help: "Elige el atajo para mostrar u ocultar widgets y la barra de tareas.",
     tray_icon_help: "Mantiene acceso rápido para abrir la ventana principal o salir.",
     tray_hover_display_help: "Muestra temporalmente los widgets al pasar por el icono de bandeja.",
     apply: "Aplicar",
     widget_library: "Biblioteca de widgets",
     my_widgets: "Mis widgets",
+    widget_actions: "Acciones del widget",
+    replace_pair: "Cambiar par",
+    remove_pair: "Quitar par",
     selected_widget: "Widget seleccionado:",
     selected_widget_description: "Los ajustes siguientes solo afectan al widget seleccionado.",
     widget_name: "Nombre",
@@ -825,7 +866,7 @@ const ES_419_TEXT: UiText = UiText {
     mini_ticker_title: "Mini cotizador",
     plugin_market_description: "Widgets integrados y locales disponibles.",
     my_widgets_description: "Gestiona widgets añadidos, pares y visualización.",
-    market_settings_description: "Configura fuentes, frecuencia, pares predeterminados y alertas.",
+    market_settings_description: "Configura fuentes, frecuencia de actualización y pares predeterminados.",
     appearance_settings_description: "Ajusta tema, idioma y visualización predeterminada.",
     system_settings_description: "Gestiona inicio, proxy, bandeja e información de la app.",
     quote_board_description: "Muestra hasta 20 pares para seguir mercados principales juntos.",
@@ -855,7 +896,8 @@ const ES_419_TEXT: UiText = UiText {
     status_network_proxy_invalid: "El proxy de red no es válido",
     status_icon_cache_clear_failed: "No se pudo borrar la caché de iconos",
     status_custom_components_folder_open_failed: "No se pudo abrir la carpeta de widgets",
-    status_symbol_catalog_fallback: "Usando lista de pares populares",
+    status_issue_link_open_failed: "No se pudo abrir la página de comentarios",
+    status_symbol_catalog_unavailable: "El catálogo de pares no está disponible",
     status_symbol_catalog_partial: "No se pudieron cargar algunas fuentes de mercado",
 };
 
@@ -926,6 +968,7 @@ const PT_BR_TEXT: UiText = UiText {
     network_proxy_help: "Roteia cotações, busca de pares e atualizações pelo proxy.",
     app_version: "Versão",
     about_us: "Sobre",
+    submit_issue: "Feedback e sugestões",
     icon_cache: "Cache de ícones",
     icon_cache_help: "Remove logos de moedas salvos localmente.",
     clear_icon_cache: "Limpar ícones",
@@ -936,7 +979,7 @@ const PT_BR_TEXT: UiText = UiText {
     language: "Idioma",
     appearance_interface: "Interface",
     appearance_widget_defaults: "Padrões dos widgets",
-    theme_help: "Atualiza as cores da janela principal e dos widgets.",
+    theme_help: "Tema da janela principal; defina o tema de cada widget separadamente.",
     language_help: "Atualiza os textos da interface imediatamente.",
     red_up_color_help: "Mostra altas em vermelho e quedas em verde.",
     default_opacity_help: "Define a transparência dos novos widgets.",
@@ -947,12 +990,15 @@ const PT_BR_TEXT: UiText = UiText {
     system_maintenance: "Manutenção",
     auto_start_help: "Executa o Crypto HUD depois que você entra.",
     show_main_window_on_startup_help: "Abre a janela principal ao iniciar o app.",
-    shortcut_help: "Use Alt+C para ocultar ou restaurar widgets e o conteúdo da barra de tarefas.",
+    shortcut_help: "Escolha o atalho para mostrar ou ocultar widgets e conteúdo da barra de tarefas.",
     tray_icon_help: "Mantém acesso rápido para abrir a janela principal ou sair.",
     tray_hover_display_help: "Mostra temporariamente os widgets ao passar pelo ícone da bandeja.",
     apply: "Aplicar",
     widget_library: "Biblioteca de widgets",
     my_widgets: "Meus widgets",
+    widget_actions: "Ações do widget",
+    replace_pair: "Trocar par",
+    remove_pair: "Remover par",
     selected_widget: "Widget selecionado:",
     selected_widget_description: "As opções abaixo afetam apenas o widget selecionado.",
     widget_name: "Nome",
@@ -985,7 +1031,7 @@ const PT_BR_TEXT: UiText = UiText {
     mini_ticker_title: "Mini cotação",
     plugin_market_description: "Widgets integrados e locais disponíveis.",
     my_widgets_description: "Gerencie widgets adicionados, pares e exibição.",
-    market_settings_description: "Configure fontes, atualização, pares padrão e alertas.",
+    market_settings_description: "Configure fontes, intervalo de atualização e pares padrão.",
     appearance_settings_description: "Ajuste tema, idioma e exibição padrão.",
     system_settings_description: "Gerencie inicialização, proxy, bandeja e informações do app.",
     quote_board_description: "Mostra até 20 pares para acompanhar mercados principais juntos.",
@@ -1015,7 +1061,8 @@ const PT_BR_TEXT: UiText = UiText {
     status_network_proxy_invalid: "Proxy de rede inválido",
     status_icon_cache_clear_failed: "Falha ao limpar cache de ícones",
     status_custom_components_folder_open_failed: "Não foi possível abrir a pasta de widgets",
-    status_symbol_catalog_fallback: "Usando lista de pares populares",
+    status_issue_link_open_failed: "Não foi possível abrir a página de feedback",
+    status_symbol_catalog_unavailable: "O catálogo de pares está indisponível",
     status_symbol_catalog_partial: "Algumas fontes de mercado não puderam ser carregadas",
 };
 
@@ -1086,6 +1133,7 @@ const VI_TEXT: UiText = UiText {
     network_proxy_help: "Định tuyến giá, tìm kiếm cặp và cập nhật qua proxy.",
     app_version: "Phiên bản",
     about_us: "Giới thiệu",
+    submit_issue: "Góp ý và đề xuất",
     icon_cache: "Bộ nhớ đệm biểu tượng",
     icon_cache_help: "Xóa logo coin đã lưu cục bộ.",
     clear_icon_cache: "Xóa biểu tượng",
@@ -1096,7 +1144,7 @@ const VI_TEXT: UiText = UiText {
     language: "Ngôn ngữ",
     appearance_interface: "Giao diện",
     appearance_widget_defaults: "Mặc định widget",
-    theme_help: "Cập nhật màu cho cửa sổ chính và widget.",
+    theme_help: "Chủ đề cửa sổ chính; chọn chủ đề riêng trong cài đặt từng widget.",
     language_help: "Làm mới văn bản giao diện ngay lập tức.",
     red_up_color_help: "Hiển thị tăng giá màu đỏ và giảm giá màu xanh.",
     default_opacity_help: "Đặt độ trong suốt cho widget mới.",
@@ -1107,12 +1155,15 @@ const VI_TEXT: UiText = UiText {
     system_maintenance: "Bảo trì",
     auto_start_help: "Chạy Crypto HUD sau khi bạn đăng nhập.",
     show_main_window_on_startup_help: "Mở cửa sổ chính khi khởi chạy ứng dụng.",
-    shortcut_help: "Dùng Alt+C để ẩn hoặc khôi phục widget và nội dung trên thanh tác vụ.",
+    shortcut_help: "Chọn phím tắt để hiện hoặc ẩn widget và nội dung thanh tác vụ.",
     tray_icon_help: "Giữ lối tắt để mở cửa sổ chính hoặc thoát.",
     tray_hover_display_help: "Tạm thời hiện widget khi rê chuột lên biểu tượng khay.",
     apply: "Áp dụng",
     widget_library: "Thư viện widget",
     my_widgets: "Widget của tôi",
+    widget_actions: "Thao tác widget",
+    replace_pair: "Thay cặp giao dịch",
+    remove_pair: "Xóa cặp giao dịch",
     selected_widget: "Widget đã chọn:",
     selected_widget_description: "Các thiết lập dưới đây chỉ ảnh hưởng widget đã chọn.",
     widget_name: "Tên",
@@ -1144,7 +1195,7 @@ const VI_TEXT: UiText = UiText {
     quote_board_title: "Bảng giá",
     plugin_market_description: "Widget tích hợp và cục bộ có sẵn.",
     my_widgets_description: "Quản lý widget đã thêm, cặp và hiển thị cửa sổ.",
-    market_settings_description: "Cấu hình nguồn giá, tần suất, cặp mặc định và cảnh báo.",
+    market_settings_description: "Cấu hình nguồn giá, chu kỳ cập nhật và cặp giao dịch mặc định.",
     appearance_settings_description: "Điều chỉnh chủ đề, ngôn ngữ và mặc định widget.",
     system_settings_description: "Quản lý khởi động, proxy, khay và thông tin ứng dụng.",
     quote_board_description: "Hiển thị tối đa 20 cặp để theo dõi các thị trường chính.",
@@ -1175,7 +1226,8 @@ const VI_TEXT: UiText = UiText {
     status_network_proxy_invalid: "Proxy mạng không hợp lệ",
     status_icon_cache_clear_failed: "Không xóa được bộ nhớ đệm biểu tượng",
     status_custom_components_folder_open_failed: "Không mở được thư mục widget tùy chỉnh",
-    status_symbol_catalog_fallback: "Đang dùng danh sách cặp phổ biến",
+    status_issue_link_open_failed: "Không mở được trang góp ý",
+    status_symbol_catalog_unavailable: "Danh mục cặp giao dịch hiện không khả dụng",
     status_symbol_catalog_partial: "Không tải được một số nguồn thị trường",
 };
 
@@ -1246,6 +1298,7 @@ const ID_TEXT: UiText = UiText {
     network_proxy_help: "Mengalihkan harga, pencarian pair, dan pembaruan melalui proxy.",
     app_version: "Versi",
     about_us: "Tentang",
+    submit_issue: "Masukan dan saran",
     icon_cache: "Cache ikon",
     icon_cache_help: "Menghapus logo coin yang tersimpan lokal.",
     clear_icon_cache: "Hapus ikon",
@@ -1256,7 +1309,7 @@ const ID_TEXT: UiText = UiText {
     language: "Bahasa",
     appearance_interface: "Antarmuka",
     appearance_widget_defaults: "Default widget",
-    theme_help: "Memperbarui warna jendela utama dan widget.",
+    theme_help: "Tema jendela utama; atur tema tiap widget secara terpisah.",
     language_help: "Menyegarkan teks antarmuka seketika.",
     red_up_color_help: "Menampilkan kenaikan merah dan penurunan hijau.",
     default_opacity_help: "Mengatur transparansi widget baru.",
@@ -1267,12 +1320,15 @@ const ID_TEXT: UiText = UiText {
     system_maintenance: "Pemeliharaan",
     auto_start_help: "Menjalankan Crypto HUD setelah Anda masuk.",
     show_main_window_on_startup_help: "Membuka jendela utama saat aplikasi mulai.",
-    shortcut_help: "Gunakan Alt+C untuk menyembunyikan atau memulihkan widget dan konten taskbar.",
+    shortcut_help: "Pilih pintasan untuk menampilkan atau menyembunyikan widget dan konten taskbar.",
     tray_icon_help: "Menyimpan akses cepat untuk membuka jendela utama atau keluar.",
     tray_hover_display_help: "Menampilkan widget sementara saat ikon tray di-hover.",
     apply: "Terapkan",
     widget_library: "Pustaka widget",
     my_widgets: "Widget saya",
+    widget_actions: "Tindakan widget",
+    replace_pair: "Ganti pasangan",
+    remove_pair: "Hapus pasangan",
     selected_widget: "Widget dipilih:",
     selected_widget_description: "Pengaturan di bawah hanya memengaruhi widget yang dipilih.",
     widget_name: "Nama",
@@ -1304,7 +1360,7 @@ const ID_TEXT: UiText = UiText {
     quote_board_title: "Papan harga",
     plugin_market_description: "Widget bawaan dan lokal yang tersedia.",
     my_widgets_description: "Kelola widget, pair, dan tampilan jendela.",
-    market_settings_description: "Atur sumber harga, refresh, pair default, dan peringatan.",
+    market_settings_description: "Atur sumber harga, interval pembaruan, dan pasangan bawaan.",
     appearance_settings_description: "Atur tema, bahasa, dan tampilan default widget.",
     system_settings_description: "Kelola startup, proxy, tray, dan info aplikasi.",
     quote_board_description: "Menampilkan hingga 20 pair untuk memantau pasar utama.",
@@ -1335,7 +1391,8 @@ const ID_TEXT: UiText = UiText {
     status_network_proxy_invalid: "Proxy jaringan tidak valid",
     status_icon_cache_clear_failed: "Gagal menghapus cache ikon",
     status_custom_components_folder_open_failed: "Tidak dapat membuka folder widget kustom",
-    status_symbol_catalog_fallback: "Memakai daftar pair populer",
+    status_issue_link_open_failed: "Tidak dapat membuka halaman masukan",
+    status_symbol_catalog_unavailable: "Katalog pair tidak tersedia",
     status_symbol_catalog_partial: "Sebagian sumber pasar tidak dapat dimuat",
 };
 
@@ -1406,6 +1463,7 @@ const TR_TEXT: UiText = UiText {
     network_proxy_help: "Fiyatları, çift aramasını ve güncellemeleri proxy üzerinden yönlendirir.",
     app_version: "Sürüm",
     about_us: "Hakkında",
+    submit_issue: "Geri bildirim ve öneriler",
     icon_cache: "Simge önbelleği",
     icon_cache_help: "Yerelde önbelleğe alınmış coin logolarını kaldırır.",
     clear_icon_cache: "Simgeleri temizle",
@@ -1416,7 +1474,7 @@ const TR_TEXT: UiText = UiText {
     language: "Dil",
     appearance_interface: "Arayüz",
     appearance_widget_defaults: "Widget varsayılanları",
-    theme_help: "Ana pencere ve widget renklerini günceller.",
+    theme_help: "Ana pencere teması; her widget’ın temasını ayrı ayarlayın.",
     language_help: "Arayüz metinlerini hemen yeniler.",
     red_up_color_help: "Yükselişleri kırmızı, düşüşleri yeşil gösterir.",
     default_opacity_help: "Yeni widget'ların saydamlığını ayarlar.",
@@ -1427,13 +1485,15 @@ const TR_TEXT: UiText = UiText {
     system_maintenance: "Bakım",
     auto_start_help: "Oturum açtıktan sonra Crypto HUD'u çalıştırır.",
     show_main_window_on_startup_help: "Uygulama açıldığında ana pencereyi açar.",
-    shortcut_help:
-        "Widget'ları ve görev çubuğu içeriğini gizlemek veya geri getirmek için Alt+C kullanın.",
+    shortcut_help: "Widget ve görev çubuğu içeriğini gösterme veya gizleme kısayolunu seçin.",
     tray_icon_help: "Ana pencereyi açmak veya çıkmak için hızlı erişimi korur.",
     tray_hover_display_help: "Tepsi simgesi üzerindeyken widget'ları geçici gösterir.",
     apply: "Uygula",
     widget_library: "Widget kitaplığı",
     my_widgets: "Widget'larım",
+    widget_actions: "Widget işlemleri",
+    replace_pair: "Pariteyi değiştir",
+    remove_pair: "Pariteyi kaldır",
     selected_widget: "Seçili widget:",
     selected_widget_description: "Aşağıdaki ayarlar yalnızca seçili widget'ı etkiler.",
     widget_name: "Ad",
@@ -1466,8 +1526,7 @@ const TR_TEXT: UiText = UiText {
     quote_board_title: "Fiyat panosu",
     plugin_market_description: "Kullanılabilir yerleşik ve yerel widget'lar.",
     my_widgets_description: "Eklenen widget'ları, çiftleri ve pencere görünümünü yönetin.",
-    market_settings_description:
-        "Fiyat kaynaklarını, yenilemeyi, varsayılan çiftleri ve uyarıları ayarlayın.",
+    market_settings_description: "Veri kaynaklarını, yenileme aralığını ve varsayılan pariteleri ayarlayın.",
     appearance_settings_description: "Tema, dil ve varsayılan widget görünümünü ayarlayın.",
     system_settings_description: "Başlangıç, proxy, tepsi ve uygulama bilgisini yönetin.",
     quote_board_description: "Ana piyasaları birlikte izlemek için en fazla 20 çift gösterir.",
@@ -1498,7 +1557,8 @@ const TR_TEXT: UiText = UiText {
     status_network_proxy_invalid: "Ağ proxy'si geçersiz",
     status_icon_cache_clear_failed: "Simge önbelleği temizlenemedi",
     status_custom_components_folder_open_failed: "Özel widget klasörü açılamadı",
-    status_symbol_catalog_fallback: "Popüler çiftler listesi kullanılıyor",
+    status_issue_link_open_failed: "Geri bildirim sayfası açılamadı",
+    status_symbol_catalog_unavailable: "Parite kataloğu kullanılamıyor",
     status_symbol_catalog_partial: "Bazı piyasa kaynakları yüklenemedi",
 };
 
@@ -1569,6 +1629,7 @@ const KO_TEXT: UiText = UiText {
     network_proxy_help: "시세, 페어 검색, 업데이트를 프록시로 라우팅합니다.",
     app_version: "버전",
     about_us: "정보",
+    submit_issue: "의견 및 제안",
     icon_cache: "아이콘 캐시",
     icon_cache_help: "로컬에 캐시된 코인 로고를 제거합니다.",
     clear_icon_cache: "아이콘 지우기",
@@ -1579,7 +1640,7 @@ const KO_TEXT: UiText = UiText {
     language: "언어",
     appearance_interface: "인터페이스",
     appearance_widget_defaults: "위젯 기본값",
-    theme_help: "메인 창과 위젯 색상을 업데이트합니다.",
+    theme_help: "메인 창 테마입니다. 각 위젯의 테마는 개별 설정에서 선택하세요.",
     language_help: "인터페이스 텍스트를 즉시 새로고침합니다.",
     red_up_color_help: "상승은 빨간색, 하락은 초록색으로 표시합니다.",
     default_opacity_help: "새 위젯의 투명도를 설정합니다.",
@@ -1590,12 +1651,15 @@ const KO_TEXT: UiText = UiText {
     system_maintenance: "관리",
     auto_start_help: "로그인 후 Crypto HUD를 실행합니다.",
     show_main_window_on_startup_help: "앱 시작 시 메인 창을 엽니다.",
-    shortcut_help: "Alt+C로 위젯과 작업 표시줄 콘텐츠를 숨기거나 복원합니다.",
+    shortcut_help: "위젯과 작업 표시줄 콘텐츠를 표시하거나 숨길 단축키를 선택합니다.",
     tray_icon_help: "메인 창 열기와 종료를 위한 빠른 접근을 유지합니다.",
     tray_hover_display_help: "트레이 아이콘에 마우스를 올리면 위젯을 잠시 표시합니다.",
     apply: "적용",
     widget_library: "위젯 라이브러리",
     my_widgets: "내 위젯",
+    widget_actions: "위젯 작업",
+    replace_pair: "거래쌍 변경",
+    remove_pair: "거래쌍 제거",
     selected_widget: "선택한 위젯:",
     selected_widget_description: "아래 설정은 선택한 위젯에만 적용됩니다.",
     widget_name: "이름",
@@ -1627,7 +1691,7 @@ const KO_TEXT: UiText = UiText {
     quote_board_title: "시세 보드",
     plugin_market_description: "사용 가능한 기본 및 로컬 위젯입니다.",
     my_widgets_description: "추가된 위젯, 페어, 창 표시를 관리합니다.",
-    market_settings_description: "시세 소스, 새로고침, 기본 페어와 알림을 설정합니다.",
+    market_settings_description: "시세 소스, 새로고침 간격과 기본 거래쌍을 설정합니다.",
     appearance_settings_description: "테마, 언어, 기본 위젯 표시를 조정합니다.",
     system_settings_description: "시작 동작, 프록시, 트레이와 앱 정보를 관리합니다.",
     quote_board_description: "주요 시장을 함께 추적하도록 최대 20개 페어를 표시합니다.",
@@ -1658,7 +1722,8 @@ const KO_TEXT: UiText = UiText {
     status_network_proxy_invalid: "네트워크 프록시가 올바르지 않습니다",
     status_icon_cache_clear_failed: "아이콘 캐시를 지우지 못했습니다",
     status_custom_components_folder_open_failed: "사용자 지정 위젯 폴더를 열 수 없습니다",
-    status_symbol_catalog_fallback: "인기 페어 목록 사용 중",
+    status_issue_link_open_failed: "의견 보내기 페이지를 열 수 없습니다",
+    status_symbol_catalog_unavailable: "거래 페어 목록을 불러올 수 없습니다",
     status_symbol_catalog_partial: "일부 시세 소스를 불러오지 못했습니다",
 };
 
@@ -1729,6 +1794,7 @@ const JA_TEXT: UiText = UiText {
     network_proxy_help: "価格、ペア検索、更新をプロキシ経由で送信します。",
     app_version: "バージョン",
     about_us: "このアプリについて",
+    submit_issue: "ご意見・ご要望",
     icon_cache: "アイコンキャッシュ",
     icon_cache_help: "ローカルに保存されたコインロゴを削除します。",
     clear_icon_cache: "アイコンをクリア",
@@ -1739,7 +1805,7 @@ const JA_TEXT: UiText = UiText {
     language: "言語",
     appearance_interface: "インターフェイス",
     appearance_widget_defaults: "ウィジェット既定値",
-    theme_help: "メインウィンドウとウィジェットの色を更新します。",
+    theme_help: "メインウィンドウのテーマです。各ウィジェットのテーマは個別に設定します。",
     language_help: "インターフェイスのテキストをすぐに更新します。",
     red_up_color_help: "上昇を赤、下落を緑で表示します。",
     default_opacity_help: "新規ウィジェットの透明度を設定します。",
@@ -1750,12 +1816,15 @@ const JA_TEXT: UiText = UiText {
     system_maintenance: "メンテナンス",
     auto_start_help: "サインイン後に Crypto HUD を実行します。",
     show_main_window_on_startup_help: "アプリ起動時にメインウィンドウを開きます。",
-    shortcut_help: "Alt+C でウィジェットとタスクバー表示を非表示または復元します。",
+    shortcut_help: "ウィジェットとタスクバー表示を切り替えるショートカットを選択します。",
     tray_icon_help: "メインウィンドウを開く、または終了するための入口を保持します。",
     tray_hover_display_help: "トレイアイコンにホバーしている間だけウィジェットを表示します。",
     apply: "適用",
     widget_library: "ウィジェットライブラリ",
     my_widgets: "マイウィジェット",
+    widget_actions: "ウィジェット操作",
+    replace_pair: "取引ペアを変更",
+    remove_pair: "取引ペアを削除",
     selected_widget: "選択中のウィジェット:",
     selected_widget_description: "以下の設定は選択中のウィジェットにのみ適用されます。",
     widget_name: "名前",
@@ -1787,7 +1856,7 @@ const JA_TEXT: UiText = UiText {
     quote_board_title: "レートボード",
     plugin_market_description: "利用可能な組み込みおよびローカルウィジェットです。",
     my_widgets_description: "追加済みウィジェット、ペア、ウィンドウ表示を管理します。",
-    market_settings_description: "価格ソース、更新間隔、既定ペア、アラートを設定します。",
+    market_settings_description: "価格ソース、更新間隔、既定の取引ペアを設定します。",
     appearance_settings_description: "テーマ、言語、既定のウィジェット表示を調整します。",
     system_settings_description: "起動、プロキシ、トレイ、アプリ情報を管理します。",
     quote_board_description: "主要市場をまとめて追跡するため最大 20 ペアを表示します。",
@@ -1818,7 +1887,8 @@ const JA_TEXT: UiText = UiText {
     status_network_proxy_invalid: "ネットワークプロキシが無効です",
     status_icon_cache_clear_failed: "アイコンキャッシュの削除に失敗しました",
     status_custom_components_folder_open_failed: "カスタムウィジェットフォルダーを開けません",
-    status_symbol_catalog_fallback: "人気ペア一覧を使用中",
+    status_issue_link_open_failed: "フィードバックページを開けません",
+    status_symbol_catalog_unavailable: "取引ペア一覧を利用できません",
     status_symbol_catalog_partial: "一部の市場データソースを読み込めませんでした",
 };
 
@@ -1889,6 +1959,7 @@ const RU_TEXT: UiText = UiText {
     network_proxy_help: "Направляет котировки, поиск пар и обновления через прокси.",
     app_version: "Версия",
     about_us: "О приложении",
+    submit_issue: "Отзывы и предложения",
     icon_cache: "Кэш значков",
     icon_cache_help: "Удаляет локально сохраненные логотипы монет.",
     clear_icon_cache: "Очистить значки",
@@ -1899,7 +1970,7 @@ const RU_TEXT: UiText = UiText {
     language: "Язык",
     appearance_interface: "Интерфейс",
     appearance_widget_defaults: "Параметры виджетов по умолчанию",
-    theme_help: "Обновляет цвета главного окна и виджетов.",
+    theme_help: "Тема главного окна; тему каждого виджета задавайте отдельно.",
     language_help: "Сразу обновляет текст интерфейса.",
     red_up_color_help: "Показывает рост красным, а падение зеленым.",
     default_opacity_help: "Задает прозрачность новых виджетов.",
@@ -1910,12 +1981,15 @@ const RU_TEXT: UiText = UiText {
     system_maintenance: "Обслуживание",
     auto_start_help: "Запускает Crypto HUD после входа в систему.",
     show_main_window_on_startup_help: "Открывает главное окно при запуске приложения.",
-    shortcut_help: "Используйте Alt+C, чтобы скрыть или вернуть виджеты и содержимое панели задач.",
+    shortcut_help: "Выберите сочетание клавиш для показа или скрытия виджетов и содержимого панели задач.",
     tray_icon_help: "Оставляет быстрый доступ к главному окну и выходу.",
     tray_hover_display_help: "Временно показывает виджеты при наведении на значок в трее.",
     apply: "Применить",
     widget_library: "Библиотека виджетов",
     my_widgets: "Мои виджеты",
+    widget_actions: "Действия с виджетом",
+    replace_pair: "Заменить пару",
+    remove_pair: "Удалить пару",
     selected_widget: "Выбранный виджет:",
     selected_widget_description: "Параметры ниже влияют только на выбранный виджет.",
     widget_name: "Имя",
@@ -1947,7 +2021,7 @@ const RU_TEXT: UiText = UiText {
     quote_board_title: "Панель котировок",
     plugin_market_description: "Доступные встроенные и локальные виджеты.",
     my_widgets_description: "Управление добавленными виджетами, парами и отображением.",
-    market_settings_description: "Настройте источники котировок, обновление, пары и оповещения.",
+    market_settings_description: "Настройте источники котировок, интервал обновления и пары по умолчанию.",
     appearance_settings_description: "Настройте тему, язык и отображение виджетов по умолчанию.",
     system_settings_description: "Управляйте запуском, прокси, треем и информацией приложения.",
     quote_board_description: "Показывает до 20 пар для совместного отслеживания рынков.",
@@ -1978,7 +2052,8 @@ const RU_TEXT: UiText = UiText {
     status_network_proxy_invalid: "Сетевой прокси недействителен",
     status_icon_cache_clear_failed: "Не удалось очистить кэш значков",
     status_custom_components_folder_open_failed: "Не удалось открыть папку виджетов",
-    status_symbol_catalog_fallback: "Используется список популярных пар",
+    status_issue_link_open_failed: "Не удалось открыть страницу обратной связи",
+    status_symbol_catalog_unavailable: "Каталог торговых пар недоступен",
     status_symbol_catalog_partial: "Не удалось загрузить некоторые источники рынка",
 };
 
@@ -2050,6 +2125,7 @@ const AR_TEXT: UiText = UiText {
     network_proxy_help: "يوجه الأسعار وبحث الأزواج والتحديثات عبر الوكيل.",
     app_version: "الإصدار",
     about_us: "حول التطبيق",
+    submit_issue: "ملاحظات واقتراحات",
     icon_cache: "ذاكرة الأيقونات",
     icon_cache_help: "يزيل شعارات العملات المخزنة محليا.",
     clear_icon_cache: "مسح الأيقونات",
@@ -2060,7 +2136,7 @@ const AR_TEXT: UiText = UiText {
     language: "اللغة",
     appearance_interface: "الواجهة",
     appearance_widget_defaults: "إعدادات الأدوات الافتراضية",
-    theme_help: "يحدث ألوان النافذة الرئيسية والأدوات.",
+    theme_help: "سمة النافذة الرئيسية؛ اختر سمة كل أداة من إعداداتها الخاصة.",
     language_help: "يحدث نصوص الواجهة فورا.",
     red_up_color_help: "يعرض الصعود بالأحمر والهبوط بالأخضر.",
     default_opacity_help: "يضبط شفافية الأدوات الجديدة.",
@@ -2071,13 +2147,15 @@ const AR_TEXT: UiText = UiText {
     system_maintenance: "الصيانة",
     auto_start_help: "يشغل \u{2066}Crypto HUD\u{2069} بعد تسجيل الدخول.",
     show_main_window_on_startup_help: "يفتح النافذة الرئيسية عند تشغيل التطبيق.",
-    shortcut_help:
-        "استخدم \u{2066}Alt+C\u{2069} لإخفاء الأدوات ومحتوى شريط المهام أو استعادتهما.",
+    shortcut_help: "اختر اختصار إظهار الأدوات ومحتوى شريط المهام أو إخفائها.",
     tray_icon_help: "يبقي وصولا سريعا للنافذة الرئيسية والخروج.",
     tray_hover_display_help: "يعرض الأدوات مؤقتا عند تمرير المؤشر فوق أيقونة العلبة.",
     apply: "تطبيق",
     widget_library: "مكتبة الأدوات",
     my_widgets: "أدواتي",
+    widget_actions: "إجراءات الأداة",
+    replace_pair: "تغيير الزوج",
+    remove_pair: "إزالة الزوج",
     selected_widget: "الأداة المحددة:",
     selected_widget_description: "الإعدادات أدناه تؤثر في الأداة المحددة فقط.",
     widget_name: "الاسم",
@@ -2109,7 +2187,7 @@ const AR_TEXT: UiText = UiText {
     quote_board_title: "لوحة الأسعار",
     plugin_market_description: "الأدوات المضمنة والمحلية المتاحة.",
     my_widgets_description: "إدارة الأدوات المضافة والأزواج وعرض النوافذ.",
-    market_settings_description: "إعداد مصادر الأسعار والتحديث والأزواج الافتراضية والتنبيهات.",
+    market_settings_description: "إعداد مصادر الأسعار وفترة التحديث والأزواج الافتراضية.",
     appearance_settings_description: "ضبط السمة واللغة والعرض الافتراضي للأدوات.",
     system_settings_description: "إدارة بدء التشغيل والوكيل والعلبة ومعلومات التطبيق.",
     quote_board_description: "يعرض حتى \u{2066}20\u{2069} زوجا لمتابعة الأسواق الرئيسية معا.",
@@ -2140,7 +2218,8 @@ const AR_TEXT: UiText = UiText {
     status_network_proxy_invalid: "وكيل الشبكة غير صالح",
     status_icon_cache_clear_failed: "فشل مسح ذاكرة الأيقونات",
     status_custom_components_folder_open_failed: "تعذر فتح مجلد الأدوات المخصصة",
-    status_symbol_catalog_fallback: "يتم استخدام قائمة الأزواج الشائعة",
+    status_issue_link_open_failed: "تعذر فتح صفحة الملاحظات",
+    status_symbol_catalog_unavailable: "دليل أزواج السوق غير متاح",
     status_symbol_catalog_partial: "تعذر تحميل بعض مصادر السوق",
 };
 
@@ -3137,6 +3216,20 @@ pub fn builtin_plugin_title(locale: Locale, plugin_id: &str) -> Option<&'static 
             Locale::Ru => "Компас рынка",
             Locale::Ar => "بوصلة السوق",
         }),
+        "com.cryptohud.mint-tile" => Some(match locale {
+            Locale::En => "Mint Tile",
+            Locale::ZhHans => "薄荷行情卡",
+            Locale::ZhHant => "薄荷行情卡",
+            Locale::Es419 => "Tarjeta menta",
+            Locale::PtBr => "Cartão menta",
+            Locale::Vi => "Thẻ bạc hà",
+            Locale::Id => "Kartu mint",
+            Locale::Tr => "Nane kartı",
+            Locale::Ko => "민트 시세 카드",
+            Locale::Ja => "ミント相場カード",
+            Locale::Ru => "Мятная карточка",
+            Locale::Ar => "بطاقة النعناع",
+        }),
         "com.cryptohud.trust-card" => Some(match locale {
             Locale::En => "Trust Card",
             Locale::ZhHans => "信任卡片",
@@ -3212,6 +3305,20 @@ pub fn builtin_plugin_description(locale: Locale, plugin_id: &str) -> Option<&'s
             Locale::Ja => "市場ローテーションを素早く捉える円形の複数ペア表示です。",
             Locale::Ru => "Круговой обзор нескольких пар для быстрого поиска ротации рынка.",
             Locale::Ar => "عرض دائري لعدة أزواج لرصد دوران السوق بسرعة.",
+        }),
+        "com.cryptohud.mint-tile" => Some(match locale {
+            Locale::En => "Soft mint single-pair card with a large price and trend chart.",
+            Locale::ZhHans => "柔和薄荷色单交易对卡片，突出大号价格与趋势图。",
+            Locale::ZhHant => "柔和薄荷色單一交易對卡片，突出大型價格與趨勢圖。",
+            Locale::Es419 => "Tarjeta menta de un par con precio grande y gráfico de tendencia.",
+            Locale::PtBr => "Cartão menta de um par com preço grande e gráfico de tendência.",
+            Locale::Vi => "Thẻ bạc hà cho một cặp với giá lớn và biểu đồ xu hướng.",
+            Locale::Id => "Kartu mint satu pair dengan harga besar dan grafik tren.",
+            Locale::Tr => "Büyük fiyat ve trend grafiği içeren tek çiftlik nane kartı.",
+            Locale::Ko => "큰 가격과 추세 차트를 담은 부드러운 민트색 단일 페어 카드입니다.",
+            Locale::Ja => "大きな価格とトレンドチャートを備えたミント色の単一ペアカードです。",
+            Locale::Ru => "Мятная карточка одной пары с крупной ценой и графиком тренда.",
+            Locale::Ar => "بطاقة بلون النعناع لزوج واحد مع سعر كبير ومخطط للاتجاه.",
         }),
         "com.cryptohud.trust-card" => Some(match locale {
             Locale::En => "Single-pair card with trend chart and source status for confidence checks.",
@@ -3907,7 +4014,6 @@ pub fn symbol_picker_status_text(
     max: usize,
     candidate_count: usize,
     query: &str,
-    fallback_only: bool,
 ) -> String {
     let has_query = !query.trim().is_empty();
     match mode {
@@ -3921,11 +4027,6 @@ pub fn symbol_picker_status_text(
         {
             no_replacement_pairs(locale)
         }
-        SymbolPickerCopyMode::DefaultReplace | SymbolPickerCopyMode::WidgetReplace
-            if fallback_only =>
-        {
-            local_candidates_found(locale, candidate_count)
-        }
         SymbolPickerCopyMode::DefaultReplace => {
             replacement_pairs_found(locale, candidate_count, false)
         }
@@ -3935,10 +4036,26 @@ pub fn symbol_picker_status_text(
         _ if selected_count >= max => selected_limit_reached(locale, selected_count, max),
         _ if has_query && candidate_count == 0 => selected_no_matching(locale, selected_count, max),
         _ if candidate_count == 0 => selected_no_available(locale, selected_count, max),
-        _ if fallback_only => local_candidates_found(locale, candidate_count),
         SymbolPickerCopyMode::DefaultAdd => add_pairs_found(locale, candidate_count, false),
         SymbolPickerCopyMode::WidgetAdd => add_pairs_found(locale, candidate_count, true),
         SymbolPickerCopyMode::TrayMarketAdd => tray_pairs_found(locale, candidate_count),
+    }
+}
+
+pub const fn symbol_catalog_loading_status_text(locale: Locale) -> &'static str {
+    match locale {
+        Locale::En => "Loading market pairs…",
+        Locale::ZhHans => "正在加载交易对…",
+        Locale::ZhHant => "正在載入交易對…",
+        Locale::Es419 => "Cargando pares de mercado…",
+        Locale::PtBr => "Carregando pares de mercado…",
+        Locale::Vi => "Đang tải các cặp giao dịch…",
+        Locale::Id => "Memuat pair pasar…",
+        Locale::Tr => "Piyasa pariteleri yükleniyor…",
+        Locale::Ko => "거래 페어를 불러오는 중…",
+        Locale::Ja => "取引ペアを読み込んでいます…",
+        Locale::Ru => "Загрузка торговых пар…",
+        Locale::Ar => "جارٍ تحميل أزواج السوق…",
     }
 }
 
@@ -4011,50 +4128,6 @@ fn no_replacement_pairs(locale: Locale) -> String {
         Locale::Ja => "置換できるペアがありません".to_string(),
         Locale::Ru => "Нет пар для замены".to_string(),
         Locale::Ar => "لا توجد أزواج للاستبدال".to_string(),
-    }
-}
-
-fn local_candidates_found(locale: Locale, candidate_count: usize) -> String {
-    let candidate_count = count_text_for_locale(locale, candidate_count);
-    match locale {
-        Locale::En => {
-            format!("Catalog is unavailable; using local candidates. Found {candidate_count}")
-        }
-        Locale::ZhHans => format!("候选目录暂不可用，已使用本地候选，找到 {candidate_count} 个"),
-        Locale::ZhHant => format!("候選目錄暫不可用，已使用本機候選，找到 {candidate_count} 個"),
-        Locale::Es419 => {
-            format!("El catálogo no está disponible; usando candidatos locales. {candidate_count} encontrados")
-        }
-        Locale::PtBr => {
-            format!(
-                "Catálogo indisponível; usando candidatos locais. {candidate_count} encontrados"
-            )
-        }
-        Locale::Vi => {
-            format!("Danh mục chưa khả dụng; dùng danh sách cục bộ. Tìm thấy {candidate_count}")
-        }
-        Locale::Id => {
-            format!("Katalog tidak tersedia; memakai kandidat lokal. Ditemukan {candidate_count}")
-        }
-        Locale::Tr => {
-            format!("Katalog kullanılamıyor; yerel adaylar kullanılıyor. {candidate_count} bulundu")
-        }
-        Locale::Ko => {
-            format!("카탈로그를 사용할 수 없어 로컬 후보를 사용합니다. {candidate_count}개 발견")
-        }
-        Locale::Ja => {
-            format!("カタログを利用できないためローカル候補を使用中。{candidate_count} 件見つかりました")
-        }
-        Locale::Ru => {
-            format!(
-                "Каталог недоступен; используются локальные варианты. Найдено: {candidate_count}"
-            )
-        }
-        Locale::Ar => {
-            format!(
-                "الفهرس غير متاح؛ يتم استخدام المرشحات المحلية. تم العثور على {candidate_count}"
-            )
-        }
     }
 }
 
@@ -4291,6 +4364,27 @@ fn default_symbols_future_only(locale: Locale, selected_count: usize, max: usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn change_period_labels_cover_all_locales() {
+        let expected = [
+            "24h",
+            "24小时",
+            "24小時",
+            "24 h",
+            "24 h",
+            "24 giờ",
+            "24 jam",
+            "24 sa",
+            "24시간",
+            "24時間",
+            "24 ч",
+            "\u{2066}24\u{2069} ساعة",
+        ];
+        for (locale, expected) in Locale::ALL.into_iter().zip(expected) {
+            assert_eq!(change_period_label(locale), expected, "{locale:?}");
+        }
+    }
 
     #[test]
     fn locale_tags_resolve_to_supported_locales() {
@@ -4767,7 +4861,7 @@ mod tests {
         );
         assert_eq!(
             ar_text.shortcut_help,
-            "استخدم \u{2066}Alt+C\u{2069} لإخفاء الأدوات ومحتوى شريط المهام أو استعادتهما."
+            "اختر اختصار إظهار الأدوات ومحتوى شريط المهام أو إخفائها."
         );
         assert_eq!(
             ar_text.widget_hide_quote_asset_help,
@@ -4933,6 +5027,7 @@ mod tests {
             "com.cryptohud.focus-ticker",
             "com.cryptohud.market-board",
             "com.cryptohud.market-compass",
+            "com.cryptohud.mint-tile",
             "com.cryptohud.trust-card",
             "com.cryptohud.status-strip",
         ];
@@ -5233,6 +5328,11 @@ mod tests {
                 symbol_picker_cancel_text(locale),
                 symbol_picker_cancel_text(Locale::En),
                 "symbol picker cancel text should be localized for {locale:?}"
+            );
+            assert_ne!(
+                symbol_catalog_loading_status_text(locale),
+                symbol_catalog_loading_status_text(Locale::En),
+                "symbol catalog loading status should be localized for {locale:?}"
             );
 
             for mode in modes {
@@ -5754,6 +5854,7 @@ mod tests {
             ("network_proxy_url", text.network_proxy_url),
             ("app_version", text.app_version),
             ("about_us", text.about_us),
+            ("submit_issue", text.submit_issue),
             ("icon_cache", text.icon_cache),
             ("clear_icon_cache", text.clear_icon_cache),
             ("custom_components", text.custom_components),
@@ -5775,6 +5876,9 @@ mod tests {
             ("apply", text.apply),
             ("widget_library", text.widget_library),
             ("my_widgets", text.my_widgets),
+            ("widget_actions", text.widget_actions),
+            ("replace_pair", text.replace_pair),
+            ("remove_pair", text.remove_pair),
             ("selected_widget", text.selected_widget),
             ("widget_name", text.widget_name),
             ("advanced_options", text.advanced_options),
@@ -5821,8 +5925,12 @@ mod tests {
                 text.status_custom_components_folder_open_failed,
             ),
             (
-                "status_symbol_catalog_fallback",
-                text.status_symbol_catalog_fallback,
+                "status_issue_link_open_failed",
+                text.status_issue_link_open_failed,
+            ),
+            (
+                "status_symbol_catalog_unavailable",
+                text.status_symbol_catalog_unavailable,
             ),
             (
                 "status_symbol_catalog_partial",
@@ -6341,8 +6449,7 @@ mod tests {
                 5,
                 5,
                 12,
-                "",
-                false
+                ""
             ),
             "Seleccionado 5/5. Límite alcanzado; elimina un par"
         );
@@ -6351,15 +6458,7 @@ mod tests {
             "تم اختيار \u{2066}2/5\u{2069}. لا توجد أزواج مطابقة"
         );
         assert_eq!(
-            symbol_picker_status_text(
-                Locale::Ar,
-                SymbolPickerCopyMode::DefaultAdd,
-                2,
-                5,
-                12,
-                "",
-                false
-            ),
+            symbol_picker_status_text(Locale::Ar, SymbolPickerCopyMode::DefaultAdd, 2, 5, 12, ""),
             "تم العثور على \u{2066}12\u{2069} أزواج. يؤثر فقط في الأدوات الجديدة"
         );
         assert_eq!(

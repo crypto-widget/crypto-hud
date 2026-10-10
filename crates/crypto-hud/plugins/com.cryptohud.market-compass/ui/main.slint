@@ -12,17 +12,23 @@ export component MarketCompass inherits Window {
     in property <[bool]> quote-icon-ready;
     property <image> empty-quote-icon;
     in property <[string]> quote-assets;
+    in property <[string]> quote-base-labels;
+    in property <[string]> quote-quote-labels;
+    in property <[bool]> quote-price-ready;
     in property <[string]> quote-chart-line-paths;
     in property <[string]> quote-chart-fill-paths;
     in property <[string]> quote-chart-up-candle-paths;
     in property <[string]> quote-chart-down-candle-paths;
     in property <[bool]> quote-chart-ready;
     in property <[bool]> quote-chart-positive;
+    in property <[float]> quote-chart-end-y-ratios;
     in property <string> pairs-heading-text;
     in property <string> source-text;
     in property <string> source-name-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <string> change-period-text;
+    in property <string> layout-lock-text;
     in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
@@ -31,7 +37,7 @@ export component MarketCompass inherits Window {
     in property <float> widget-scale: 1.0;
     in property <bool> red-up-enabled;
     in property <int> content-opacity: 100;
-    in property <string> theme-name: "dark";
+    in property <string> theme-name: "light";
     in property <bool> show-coin-logos: true;
     in property <int> config-switch-interval-seconds: 5;
     in property <string> chart-line-path;
@@ -40,56 +46,48 @@ export component MarketCompass inherits Window {
     in property <string> chart-down-candle-path;
     in property <bool> chart-ready;
     in property <bool> chart-positive;
+    in property <float> chart-end-y-ratio: 500;
     in-out property <bool> card-left-drag-active: false;
     in-out property <int> rotation-step: 0;
 
     property <bool> light-theme: root.theme-name == "light";
     property <float> content-scale: root.widget-scale;
-    function s(value: length) -> length {
-        return value * root.content-scale;
-    }
-    property <int> orbit-count: root.quote-rows.length < 1 ? 0 : (root.quote-rows.length > 8 ? 8 : root.quote-rows.length);
-    property <int> orbit-denominator: root.orbit-count < 1 ? 1 : root.orbit-count;
-    property <int> bounded-rotation-step: root.orbit-count <= 0 ? 0 : Math.mod(root.rotation-step, root.orbit-count);
+    property <float> raster-scale: root.content-scale * (1px / 1phx);
+    property <int> artwork-level: root.raster-scale < 1.125 ? 100 : root.raster-scale < 1.375 ? 125 : root.raster-scale < 1.75 ? 150 : 200;
+    property <float> atlas-factor: root.artwork-level / 400;
+    function s(value: length) -> length { return value * root.content-scale; }
+    property <int> orbit-count: min(8, root.quote-rows.length);
+    property <int> orbit-denominator: max(1, root.orbit-count);
     property <length> orbit-center-x: root.s(240px);
-    property <length> orbit-center-y: root.s(240px);
-    property <length> orbit-radius: root.orbit-count <= 1 ? root.s(179px) : root.s(181px);
-    property <color> gain-color: root.light-theme ? #00845f : #45e98e;
-    property <color> loss-color: root.light-theme ? #c8423f : #ff5f4d;
-    property <color> primary-text-color: root.light-theme ? #0b302e : #f2f5f4;
-    property <color> muted-text-color: root.light-theme ? #5d7d77 : #aeb6bd;
-    property <color> dim-text-color: root.light-theme ? #75918c : #8b949c;
-    property <color> cyan-glow-color: root.light-theme ? #00a6aea6 : #54f4ffd6;
-    property <color> amber-glow-color: root.light-theme ? #e2a949b0 : #ffa734dd;
-    property <color> dial-black: root.light-theme ? #e9eef2ee : #070b0eee;
-    property <color> dial-inner-black: root.light-theme ? #f7fbffee : #090d10f4;
-    property <color> pair-heading-shadow-color: root.light-theme ? #ffffffc8 : #000000a8;
-    property <color> pair-heading-color: root.light-theme ? #245f5a : #c7d8eb;
-    property <color> price-shadow-color: root.light-theme ? #ffffffd8 : #000000d8;
-    property <color> price-glow-color: root.light-theme ? #39c9c348 : #6ff7ff3f;
-    property <color> price-text-color: root.light-theme ? #0b302e : #ffffff;
-    property <color> lock-hover-background: root.light-theme ? #f8faf0cc : #0f172acc;
-    property <color> lock-hover-border: root.light-theme ? #0f8f8277 : #55e6d077;
-    property <color> lock-icon-color: root.light-theme ? #0f172acc : #cbd5e1cc;
+    property <length> orbit-center-y: root.s(234px);
+    property <length> orbit-radius: root.s(171px);
+    property <color> gain-color: root.light-theme ? #00845f : #50d4a3;
+    property <color> loss-color: root.light-theme ? #ff1734 : #ff6475;
+    property <color> primary-text-color: root.light-theme ? #150f0c : #f0eade;
+    property <color> muted-text-color: root.light-theme ? #55565a : #b9b5ad;
+    property <color> focus-color: root.light-theme ? root.gain-color : #d2b784;
+    property <int> hovered-node: -1;
+    property <bool> pointer-within: drag_area.has-hover || lock_touch.has-hover || root.hovered-node >= 0;
+    property <bool> keyboard-active: lock_focus.has-focus || navigation_focus.has-focus;
+    property <bool> lock-revealed: root.pointer-within || lock_focus.has-focus;
+    // Reference artwork is independent of network/cache availability. Other assets use host icons.
+    property <[int]> logo-x: [39, 326, 556, 806, 31, 294, 553, 808];
+    property <[int]> logo-y: [52, 48, 69, 48, 308, 294, 300, 308];
+    property <[int]> logo-width: [177, 117, 170, 181, 191, 180, 176, 168];
+    property <[int]> logo-height: [176, 181, 142, 180, 152, 179, 167, 155];
 
     function active-index() -> int {
-        if root.orbit-count <= 0 {
-            return 0;
-        }
-        return root.bounded-rotation-step;
+        return Math.mod(Math.mod(root.rotation-step, root.orbit-denominator) + root.orbit-denominator, root.orbit-denominator);
     }
-
+    function select-index(index: int) {
+        let requested = Math.mod(Math.mod(index, root.orbit-denominator) + root.orbit-denominator, root.orbit-denominator);
+        let delta = Math.mod(requested - root.active-index() + root.orbit-denominator, root.orbit-denominator);
+        root.rotation-step += delta > root.orbit-denominator / 2 ? delta - root.orbit-denominator : delta;
+    }
     function status-line() -> string {
-        if root.source-name-text != "" && root.updated-text != "" {
-            return root.source-name-text + " · " + root.updated-text;
-        }
-        if root.source-text != "" && root.updated-text != "" {
-            return root.source-text + " · " + root.updated-text;
-        }
-        if root.source-name-text != "" {
-            return root.source-name-text;
-        }
-        return root.source-text;
+        let source = root.source-name-text != "" ? root.source-name-text : root.source-text;
+        if source != "" && root.updated-text != "" { return source + " · " + root.updated-text; }
+        return source != "" ? source : root.updated-text;
     }
 
     callback drag-move(length, length);
@@ -100,18 +98,14 @@ export component MarketCompass inherits Window {
     no-frame: true;
     always-on-top: root.pin-to-top;
     background: transparent;
+    default-font-family: "Arial";
 
-    Timer {
-        interval: root.config-switch-interval-seconds * 1s;
-        running: root.orbit-count > 1;
-        triggered() => {
-            root.rotation-step += 1;
-        }
+    rotation_timer := Timer {
+        interval: max(1, root.config-switch-interval-seconds) * 1s;
+        running: root.orbit-count > 1 && !root.pointer-within && !root.keyboard-active;
+        triggered => { root.rotation-step += 1; }
     }
-
     drag_area := TouchArea {
-        width: root.widget-width * 1px;
-        height: root.widget-height * 1px;
         mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
         pointer-event(event) => {
             if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
@@ -126,424 +120,318 @@ export component MarketCompass inherits Window {
             }
         }
     }
+    navigation_focus := FocusScope {
+        width: 0px; height: 0px;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.UpArrow {
+                root.select-index(root.active-index() - 1);
+                return accept;
+            }
+            if event.text == Key.RightArrow || event.text == Key.DownArrow {
+                root.select-index(root.active-index() + 1);
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     card := Rectangle {
         x: (root.widget-width * 1px - root.s(480px)) / 2;
         y: (root.widget-height * 1px - root.s(480px)) / 2;
-        width: root.s(480px);
-        height: root.s(480px);
+        width: root.s(480px); height: root.s(480px);
         background: transparent;
         opacity: root.content-opacity / 100;
 
-        Image {
-            width: parent.width;
-            height: parent.height;
-            source: @image-url("opaque-circle.png");
-            image-fit: fill;
-            visible: !root.light-theme;
+        Rectangle {
+            x: root.s(24px); y: root.s(18px);
+            width: root.s(432px); height: self.width;
+            border-radius: self.width / 2;
+            background: root.light-theme ? #d4c8b1 : #20262b;
+            drop-shadow-blur: root.s(14px);
+            drop-shadow-offset-y: root.s(7px);
+            drop-shadow-color: root.light-theme ? #00000038 : #00000070;
         }
-
         Image {
-            width: parent.width;
-            height: parent.height;
-            source: @image-url("opaque-circle-light.png");
+            width: parent.width; height: parent.height;
+            source: root.artwork-level == 100 ? @image-url("champagne-dial.png")
+                : root.artwork-level == 125 ? @image-url("champagne-dial-125.png")
+                : root.artwork-level == 150 ? @image-url("champagne-dial-150.png") : @image-url("champagne-dial-200.png");
             image-fit: fill;
             visible: root.light-theme;
         }
-
         Image {
-            width: parent.width;
-            height: parent.height;
-            source: @image-url("reference.png");
+            width: parent.width; height: parent.height;
+            source: root.artwork-level == 100 ? @image-url("midnight-dial.png")
+                : root.artwork-level == 125 ? @image-url("midnight-dial-125.png")
+                : @image-url("midnight-dial-150.png");
             image-fit: fill;
             visible: !root.light-theme;
-        }
-
-        Image {
-            width: parent.width;
-            height: parent.height;
-            source: @image-url("reference-light.png");
-            image-fit: fill;
-            visible: root.light-theme;
-        }
-
-        Rectangle {
-            x: root.s(86px);
-            y: root.s(86px);
-            width: root.s(308px);
-            height: root.s(308px);
-            border-radius: root.s(154px);
-            background: root.light-theme ? #ffffff18 : #00000018;
-            border-width: root.s(1px);
-            border-color: root.light-theme ? #00a6ae36 : #132838c8;
-        }
-
-        Rectangle {
-            x: root.s(94px);
-            y: root.s(94px);
-            width: root.s(292px);
-            height: root.s(292px);
-            border-radius: root.s(146px);
-            background: root.light-theme ? @radial-gradient(circle, #82e5dc24 0%, #ebfff914 58%, #ffffff00 78%) : @radial-gradient(circle, #0e273322 0%, #02070b10 58%, #00000000 78%);
-            border-width: root.s(1px);
-            border-color: root.light-theme ? #00a6ae24 : #4fd6e42d;
-        }
-
-        Rectangle {
-            x: root.s(94px);
-            y: root.s(94px);
-            width: root.s(292px);
-            height: root.s(292px);
-            border-radius: root.s(146px);
-            background: root.light-theme ? @linear-gradient(180deg, #ffffff58 0%, #ffffff14 24%, #8de3d812 62%, #3b8f8720 100%) : @linear-gradient(180deg, #ffffff18 0%, #ffffff04 23%, #00000000 52%, #0000001c 100%);
         }
 
         for quote[index] in root.quote-rows : active_panel := Rectangle {
             property <bool> selected: index == root.active-index();
+            property <bool> price-ready: root.quote-price-ready.length > index ? root.quote-price-ready[index] : true;
             property <bool> selected-chart-ready: root.quote-chart-ready.length > index ? root.quote-chart-ready[index] : root.chart-ready;
             property <bool> selected-chart-positive: root.quote-chart-positive.length > index ? root.quote-chart-positive[index] : root.chart-positive;
             property <string> selected-chart-line-path: root.quote-chart-line-paths.length > index ? root.quote-chart-line-paths[index] : root.chart-line-path;
             property <string> selected-chart-fill-path: root.quote-chart-fill-paths.length > index ? root.quote-chart-fill-paths[index] : root.chart-fill-path;
-            property <string> selected-chart-up-candle-path: root.quote-chart-up-candle-paths.length > index ? root.quote-chart-up-candle-paths[index] : root.chart-up-candle-path;
-            property <string> selected-chart-down-candle-path: root.quote-chart-down-candle-paths.length > index ? root.quote-chart-down-candle-paths[index] : root.chart-down-candle-path;
+            property <float> selected-end-ratio: root.quote-chart-end-y-ratios.length > index ? root.quote-chart-end-y-ratios[index] : root.chart-end-y-ratio;
             property <color> selected-chart-color: active_panel.selected-chart-positive
                 ? (root.red-up-enabled ? root.loss-color : root.gain-color)
                 : (root.red-up-enabled ? root.gain-color : root.loss-color);
             property <color> up-candle-color: root.red-up-enabled ? root.loss-color : root.gain-color;
             property <color> down-candle-color: root.red-up-enabled ? root.gain-color : root.loss-color;
-            width: parent.width;
-            height: parent.height;
-            visible: active_panel.selected && index < root.orbit-count;
+            width: parent.width; height: parent.height;
+            visible: self.selected && index < root.orbit-count;
 
-            pair_shadow := Text {
-                x: root.s(124px);
-                y: root.s(124px);
-                width: root.s(232px);
+            pair_heading := HorizontalLayout {
+                x: (parent.width - self.width) / 2; y: root.s(147px);
+                width: min(root.s(260px), pair_base.preferred-width + pair_quote.preferred-width + root.s(5px));
+                height: root.s(26px); spacing: root.s(5px);
+                pair_base := Text {
+                    text: root.quote-base-labels.length > index ? root.quote-base-labels[index] : quote.symbol;
+                    color: root.primary-text-color;
+                    font-size: root.s(18px); font-weight: 700;
+                    vertical-alignment: center; overflow: elide;
+                }
+                pair_quote := Text {
+                    text: root.quote-quote-labels[index];
+                    color: root.primary-text-color;
+                    font-size: root.s(18px); font-weight: 400;
+                    vertical-alignment: center; overflow: elide;
+                }
+            }
+            // The maximum eight-character budget stays stable as quotes and charts update.
+            price_text := Text {
+                x: root.s(90px); y: root.s(173px);
+                width: root.s(300px); height: root.s(49px);
+                text: quote.price;
+                color: root.primary-text-color;
+                font-size: active_panel.price-ready ? root.s(44px) : root.s(22px);
+                font-weight: 700;
+                horizontal-alignment: center; vertical-alignment: center;
+                overflow: elide;
+            }
+            change_group := Rectangle {
+                x: root.s(145px); y: root.s(223px);
+                width: root.s(220px);
                 height: root.s(28px);
-                text: quote.symbol;
-                color: root.pair-heading-shadow-color;
-                font-size: root.s(25px);
-                font-weight: 820;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            Text {
-                x: root.s(124px);
-                y: root.s(122px);
-                width: root.s(232px);
-                height: root.s(28px);
-                text: quote.symbol;
-                color: root.pair-heading-color;
-                font-size: root.s(25px);
-                font-weight: 820;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            price_shadow := Text {
-                x: root.s(46px);
-                y: root.s(151px);
-                width: root.s(388px);
-                height: root.s(76px);
-                text: quote.price;
-                color: root.price-shadow-color;
-                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
-                font-weight: 900;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            price_glow := Text {
-                x: root.s(46px);
-                y: root.s(147px);
-                width: root.s(388px);
-                height: root.s(76px);
-                text: quote.price;
-                color: root.price-glow-color;
-                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
-                font-weight: 900;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            Text {
-                x: root.s(46px);
-                y: root.s(148px);
-                width: root.s(388px);
-                height: root.s(76px);
-                text: quote.price;
-                color: root.price-text-color;
-                font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);
-                font-weight: 900;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            Text {
-                x: root.s(142px);
-                y: root.s(214px);
-                width: root.s(196px);
-                height: root.s(34px);
-                text: quote.change;
-                color: quote.positive
-                    ? (root.red-up-enabled ? root.loss-color : root.gain-color)
-                    : (root.red-up-enabled ? root.gain-color : root.loss-color);
-                font-size: root.s(29px);
-                font-weight: 850;
-                horizontal-alignment: center;
-                visible: quote.change != "--";
-                overflow: elide;
-            }
-
-            chart_band := Rectangle {
-                x: root.s(97px);
-                y: root.s(246px);
-                width: root.s(286px);
-                height: root.s(100px);
-                background: transparent;
-                clip: true;
-
-                Rectangle {
-                    width: parent.width;
+                visible: quote.change != "--" && active_panel.price-ready;
+                change_text := Text {
+                    x: 0px;
+                    width: root.s(118px);
                     height: parent.height;
-                    background: root.light-theme ? @radial-gradient(circle 182px at 225px 32px, #63dccf2a 0%, #51d1c10d 42%, #51d1c100 82%) : @radial-gradient(circle 182px at 225px 32px, #47e7cf24 0%, #20c9970c 42%, #20c99700 82%);
-                    opacity: active_panel.selected-chart-ready ? (root.light-theme ? 0.72 : 0.82) : 0.26;
+                    text: quote.change;
+                    color: quote.positive ? active_panel.up-candle-color : active_panel.down-candle-color;
+                    font-size: root.s(24px); font-weight: 700;
+                    horizontal-alignment: right; vertical-alignment: center; overflow: elide;
                 }
-
-                Path {
-                    x: 0px;
-                    y: root.s(9px);
-                    width: parent.width;
-                    height: root.s(78px);
-                    viewbox-width: 100;
-                    viewbox-height: 40;
-                    fit: fill;
-                    commands: active_panel.selected-chart-fill-path;
-                    fill: active_panel.selected-chart-color;
-                    stroke-width: 0px;
-                    opacity: active_panel.selected-chart-ready ? (root.light-theme ? 0.075 : 0.045) : 0.025;
-                }
-
-                Path {
-                    x: 0px;
-                    y: root.s(9px);
-                    width: parent.width;
-                    height: root.s(78px);
-                    viewbox-width: 100;
-                    viewbox-height: 40;
-                    fit: fill;
-                    commands: active_panel.selected-chart-line-path;
-                    fill: transparent;
-                    stroke: active_panel.selected-chart-color;
-                    stroke-width: root.s(2px);
-                    stroke-line-cap: round;
-                    stroke-line-join: round;
-                    opacity: active_panel.selected-chart-ready ? (root.light-theme ? 0.36 : 0.26) : 0.18;
-                }
-
-                Path {
-                    x: root.s(5px);
-                    y: root.s(7px);
-                    width: parent.width - root.s(10px);
-                    height: root.s(80px);
-                    viewbox-width: 100;
-                    viewbox-height: 40;
-                    fit: fill;
-                    commands: active_panel.selected-chart-down-candle-path;
-                    fill: active_panel.down-candle-color;
-                    stroke-width: 0px;
-                    opacity: active_panel.selected-chart-ready ? 0.96 : 0.28;
-                }
-
-                Path {
-                    x: root.s(5px);
-                    y: root.s(7px);
-                    width: parent.width - root.s(10px);
-                    height: root.s(80px);
-                    viewbox-width: 100;
-                    viewbox-height: 40;
-                    fit: fill;
-                    commands: active_panel.selected-chart-up-candle-path;
-                    fill: active_panel.up-candle-color;
-                    stroke-width: 0px;
-                    opacity: active_panel.selected-chart-ready ? 1 : 0.3;
+                Text {
+                    x: root.s(128px); y: root.s(5px);
+                    width: root.s(92px); height: root.s(23px);
+                    text: root.change-period-text;
+                    color: root.muted-text-color; font-size: root.s(15px);
+                    vertical-alignment: center; overflow: elide;
                 }
             }
-
+            chart_band := Rectangle {
+                x: root.s(125px); y: root.s(244px);
+                width: root.s(222px); height: root.s(64px);
+                background: transparent;
+                visible: active_panel.selected-chart-ready;
+                // The software renderer flattens Path gradients. Clipped slices preserve
+                // the live price path while fading its area into the dial material.
+                for band in 32 : fill_slice := Rectangle {
+                    y: Math.round(chart_band.height * band / 32 / 1phx) * 1phx;
+                    width: chart_band.width;
+                    height: Math.round(chart_band.height * (band + 1) / 32 / 1phx) * 1phx - self.y;
+                    background: transparent; clip: true;
+                    opacity: (root.light-theme ? 0.23 : 0.19) * (1 - (band + 0.5) / 32);
+                    Path {
+                        y: -fill_slice.y;
+                        width: chart_band.width; height: chart_band.height;
+                        viewbox-width: 100; viewbox-height: 40; fit: fill;
+                        commands: active_panel.selected-chart-fill-path;
+                        fill: active_panel.selected-chart-color;
+                        stroke-width: 0px;
+                    }
+                }
+                chart_line := Path {
+                    width: parent.width; height: parent.height;
+                    viewbox-width: 100; viewbox-height: 40; fit: fill;
+                    commands: active_panel.selected-chart-line-path;
+                    fill: transparent; stroke: active_panel.selected-chart-color;
+                    stroke-width: root.s(1.25px);
+                    stroke-line-cap: round; stroke-line-join: round;
+                }
+                chart_dot := Rectangle {
+                    x: parent.width - self.width / 2;
+                    y: parent.height * clamp(active_panel.selected-end-ratio / 1000, 0, 1) - self.height / 2;
+                    width: root.s(7px); height: self.width; border-radius: self.width / 2;
+                    background: active_panel.selected-chart-color;
+                    border-width: root.s(0.5px); border-color: root.light-theme ? #fffaf2 : #20262b;
+                }
+            }
+            Rectangle {
+                x: root.s(149px); y: root.s(314px);
+                width: root.s(182px); height: root.s(0.5px);
+                background: root.light-theme ? #999b9e : #655e53;
+            }
             Text {
-                x: root.s(128px);
-                y: root.s(354px);
-                width: root.s(224px);
-                height: root.s(28px);
+                x: root.s(117px); y: root.s(323px);
+                width: root.s(246px); height: root.s(22px);
                 text: root.status-line();
-                color: root.muted-text-color;
-                font-size: root.s(15px);
-                font-weight: 560;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                color: root.muted-text-color; font-size: root.s(12px);
+                horizontal-alignment: center; vertical-alignment: center;
                 overflow: elide;
             }
         }
 
         for quote[index] in root.quote-rows : coin_node := Rectangle {
             property <bool> selected: index == root.active-index();
-            property <angle> slot-angle: -90deg + (root.rotation-step - index) * 1turn / root.orbit-denominator;
-            property <length> node-size: self.selected ? root.s(78px) : root.s(69px);
-            property <length> icon-size: self.selected ? root.s(34px) : root.s(30px);
-            property <length> icon-top: self.selected ? root.s(18px) : root.s(17px);
+            property <angle> base-slot-angle: -90deg + (index - root.rotation-step) * 1turn / root.orbit-denominator;
+            property <angle> slot-angle: self.base-slot-angle - 3deg * Math.sin(2 * self.base-slot-angle);
+            property <length> node-size: self.selected ? root.s(76px) : root.s(68px);
             property <string> node-asset: root.quote-assets.length > index ? root.quote-assets[index] : quote.symbol;
-            property <bool> icon-ready: root.show-coin-logos && root.quote-icon-ready.length > index && root.quote-icon-ready[index];
-            x: root.orbit-center-x + root.orbit-radius * Math.cos(coin_node.slot-angle) - coin_node.node-size / 2;
-            y: root.orbit-center-y + root.orbit-radius * Math.sin(coin_node.slot-angle) - coin_node.node-size / 2;
-            width: coin_node.node-size;
-            height: coin_node.node-size;
-            border-radius: coin_node.node-size / 2;
-            visible: index < root.orbit-count;
+            property <length> icon-size: root.s(self.node-asset == "SOL" || self.node-asset == "XRP" ? 29px
+                : self.node-asset == "ETH" ? 37px : self.selected ? 38px : 34px);
+            property <length> icon-top: root.s(10px) + ((self.selected ? root.s(38px) : root.s(34px)) - self.icon-size) / 2;
+            property <int> reference-logo: self.node-asset == "BTC" ? 0 : self.node-asset == "ETH" ? 1
+                : self.node-asset == "SOL" ? 2 : self.node-asset == "BNB" ? 3 : self.node-asset == "XRP" ? 4
+                : self.node-asset == "DOGE" ? 5 : self.node-asset == "ADA" ? 6 : self.node-asset == "PEPE" ? 7 : -1;
+            property <bool> icon-ready: root.show-coin-logos && (self.reference-logo >= 0
+                || (root.quote-icon-ready.length > index && root.quote-icon-ready[index]));
+            x: root.orbit-center-x + root.orbit-radius * Math.cos(self.slot-angle) - self.node-size / 2;
+            y: root.orbit-center-y + root.orbit-radius * Math.sin(self.slot-angle) - self.node-size / 2;
+            width: self.node-size; height: self.node-size;
             background: transparent;
-
+            visible: index < root.orbit-count;
             animate slot-angle { duration: 620ms; easing: ease-in-out; }
-            animate width { duration: 260ms; easing: ease-out; }
-            animate height { duration: 260ms; easing: ease-out; }
 
             Image {
-                width: parent.width;
-                height: parent.height;
-                source: @image-url("coin-node.png");
-                image-fit: fill;
-                visible: !coin_node.selected && !root.light-theme;
+                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                width: parent.width / (coin_node.selected ? 0.885 : 0.86); height: self.width;
+                source: coin_node.selected
+                    ? (root.artwork-level == 100 ? @image-url("champagne-node-selected.png")
+                        : root.artwork-level == 125 ? @image-url("champagne-node-selected-125.png")
+                        : root.artwork-level == 150 ? @image-url("champagne-node-selected-150.png") : @image-url("champagne-node-selected-200.png"))
+                    : (root.artwork-level == 100 ? @image-url("champagne-node.png")
+                        : root.artwork-level == 125 ? @image-url("champagne-node-125.png")
+                        : root.artwork-level == 150 ? @image-url("champagne-node-150.png") : @image-url("champagne-node-200.png"));
+                image-fit: fill; visible: root.light-theme;
             }
-
             Image {
-                width: parent.width;
-                height: parent.height;
-                source: @image-url("coin-node-light.png");
-                image-fit: fill;
-                visible: !coin_node.selected && root.light-theme;
+                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                width: parent.width / (coin_node.selected ? 0.885 : 0.86); height: self.width;
+                source: coin_node.selected
+                    ? (root.artwork-level == 100 ? @image-url("midnight-node-selected.png")
+                        : root.artwork-level == 125 ? @image-url("midnight-node-selected-125.png")
+                        : root.artwork-level == 150 ? @image-url("midnight-node-selected-150.png") : @image-url("midnight-node-selected-200.png"))
+                    : (root.artwork-level == 100 ? @image-url("midnight-node.png")
+                        : root.artwork-level == 125 ? @image-url("midnight-node-125.png")
+                        : root.artwork-level == 150 ? @image-url("midnight-node-150.png") : @image-url("midnight-node-200.png"));
+                image-fit: fill; visible: !root.light-theme;
             }
-
             Image {
-                width: parent.width;
-                height: parent.height;
-                source: @image-url("coin-node-selected.png");
-                image-fit: fill;
-                visible: coin_node.selected && !root.light-theme;
-            }
-
-            Image {
-                width: parent.width;
-                height: parent.height;
-                source: @image-url("coin-node-light-selected.png");
-                image-fit: fill;
-                visible: coin_node.selected && root.light-theme;
-            }
-
-            dark_inner_ring_mask := Rectangle {
-                width: parent.width * 0.594;
-                height: self.width;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: self.width / 2;
-                background: transparent;
-                border-width: parent.width * 0.032;
-                border-color: #05090d;
-                visible: !root.light-theme;
-            }
-
-            Image {
-                x: (parent.width - coin_node.icon-size) / 2;
-                y: coin_node.icon-top;
-                width: coin_node.icon-size;
-                height: coin_node.icon-size;
+                x: (parent.width - self.width) / 2; y: coin_node.icon-top;
+                width: coin_node.icon-size; height: self.width;
                 source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
                 image-fit: contain;
-                visible: coin_node.icon-ready && root.quote-icons.length > index;
+                visible: coin_node.icon-ready && coin_node.reference-logo < 0;
             }
-
-            Text {
-                x: root.s(7px);
-                y: coin_node.icon-top;
-                width: parent.width - root.s(14px);
-                height: coin_node.icon-size;
+            reference_icon := Image {
+                x: (parent.width - self.width) / 2; y: coin_node.icon-top;
+                width: coin_node.icon-size; height: self.width;
+                source: root.artwork-level == 100 ? @image-url("champagne-coin-atlas.png")
+                    : root.artwork-level == 125 ? @image-url("champagne-coin-atlas-125.png")
+                    : root.artwork-level == 150 ? @image-url("champagne-coin-atlas-150.png") : @image-url("champagne-coin-atlas-200.png");
+                source-clip-x: Math.round(root.logo-x[coin_node.reference-logo] * root.atlas-factor);
+                source-clip-y: Math.round(root.logo-y[coin_node.reference-logo] * root.atlas-factor);
+                source-clip-width: Math.round(root.logo-width[coin_node.reference-logo] * root.atlas-factor);
+                source-clip-height: Math.round(root.logo-height[coin_node.reference-logo] * root.atlas-factor);
+                image-fit: contain;
+                visible: coin_node.icon-ready && coin_node.reference-logo >= 0;
+            }
+            states [
+                dark-xrp when !root.light-theme && coin_node.reference-logo == 4: {
+                    reference_icon.colorize: #ede9e0;
+                }
+                dark-ada when !root.light-theme && coin_node.reference-logo == 6: {
+                    reference_icon.colorize: #729bff;
+                }
+            ]
+            node_label := Text {
+                x: root.s(5px); y: coin_node.icon-ready ? (coin_node.selected ? root.s(49px) : root.s(44px)) : (parent.height - self.height) / 2;
+                width: parent.width - root.s(10px); height: root.s(19px);
                 text: coin_node.node-asset;
-                color: root.primary-text-color;
-                font-size: coin_node.selected ? root.s(16px) : root.s(14px);
-                font-weight: 900;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                color: root.light-theme ? #0d1c22 : #ece7df;
+                font-size: root.s(11px); font-weight: 700;
+                horizontal-alignment: center; vertical-alignment: center;
                 overflow: elide;
-                visible: coin_node.selected && !coin_node.icon-ready;
             }
-
-            Text {
-                x: root.s(6px);
-                y: coin_node.selected ? root.s(54px) : root.s(46px);
-                width: parent.width - root.s(12px);
-                height: coin_node.selected ? root.s(18px) : root.s(17px);
-                text: quote.change;
-                color: quote.positive
-                    ? (root.red-up-enabled ? root.loss-color : root.gain-color)
-                    : (root.red-up-enabled ? root.gain-color : root.loss-color);
-                font-size: coin_node.selected ? root.s(14px) : root.s(13px);
-                font-weight: 900;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                visible: quote.change != "--";
-                overflow: elide;
+            Rectangle {
+                width: parent.width; height: parent.height; border-radius: self.width / 2;
+                border-width: navigation_focus.has-focus && coin_node.selected ? root.s(1px) : 0px;
+                border-color: root.focus-color; background: transparent;
+            }
+            node_touch := TouchArea {
+                mouse-cursor: pointer;
+                changed has-hover => {
+                    if self.has-hover { root.hovered-node = index; }
+                    else if root.hovered-node == index { root.hovered-node = -1; }
+                }
+                clicked => { root.select-index(index); }
+                accessible-role: button;
+                accessible-label: quote.symbol;
+                accessible-action-default => { root.select-index(index); }
             }
         }
-
+        Image {
+            x: root.s(233px); y: root.s(18px);
+            width: root.s(14px); height: root.s(11px);
+            source: @image-url("champagne-pointer.png");
+            source-clip-x: 10; source-clip-y: 25; source-clip-width: 108; source-clip-height: 87;
+            image-fit: fill;
+            visible: root.orbit-count > 0;
+        }
         Text {
-            x: root.s(118px);
-            y: root.s(198px);
-            width: root.s(244px);
-            height: root.s(42px);
-            text: root.empty-text;
-            color: root.muted-text-color;
-            font-size: root.s(22px);
-            font-weight: 800;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            visible: root.quote-rows.length == 0;
-            overflow: elide;
+            x: root.s(118px); y: root.s(193px);
+            width: root.s(244px); height: root.s(82px);
+            text: root.empty-text; color: root.muted-text-color;
+            font-size: root.s(17px); wrap: word-wrap;
+            horizontal-alignment: center; vertical-alignment: center;
+            overflow: elide; visible: root.orbit-count == 0;
         }
-
-        lock_button := Rectangle {
-            x: parent.width - root.s(54px);
-            y: root.s(52px);
-            width: root.s(28px);
-            height: root.s(28px);
-            border-radius: root.s(14px);
-            background: root.layout-locked || lock_touch.has-hover ? root.lock-hover-background : transparent;
-            border-width: root.s(1px);
-            border-color: root.layout-locked || lock_touch.has-hover ? root.lock-hover-border : transparent;
-            visible: drag_area.has-hover || lock_touch.has-hover;
-
-            Path {
-                x: root.s(5px);
-                y: root.s(4px);
-                width: root.s(18px);
-                height: root.s(20px);
-                viewbox-width: 24;
-                viewbox-height: 24;
-                commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
-                fill: root.layout-locked ? root.lock-icon-color : transparent;
-                stroke: root.lock-icon-color;
-                stroke-width: root.s(2px);
-                stroke-line-cap: round;
-                stroke-line-join: round;
+        lock_control := Rectangle {
+            x: root.s(390px); y: root.s(53px);
+            width: max(root.s(26px), 18px); height: self.width;
+            border-radius: self.width / 2;
+            background: root.light-theme ? #fffaf1e8 : #252c31e8;
+            border-width: lock_focus.has-focus ? 1px : 0px;
+            border-color: root.focus-color;
+            opacity: root.lock-revealed ? 1 : 0;
+            forward-focus: lock_focus;
+            accessible-role: checkbox; accessible-label: root.layout-lock-text;
+            accessible-checkable: true; accessible-checked: root.layout-locked;
+            accessible-action-default => { root.toggle-layout-lock(); }
+            Image {
+                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                width: max(root.s(15px), 11px); height: self.width;
+                source: root.layout-locked ? @image-url("icons/lock.svg") : @image-url("icons/unlock.svg");
+                image-fit: contain; colorize: root.muted-text-color;
             }
-
             lock_touch := TouchArea {
-                width: parent.width;
-                height: parent.height;
                 mouse-cursor: pointer;
                 clicked => { root.toggle-layout-lock(); }
+            }
+            lock_focus := FocusScope {
+                width: 0px; height: 0px;
+                key-pressed(event) => {
+                    if !event.repeat && (event.text == Key.Space || event.text == Key.Return) {
+                        root.toggle-layout-lock(); return accept;
+                    }
+                    return reject;
+                }
             }
         }
     }

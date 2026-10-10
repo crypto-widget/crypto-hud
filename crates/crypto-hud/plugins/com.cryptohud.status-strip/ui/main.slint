@@ -5,92 +5,140 @@ export struct QuoteRow {
     positive: bool,
 }
 
-component StatusStripFill inherits Image {
+// Physical-pixel-aligned rounded slices keep the original gloss and shading
+// consistent in the software renderer, including partial redraw and opacity.
+component StatusStripFill inherits Rectangle {
+    in property <int> tone-index;
     in property <int> edge-kind;
-    // SVG rasterization preserves gradient masks at fractional DPI and scale.
-    // Native software-renderer gradient rectangles do not clip rounded corners.
-    source: root.edge-kind == 1 ? @image-url("gloss-left.svg")
-        : (root.edge-kind == 2 ? @image-url("gloss-right.svg")
-        : (root.edge-kind == 3 ? @image-url("gloss-single.svg")
-        : @image-url("gloss-middle.svg")));
-    image-fit: fill;
+    in property <bool> light-theme;
+    in property <bool> ready;
+    in property <length> radius;
+    property <color> top: !root.ready ? (root.light-theme ? #7b8c98 : #394954)
+        : (root.tone-index == 0 ? (root.light-theme ? #1ab5cd : #167c95)
+        : (root.tone-index == 1 ? (root.light-theme ? #29a2d7 : #276b9e)
+        : (root.tone-index == 2 ? (root.light-theme ? #f79d25 : #b57529)
+        : (root.tone-index == 3 ? (root.light-theme ? #dbcc27 : #93892b)
+        : (root.light-theme ? #52b868 : #397c50)))));
+    property <color> bottom: !root.ready ? (root.light-theme ? #4e6474 : #202d37)
+        : (root.tone-index == 0 ? (root.light-theme ? #128bb1 : #0c4c66)
+        : (root.tone-index == 1 ? (root.light-theme ? #1f6ebc : #183b67)
+        : (root.tone-index == 2 ? (root.light-theme ? #e55e1f : #773d24)
+        : (root.tone-index == 3 ? (root.light-theme ? #b5aa16 : #5c5418)
+        : (root.light-theme ? #288b52 : #204c37)))));
+    property <color> highlight: !root.ready ? (root.light-theme ? #a5b4bf : #61717b)
+        : (root.tone-index == 0 ? (root.light-theme ? #86dfea : #62a8b9)
+        : (root.tone-index == 1 ? (root.light-theme ? #92d7f1 : #7098b9)
+        : (root.tone-index == 2 ? (root.light-theme ? #ffda8d : #cbaa6b)
+        : (root.tone-index == 3 ? (root.light-theme ? #f3ec8c : #b3ab68)
+        : (root.light-theme ? #b0e6b8 : #83ac8b)))));
+    function shade(position: float) -> color {
+        if position < 0.05 { return root.top.mix(root.highlight, position / 0.05); }
+        return root.bottom.mix(root.top, max(0, (position - 0.25) / 0.75));
+    }
+    background: transparent;
+    clip: true;
+    for band in 64 : Rectangle {
+        y: floor(band * root.height / 64 / 1phx) * 1phx;
+        width: root.width;
+        height: floor((band + 1) * root.height / 64 / 1phx) * 1phx - self.y;
+        background: transparent;
+        clip: true;
+        Rectangle {
+            y: -parent.y;
+            width: root.width; height: root.height;
+            border-top-left-radius: root.edge-kind == 1 || root.edge-kind == 3 ? root.radius : 0px;
+            border-bottom-left-radius: self.border-top-left-radius;
+            border-top-right-radius: root.edge-kind == 2 || root.edge-kind == 3 ? root.radius : 0px;
+            border-bottom-right-radius: self.border-top-right-radius;
+            background: root.shade(band / 63.0);
+        }
+    }
 }
 
 export component StatusStrip inherits Window {
     in property <string> widget-id;
     in property <[QuoteRow]> quote-rows;
+    in property <[bool]> quote-price-ready;
+    in property <[int]> quote-cell-widths;
     in property <string> pairs-heading-text;
     in property <string> source-text;
+    in property <string> source-name-text: root.source-text;
     in property <string> updated-text;
     in property <string> empty-text;
+    in property <string> layout-lock-text;
+    in property <string> change-period-text;
+    in property <bool> market-status-warning: false;
     in property <bool> rtl-layout: false;
     in property <bool> pin-to-top;
     in property <bool> layout-locked;
     in property <int> widget-width: 618;
     in property <int> widget-height: 92;
     in property <float> widget-scale: 1.0;
-    in property <[int]> quote-cell-widths;
     in property <bool> red-up-enabled;
     in property <int> content-opacity;
-    in property <string> theme-name: "dark";
-
-    property <int> max-block-count: 5;
-    property <int> block-count: root.quote-rows.length <= 0 ? 1 : (root.quote-rows.length > root.max-block-count ? root.max-block-count : root.quote-rows.length);
-    property <length> visible-height: 84px;
-    property <length> window-padding: 4px;
-    property <length> block-width: 122px;
-    property <length> card-radius: 10px;
-    property <length> text-left: 13px;
-    property <length> text-horizontal-padding: root.text-left * 2;
-    property <length> price-right-gap: 7px;
-    property <length> separator-top: 30px;
-    property <length> separator-bottom-gap: 37px;
-    property <length> lock-button-size: 26px;
-    property <length> lock-button-right-gap: 10px;
-    property <length> lock-button-top: 8px;
-    property <length> lock-button-radius: 7px;
-    property <color> default-text-color: #fffffff5;
-    property <color> muted-text-color: #ffffffb0;
-    property <color> contrast-text-color: #101822eb;
-    property <length> block-0-width: root.quote-cell-widths.length > 0 ? root.quote-cell-widths[0] * 1px : root.block-width;
-    property <length> block-1-width: root.quote-cell-widths.length > 1 ? root.quote-cell-widths[1] * 1px : root.block-width;
-    property <length> block-2-width: root.quote-cell-widths.length > 2 ? root.quote-cell-widths[2] * 1px : root.block-width;
-    property <length> block-3-width: root.quote-cell-widths.length > 3 ? root.quote-cell-widths[3] * 1px : root.block-width;
-    property <length> block-4-width: root.quote-cell-widths.length > 4 ? root.quote-cell-widths[4] * 1px : root.block-width;
-    property <length> block-0-x: 0px;
-    property <length> block-1-x: root.block-0-x + root.block-0-width;
-    property <length> block-2-x: root.block-1-x + root.block-1-width;
-    property <length> block-3-x: root.block-2-x + root.block-2-width;
-    property <length> block-4-x: root.block-3-x + root.block-3-width;
-    property <length> block-5-x: root.block-4-x + root.block-4-width;
-    property <length> canvas-width: root.block-count == 1 ? root.block-1-x
-        : (root.block-count == 2 ? root.block-2-x
-        : (root.block-count == 3 ? root.block-3-x
-        : (root.block-count == 4 ? root.block-4-x : root.block-5-x)));
-    property <length> canvas-height: root.visible-height;
-    property <length> card-width: root.canvas-width;
-    property <length> content-width: root.canvas-width + root.window-padding * 2;
-    property <length> content-height: root.canvas-height + root.window-padding * 2;
-    property <float> content-scale: root.widget-scale;
+    in property <string> theme-name: "light";
     in-out property <bool> card-left-drag-active: false;
+    in-out property <bool> show-lock-focus: false;
 
+    property <bool> light-theme: root.theme-name != "dark";
+    property <float> content-scale: root.widget-scale;
+    property <int> block-count: max(1, min(root.quote-rows.length, 5));
+    property <color> surface: root.light-theme ? #f5f8f9 : #18242c;
+    property <color> primary: root.light-theme ? #1c303b : #eaf1f5;
+    property <color> secondary: root.light-theme ? #526874 : #a5b7c1;
+    property <color> edge: root.light-theme ? #718b9b38 : #9bb6c32b;
+    property <color> gain: #baffd5;
+    property <color> loss: #ffd0d8;
+    property <color> gain-contrast: #244b13;
+    property <color> loss-contrast: #78351d;
+    property <color> warning: #ffe2a3;
+    property <bool> lock-revealed: drag_area.has-hover || lock_touch.has-hover
+        || lock_touch.pressed || root.card-left-drag-active
+        || (root.show-lock-focus && lock_focus.has-focus);
+    property <bool> details-visible: drag_area.has-hover && !root.card-left-drag-active
+        && ((drag_area.mouse-y >= card.y + root.s(78px)
+                && drag_area.mouse-x < lock_button.x - root.s(2px))
+            || (root.market-status-warning
+                && drag_area.mouse-y < card.y + root.s(20px)
+                && drag_area.mouse-x > card.x + card.width - root.s(20px)));
+    property <string> status-details-label: root.updated-text + "\n" + root.source-text;
+    property <length> canvas-width: root.cell-x(root.block-count);
+    property <string> price-slot-reference: "88888888";
+
+    // A fixed eight-digit reference keeps short and tiny prices at the same size.
+    price_slots := Text {
+        text: root.price-slot-reference;
+        font-size: root.s(23px);
+        font-weight: 700;
+        visible: false;
+    }
+    function s(value: length) -> length { return value * root.content-scale; }
+    function cell-width(index: int) -> length {
+        return root.quote-cell-widths.length > index ? root.quote-cell-widths[index] * 1px : 122px;
+    }
+    function cell-x(index: int) -> length {
+        return (index > 0 ? root.cell-width(0) : 0px)
+            + (index > 1 ? root.cell-width(1) : 0px)
+            + (index > 2 ? root.cell-width(2) : 0px)
+            + (index > 3 ? root.cell-width(3) : 0px)
+            + (index > 4 ? root.cell-width(4) : 0px);
+    }
     callback drag-move(length, length);
     callback toggle-layout-lock();
-    function s(value: length) -> length {
-        return value * root.content-scale;
-    }
     title: root.widget-id;
     width: root.widget-width * 1px;
     height: root.widget-height * 1px;
     no-frame: true;
     always-on-top: root.pin-to-top;
     background: transparent;
+    default-font-family: "Segoe UI";
+    forward-focus: lock_focus;
 
     drag_area := TouchArea {
-        width: root.widget-width * 1px;
-        height: root.widget-height * 1px;
+        width: root.width; height: root.height;
         mouse-cursor: root.layout-locked ? default : (self.pressed ? grabbing : grab);
         pointer-event(event) => {
+            if event.kind == PointerEventKind.down { root.show-lock-focus = false; }
             if !root.layout-locked && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
                 root.card-left-drag-active = true;
             } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
@@ -104,167 +152,175 @@ export component StatusStrip inherits Window {
         }
     }
 
-    canvas := Rectangle {
-        x: (root.widget-width * 1px - root.s(root.content-width)) / 2 + root.s(root.window-padding);
-        y: (root.widget-height * 1px - root.s(root.content-height)) / 2 + root.s(root.window-padding);
-        width: root.s(root.canvas-width);
-        height: root.s(root.canvas-height);
+    card := Rectangle {
+        x: round((root.width - root.s(root.canvas-width)) / 2 / 1phx) * 1phx;
+        y: round((root.height - root.s(84px)) / 2 / 1phx) * 1phx;
+        width: round(root.s(root.canvas-width) / 1phx) * 1phx;
+        height: round(root.s(84px) / 1phx) * 1phx;
+        border-radius: root.s(10px);
+        background: root.quote-rows.length == 0 ? root.surface : transparent;
         opacity: root.content-opacity / 100;
-        clip: true;
-        background: transparent;
 
-        card := Rectangle {
-            x: 0px;
-            y: 0px;
-            width: root.s(root.card-width);
-            height: root.s(root.visible-height);
-            border-radius: root.s(root.card-radius);
+        for quote[index] in root.quote-rows : cell := Rectangle {
+            property <bool> ready: root.quote-price-ready.length <= index || root.quote-price-ready[index];
+            property <bool> use-gain: quote.positive != root.red-up-enabled;
+            property <bool> contrast-face: root.light-theme && index == 3 && self.ready;
+            property <color> change-color: !self.ready ? self.face-text : (self.use-gain
+                ? (self.contrast-face ? root.gain-contrast : root.gain)
+                : (self.contrast-face ? root.loss-contrast : root.loss));
+            property <color> face-text: self.contrast-face ? #253012 : #ffffff;
+            x: round(root.s(root.cell-x(index)) / 1phx) * 1phx; y: 0px;
+            width: round(root.s(root.cell-x(index) + root.cell-width(index)) / 1phx) * 1phx - self.x;
+            height: card.height;
+            visible: index < 5;
+            border-top-left-radius: index == 0 ? root.s(10px) : 0px;
+            border-top-right-radius: index + 1 == root.block-count ? root.s(10px) : 0px;
+            border-bottom-left-radius: index == 0 ? root.s(10px) : 0px;
+            border-bottom-right-radius: index + 1 == root.block-count ? root.s(10px) : 0px;
             background: transparent;
-            border-width: 0px;
-            border-color: transparent;
-            clip: true;
-
-            for quote[index] in root.quote-rows : Rectangle {
-                property <length> cell-x: index == 0 ? root.block-0-x
-                    : (index == 1 ? root.block-1-x
-                    : (index == 2 ? root.block-2-x
-                    : (index == 3 ? root.block-3-x : root.block-4-x)));
-                property <length> cell-width: index == 0 ? root.block-0-width
-                    : (index == 1 ? root.block-1-width
-                    : (index == 2 ? root.block-2-width
-                    : (index == 3 ? root.block-3-width : root.block-4-width)));
-                x: root.s(self.cell-x);
-                y: 0px;
-                width: root.s(self.cell-width);
-                height: parent.height;
-                visible: index < root.max-block-count;
-                border-top-left-radius: index == 0 ? root.s(root.card-radius) : 0px;
-                border-bottom-left-radius: index == 0 ? root.s(root.card-radius) : 0px;
-                border-top-right-radius: index + 1 == root.block-count ? root.s(root.card-radius) : 0px;
-                border-bottom-right-radius: index + 1 == root.block-count ? root.s(root.card-radius) : 0px;
-                // Keep the solid fill and the SVG gloss independently rounded;
-                // the software renderer only supports rectangular child clips.
-                background: index == 0 ? #159fbe
-                    : (index == 1 ? #2388ca
-                    : (index == 2 ? #ee7c22
-                    : (index == 3 ? #c8bb1d : #3da45d)));
-
-                StatusStripFill {
-                    edge-kind: root.block-count == 1 ? 3 : (index == 0 ? 1 : (index + 1 == root.block-count ? 2 : 0));
-                    width: parent.width;
-                    height: parent.height;
-                }
+            StatusStripFill {
+                width: parent.width; height: parent.height;
+                tone-index: index; light-theme: root.light-theme; ready: cell.ready;
+                radius: root.s(10px);
+                edge-kind: root.block-count == 1 ? 3 : (index == 0 ? 1 : (index + 1 == root.block-count ? 2 : 0));
             }
-
-            for quote[index] in root.quote-rows : Rectangle {
-                property <length> cell-x: index == 0 ? root.block-0-x
-                    : (index == 1 ? root.block-1-x
-                    : (index == 2 ? root.block-2-x
-                    : (index == 3 ? root.block-3-x : root.block-4-x)));
-                property <length> cell-width: index == 0 ? root.block-0-width
-                    : (index == 1 ? root.block-1-width
-                    : (index == 2 ? root.block-2-width
-                    : (index == 3 ? root.block-3-width : root.block-4-width)));
-                property <bool> contrast-cell: index == 3;
-                x: root.s(self.cell-x);
-                y: 0px;
-                width: root.s(self.cell-width);
-                height: parent.height;
-                visible: index < root.max-block-count;
-                background: transparent;
-
-                Rectangle {
-                    x: parent.width - root.s(1px);
-                    y: root.s(root.separator-top);
-                    width: root.s(1px);
-                    height: parent.height - root.s(root.separator-bottom-gap);
-                    background: #ffffff28;
-                    visible: index + 1 < root.block-count;
-                }
-
-                Text {
-                    x: root.s(root.text-left);
-                    y: root.s(10px);
-                    width: parent.width - root.s(root.text-horizontal-padding);
-                    height: root.s(16px);
-                    text: quote.symbol;
-                    color: parent.contrast-cell ? root.contrast-text-color : root.default-text-color;
-                    font-size: root.s(11px);
-                    font-weight: 700;
-                    overflow: elide;
-                }
-
-                Text {
-                    x: root.s(root.text-left);
-                    y: root.s(32px);
-                    width: parent.width - root.s(root.text-left + root.price-right-gap);
-                    height: root.s(27px);
-                    text: quote.price;
-                    color: parent.contrast-cell ? root.contrast-text-color : root.default-text-color;
-                    font-size: root.s(23px);
-                    font-weight: 900;
-                    overflow: elide;
-                }
-
-                Text {
-                    x: root.s(root.text-left);
-                    y: root.s(61px);
-                    width: parent.width - root.s(root.text-horizontal-padding);
-                    height: root.s(16px);
-                    text: quote.change;
-                    color: parent.contrast-cell ? root.contrast-text-color : root.muted-text-color;
-                    font-size: root.s(13px);
-                    font-weight: 700;
-                    overflow: elide;
-                }
-            }
-
             Text {
-                x: root.s(root.text-left);
-                y: root.s(32px);
-                width: parent.width - root.s(root.text-horizontal-padding);
-                text: root.empty-text;
-                color: root.default-text-color;
-                font-size: root.s(18px);
-                font-weight: 800;
-                horizontal-alignment: root.rtl-layout ? right : left;
-                visible: root.quote-rows.length == 0;
-                overflow: elide;
+                x: root.s(11px); y: root.s(9px);
+                width: parent.width - root.s(22px); height: root.s(17px);
+                text: quote.symbol; color: cell.face-text;
+                font-size: root.s(12px); font-weight: 600;
+                overflow: elide; vertical-alignment: center;
             }
-
+            price_text := Text {
+                x: root.s(11px); y: root.s(29px);
+                width: parent.width - root.s(19px); height: root.s(28px);
+                text: quote.price;
+                color: cell.face-text;
+                font-size: root.s(23px) * min(1,
+                    (self.width - max(root.s(2px), 2px)) / max(1px, price_slots.preferred-width));
+                font-weight: 700; overflow: elide; vertical-alignment: center;
+                visible: cell.ready;
+            }
+            Text {
+                x: price_text.x; y: price_text.y;
+                width: price_text.width; height: price_text.height;
+                text: "—"; color: cell.face-text;
+                font-size: root.s(22px); visible: !cell.ready;
+            }
+            change_arrow := Image {
+                x: root.s(9px); y: root.s(62px);
+                width: root.s(12px); height: self.width;
+                // Direction follows the quote; the user's red-up preference
+                // changes only the shared arrow/percentage color.
+                source: quote.positive ? @image-url("icons/caret-up-fill.svg") : @image-url("icons/caret-down-fill.svg");
+                colorize: cell.change-color; image-fit: contain;
+                visible: cell.ready;
+            }
+            change_text := Text {
+                x: root.s(cell.ready ? 25px : 11px); y: root.s(60px);
+                width: period_text.x - root.s(5px) - self.x; height: root.s(17px);
+                text: cell.ready ? quote.change : "—";
+                color: cell.change-color;
+                font-size: root.s(13px); font-weight: 600;
+                overflow: elide; vertical-alignment: center;
+            }
+            period_text := Text {
+                x: parent.width - root.s(37px); y: root.s(60px);
+                width: root.s(26px); height: root.s(17px);
+                text: root.change-period-text; color: cell.face-text;
+                font-size: root.s(10px); overflow: elide;
+                opacity: 0.78;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                visible: cell.ready && !(index + 1 == root.block-count && root.lock-revealed);
+            }
+            Rectangle {
+                x: parent.width - 1phx; y: root.s(14px);
+                width: 1phx; height: root.s(55px);
+                background: #ffffff45; visible: index + 1 < root.block-count;
+            }
         }
 
-        lock_button := Rectangle {
-            x: parent.width - root.s(root.lock-button-size) - root.s(root.lock-button-right-gap);
-            y: root.s(root.lock-button-top);
-            width: root.s(root.lock-button-size);
-            height: root.s(root.lock-button-size);
-            border-radius: root.s(root.lock-button-radius);
-            background: root.layout-locked || lock_touch.has-hover ? #07111dcc : transparent;
-            border-width: root.s(1px);
-            border-color: root.layout-locked || lock_touch.has-hover ? #ffffff66 : transparent;
-            visible: drag_area.has-hover || lock_touch.has-hover;
+        empty_label := Text {
+            x: root.s(11px); y: root.s(12px);
+            width: parent.width - root.s(22px); height: root.s(45px);
+            text: root.empty-text; color: root.secondary;
+            font-size: root.s(13px); overflow: elide; wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-alignment: root.rtl-layout ? right : left;
+            visible: root.quote-rows.length == 0;
+        }
+        status_warning := Rectangle {
+            x: parent.width - root.s(8px); y: root.s(7px);
+            width: root.s(4px); height: self.width; border-radius: self.width / 2;
+            background: root.warning;
+            visible: root.market-status-warning && root.quote-rows.length > 0;
+            accessible-role: image;
+            accessible-label: root.status-details-label;
+        }
+    }
 
-            Path {
-                x: root.s(5px);
-                y: root.s(4px);
-                width: root.s(16px);
-                height: root.s(18px);
-                viewbox-width: 24;
-                viewbox-height: 24;
-                commands: "M 8 4 L 16 4 L 16 6 L 15 6 L 15 12 L 18 14 L 18 16 L 13 16 L 13 21 L 11 21 L 11 16 L 6 16 L 6 14 L 9 12 L 9 6 L 8 6 Z";
-                fill: root.layout-locked ? #e2e8f0dc : transparent;
-                stroke: #e2e8f0dc;
-                stroke-width: root.s(2px);
-                stroke-line-cap: round;
-                stroke-line-join: round;
+    // Passive status details use the drag surface, so they never steal dragging.
+    status_details := Rectangle {
+        // Physical bounds prevent fractional dirty rectangles from leaving a
+        // thin row behind when a translucent overlay is shown or hidden.
+        x: round((card.x + root.s(5px)) / 1phx) * 1phx;
+        y: round((card.y + root.s(4px)) / 1phx) * 1phx;
+        width: round((card.width - root.s(10px)) / 1phx) * 1phx;
+        height: round(root.s(61px) / 1phx) * 1phx;
+        background: root.surface; border-radius: root.s(6px);
+        border-width: 1phx; border-color: root.edge;
+        opacity: root.content-opacity / 100;
+        visible: root.details-visible && root.quote-rows.length > 0;
+        detail_text := Text {
+            x: root.s(7px); y: root.s(3px);
+            width: parent.width - root.s(14px); height: parent.height - root.s(6px);
+            text: root.status-details-label;
+            color: root.market-status-warning ? (root.light-theme ? #95610a : root.warning) : root.secondary;
+            font-size: root.s(10px); wrap: word-wrap; overflow: elide;
+            horizontal-alignment: root.rtl-layout ? right : left;
+            vertical-alignment: center;
+        }
+    }
+
+    // Float over the final period label, never over the pair, price or change.
+    lock_button := Rectangle {
+        x: round((card.x + card.width - self.width - root.s(4px)) / 1phx) * 1phx;
+        y: round((card.y + card.height - self.height - root.s(2px)) / 1phx) * 1phx;
+        width: round(root.s(20px) / 1phx) * 1phx; height: self.width;
+        border-radius: root.s(5px);
+        background: lock_touch.has-hover ? #244e68 : #15364ce8;
+        border-width: root.show-lock-focus && lock_focus.has-focus ? 1phx : 0px;
+        border-color: #b5e8ff;
+        opacity: root.lock-revealed ? root.content-opacity / 100 : 0;
+        forward-focus: lock_focus;
+        accessible-role: checkbox;
+        accessible-label: root.layout-lock-text;
+        accessible-checkable: true;
+        accessible-checked: root.layout-locked;
+        accessible-action-default => { root.toggle-layout-lock(); }
+        Image {
+            x: root.s(3px); y: root.s(3px);
+            width: root.s(14px); height: self.width;
+            source: root.layout-locked ? @image-url("icons/lock.svg") : @image-url("icons/unlock.svg");
+            colorize: #f0f8ff; image-fit: contain;
+        }
+        lock_touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.show-lock-focus = false;
+                lock_focus.focus();
+                root.toggle-layout-lock();
             }
-
-            lock_touch := TouchArea {
-                width: parent.width;
-                height: parent.height;
-                mouse-cursor: pointer;
-                clicked => { root.toggle-layout-lock(); }
+        }
+        lock_focus := FocusScope {
+            width: 0px; height: 0px;
+            key-pressed(event) => {
+                root.show-lock-focus = true;
+                if !event.repeat && (event.text == Key.Space || event.text == Key.Return) {
+                    root.toggle-layout-lock(); return accept;
+                }
+                return reject;
             }
         }
     }

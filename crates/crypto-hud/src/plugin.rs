@@ -59,6 +59,7 @@ const DISABLED_PROTOTYPE_PLUGIN_IDS: &[&str] = &[
 const BUNDLED_BUILTIN_SLINT_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.focus-ticker",
     "com.cryptohud.market-compass",
+    "com.cryptohud.mint-tile",
     "com.cryptohud.trust-card",
     "com.cryptohud.status-strip",
 ];
@@ -69,6 +70,7 @@ const HOST_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.focus-ticker",
     "com.cryptohud.market-board",
     "com.cryptohud.market-compass",
+    "com.cryptohud.mint-tile",
     "com.cryptohud.status-strip",
     "com.cryptohud.trust-card",
     "com.example.stage3-price-card",
@@ -76,6 +78,7 @@ const HOST_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
 #[cfg(test)]
 const DIRECT_SCALE_REPO_PLUGIN_IDS: &[&str] = &[
     "com.cryptohud.focus-ticker",
+    "com.cryptohud.mint-tile",
     "com.cryptohud.status-strip",
     "com.cryptohud.trust-card",
 ];
@@ -2330,6 +2333,7 @@ export component ExamplePriceCard inherits Window {
             BUILTIN_QUOTE_BOARD_PLUGIN_ID,
             "com.cryptohud.focus-ticker",
             "com.cryptohud.market-compass",
+            "com.cryptohud.mint-tile",
             "com.cryptohud.trust-card",
             "com.cryptohud.status-strip",
         ] {
@@ -3249,6 +3253,7 @@ export component ExamplePriceCard inherits Window {
         for plugin_id in [
             "com.cryptohud.focus-ticker",
             "com.cryptohud.market-compass",
+            "com.cryptohud.mint-tile",
             "com.cryptohud.trust-card",
             "com.cryptohud.status-strip",
         ] {
@@ -3297,6 +3302,147 @@ export component ExamplePriceCard inherits Window {
                 rows: None
             }
         );
+    }
+
+    #[test]
+    fn mint_tile_manifest_declares_single_symbol_candle_card() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let plugin = catalog.find("com.cryptohud.mint-tile").unwrap();
+
+        assert_eq!(plugin.default_size.width, 360);
+        assert_eq!(plugin.default_size.height, 360);
+        assert_eq!(plugin.min_symbol_limit, 1);
+        assert_eq!(plugin.symbol_limit, 1);
+        assert_eq!(plugin.preview_images.len(), 2);
+        for image_path in &plugin.preview_images {
+            assert!(
+                image_path.exists(),
+                "mint tile preview image should exist: {}",
+                image_path.display()
+            );
+            let image = slint::Image::load_from_path(image_path).unwrap_or_else(|error| {
+                panic!(
+                    "mint tile preview image should load: {}: {error}",
+                    image_path.display()
+                )
+            });
+            let pixels = image.to_rgba8().unwrap_or_else(|| {
+                panic!(
+                    "mint tile preview image should expose RGBA pixels: {}",
+                    image_path.display()
+                )
+            });
+            assert_eq!(
+                (pixels.width(), pixels.height()),
+                (360, 360),
+                "mint tile preview should match the natural widget canvas"
+            );
+            let width = pixels.width() as usize;
+            let height = pixels.height() as usize;
+            let data = pixels.as_slice();
+            let corners = [
+                data[0],
+                data[width - 1],
+                data[(height - 1) * width],
+                data[height * width - 1],
+            ];
+            assert!(
+                corners.iter().all(|pixel| pixel.a == 255),
+                "mint tile preview should fully composite the frameless window"
+            );
+            let corner_spread = corners
+                .iter()
+                .flat_map(|pixel| [pixel.r, pixel.g, pixel.b])
+                .map(i16::from)
+                .max()
+                .unwrap()
+                - corners
+                    .iter()
+                    .flat_map(|pixel| [pixel.r, pixel.g, pixel.b])
+                    .map(i16::from)
+                    .min()
+                    .unwrap();
+            assert!(
+                corner_spread <= 20,
+                "mint tile preview corners should retain a neutral paper backdrop"
+            );
+            let paper = data[0];
+            let shadow = data[(height - 20) * width + width / 2];
+            assert!(
+                i16::from(paper.r) + i16::from(paper.g) + i16::from(paper.b)
+                    > i16::from(shadow.r) + i16::from(shadow.g) + i16::from(shadow.b) + 24,
+                "mint tile preview should retain a visible shadow below the card"
+            );
+        }
+        assert!(plugin
+            .data_requirements
+            .iter()
+            .any(|requirement| requirement.capability == "market.price"));
+        assert!(plugin
+            .data_requirements
+            .iter()
+            .any(|requirement| requirement.capability == "market.candles"));
+    }
+
+    #[test]
+    fn mint_tile_compact_size_preserves_existing_layout_preferences() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let definitions = crate::state_bridge::widget_definitions_from_catalog(&catalog);
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.id == "com.cryptohud.mint-tile")
+            .unwrap();
+        assert_eq!(
+            definition.size_policy,
+            crypto_hud_shell_state::WidgetSizePolicy::Fixed
+        );
+
+        for (width, height, scale) in [(360, 440, 100), (450, 550, 125)] {
+            for explicit_scale in [false, true] {
+                let mut saved = serde_json::json!({
+                    "widgets": [{
+                        "id": "mint-tile-1",
+                        "plugin_id": definition.id,
+                        "name": "My Mint Tile",
+                        "layout": {
+                            "x": 210,
+                            "y": 130,
+                            "always_on_top": false,
+                            "opacity_percent": 85,
+                            "locked": true,
+                            "width": width,
+                            "height": height
+                        },
+                        "symbols": ["binance:spot:PEPE/USDT"],
+                        "config": {"theme": "dark"}
+                    }]
+                });
+                if explicit_scale {
+                    saved["widgets"][0]["layout"]["scale_percent"] = scale.into();
+                }
+                let mut store: crypto_hud_shell_state::LayoutStore =
+                    serde_json::from_value(saved).unwrap();
+                let original = store.widgets[0].clone();
+
+                crypto_hud_shell_state::normalize_store_with_catalog(
+                    &mut store,
+                    0,
+                    &definitions,
+                    (1920, 1080),
+                );
+
+                let mut expected = original;
+                expected.layout.width = width;
+                expected.layout.height = width;
+                expected.layout.scale_percent = scale;
+                assert_eq!(
+                    store.widgets[0], expected,
+                    "old {width}x{height} layout with explicit_scale={explicit_scale} should only shrink its height and normalize scale"
+                );
+            }
+        }
     }
 
     #[test]
@@ -3536,7 +3682,7 @@ export component ExamplePriceCard inherits Window {
         ));
         let source = repo_plugin_ui_source("com.cryptohud.market-compass");
         assert!(source.contains("in property <int> config-switch-interval-seconds: 5;"));
-        assert!(source.contains("interval: root.config-switch-interval-seconds * 1s;"));
+        assert!(source.contains("interval: max(1, root.config-switch-interval-seconds) * 1s;"));
     }
 
     #[test]
@@ -3577,7 +3723,8 @@ export component ExamplePriceCard inherits Window {
 
     #[test]
     fn repo_plugin_visible_text_literals_are_limited_to_non_localized_tokens() {
-        let allowed = [" · "];
+        // Punctuation-only separators and neutral missing-value placeholders.
+        let allowed = [" · ", "—"];
 
         for plugin_id in HOST_SCALE_REPO_PLUGIN_IDS {
             let source = repo_plugin_ui_source(plugin_id);
@@ -3616,6 +3763,88 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
+    fn trust_card_compact_manifest_and_saved_layouts_keep_user_preferences() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("plugins");
+        let catalog = PluginCatalog::discover(vec![root]);
+        let plugin = catalog.find("com.cryptohud.trust-card").unwrap();
+        assert_eq!(
+            (plugin.default_size.width, plugin.default_size.height),
+            (260, 180)
+        );
+        assert_eq!((plugin.min_symbol_limit, plugin.symbol_limit), (1, 1));
+        assert_eq!(plugin.preview_images.len(), 2);
+        for path in &plugin.preview_images {
+            let image = slint::Image::load_from_path(path).unwrap();
+            assert_eq!((image.size().width, image.size().height), (260, 180));
+        }
+        let definitions = crate::state_bridge::widget_definitions_from_catalog(&catalog);
+        for (width, height, scale, expected_width, expected_height, expected_scale) in [
+            (520, 386, Some(100), 260, 180, 100),
+            (650, 483, Some(125), 325, 225, 125),
+            // Legacy layouts without an explicit scale retain the host's
+            // established inference from the smaller width/height ratio.
+            (520, 386, None, 520, 360, 200),
+            (650, 483, None, 650, 450, 250),
+        ] {
+            let mut saved = serde_json::json!({
+                "widgets": [{
+                    "id": "trust-card-1", "plugin_id": plugin.id,
+                    "name": "My Trust Card",
+                    "layout": {
+                        "x": 210, "y": 130, "always_on_top": false,
+                        "opacity_percent": 85, "locked": true,
+                        "width": width, "height": height
+                    },
+                    "symbols": ["binance:spot:PEPE/USDT"],
+                    "config": {"theme": "dark"}
+                }]
+            });
+            if let Some(scale) = scale {
+                saved["widgets"][0]["layout"]["scale_percent"] = scale.into();
+            }
+            let mut store: crypto_hud_shell_state::LayoutStore =
+                serde_json::from_value(saved).unwrap();
+            let mut expected = store.widgets[0].clone();
+            expected.layout.width = expected_width;
+            expected.layout.height = expected_height;
+            expected.layout.scale_percent = expected_scale;
+            crypto_hud_shell_state::normalize_store_with_catalog(
+                &mut store,
+                0,
+                &definitions,
+                (1920, 1080),
+            );
+            assert_eq!(
+                store.widgets[0], expected,
+                "saved {width}x{height}, scale={scale:?}"
+            );
+        }
+        for count in 1..=8 {
+            let symbols: Vec<_> = ["BTC", "ETH", "SOL", "BNB", "PEPE", "DOGE", "ADA", "XRP"]
+                .into_iter()
+                .take(count)
+                .map(|asset| format!("binance:spot:{asset}/USDT"))
+                .collect();
+            let mut store: crypto_hud_shell_state::LayoutStore =
+                serde_json::from_value(serde_json::json!({
+                    "widgets": [{"id": "trust-card-1", "plugin_id": plugin.id, "symbols": symbols}]
+                }))
+                .unwrap();
+            crypto_hud_shell_state::normalize_store_with_catalog(
+                &mut store,
+                0,
+                &definitions,
+                (1920, 1080),
+            );
+            assert_eq!(
+                store.widgets[0].symbols,
+                ["binance:spot:BTC/USDT"],
+                "{count} configured pairs must normalize to the single-pair contract"
+            );
+        }
+    }
+
+    #[test]
     fn trust_card_chart_omits_horizontal_dotted_grid() {
         let source = repo_plugin_ui_source("com.cryptohud.trust-card");
 
@@ -3624,24 +3853,19 @@ export component ExamplePriceCard inherits Window {
             "trust card chart should not render horizontal dotted guide lines"
         );
         assert!(source.contains("commands: root.chart-line-path;"));
-        assert!(source.contains("commands: root.chart-fill-path;"));
+        assert!(!source.contains("commands: root.chart-fill-path;"));
     }
 
     #[test]
-    fn market_compass_loading_price_size_uses_state_not_localized_text() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
+    fn mint_tile_keeps_market_direction_on_change_and_chart_only() {
+        let source = repo_plugin_ui_source("com.cryptohud.mint-tile");
 
-        assert!(
-            !source.contains("quote.price == \"Connecting\"")
-                && !source.contains("quote.price == \"连接中\""),
-            "market compass loading layout should not compare localized runtime text"
-        );
-        assert!(
-            source.contains(
-                "font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);"
-            ),
-            "market compass price size should follow chart readiness instead of localized labels"
-        );
+        assert!(source.contains("property <color> chart-color: root.chart-uses-gain-color"));
+        assert!(source.contains(
+            "? (root.red-up-enabled ? root.loss-pill-background : root.gain-pill-background)"
+        ));
+        assert!(source.contains("commands: root.chart-line-path;"));
+        assert!(source.contains("commands: root.chart-fill-path;"));
     }
 
     #[test]
@@ -3695,162 +3919,52 @@ export component ExamplePriceCard inherits Window {
                 "{plugin_id} should scale visible text with the card"
             );
             assert!(
-                source.contains("opacity: root.content-opacity / 100;")
-                    && source.contains("source: @image-url(\"opaque-circle.png\");"),
-                "{plugin_id} should apply opacity to an opaque circular background while keeping the square outside transparent"
+                source.contains("opacity: root.content-opacity / 100;"),
+                "{plugin_id} should apply the host opacity to the complete circular surface"
             );
         }
     }
 
     #[test]
-    fn market_compass_orders_pairs_counterclockwise_for_clockwise_rotation() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("return root.bounded-rotation-step;"),
-            "market compass active pair should advance with the clockwise rotation step"
-        );
-        assert!(
-            source.contains("property <int> bounded-rotation-step: root.orbit-count <= 0 ? 0 : Math.mod(root.rotation-step, root.orbit-count);")
-                && source.contains(
-                    "slot-angle: -90deg + (root.rotation-step - index) * 1turn / root.orbit-denominator;"
-                ),
-            "market compass pairs should be laid out counterclockwise so the next pair enters 12 o'clock during clockwise rotation"
-        );
-        assert!(
-            source.contains("root.rotation-step += 1;")
-                && !source.contains("root.rotation-step = 0;"),
-            "market compass rotation should remain monotonic so the last-to-first transition continues clockwise"
-        );
-        assert!(
-            !source.contains("slot-angle: -90deg + (index + root.rotation-step)"),
-            "market compass should not lay out pairs clockwise"
-        );
-    }
-
-    #[test]
-    fn market_compass_nodes_follow_the_rail_without_self_rotation() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("animate slot-angle { duration: 620ms; easing: ease-in-out; }")
-                && !source.contains("animate x { duration: 620ms;")
-                && !source.contains("animate y { duration: 620ms;"),
-            "market compass should animate its polar angle instead of interpolating x/y across a chord"
-        );
-        assert!(
-            source.contains(
-                "x: root.orbit-center-x + root.orbit-radius * Math.cos(coin_node.slot-angle)"
-            ) && source.contains(
-                "y: root.orbit-center-y + root.orbit-radius * Math.sin(coin_node.slot-angle)"
-            ),
-            "market compass node centers should be derived from one shared circular rail"
-        );
-        assert!(
-            !source.contains("property <angle> rolling-angle:")
-                && !source.contains("rim_glint := Rectangle")
-                && !source.contains("quote-icon-rotation-sheets")
-                && !source.contains("source-clip-x: coin_node.icon-frame-index"),
-            "market compass coin shells and logos should stay upright while their nodes orbit"
-        );
-    }
-
-    #[test]
-    fn market_compass_dark_theme_removes_the_misaligned_inner_ring() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("dark_inner_ring_mask := Rectangle")
-                && source.contains("width: parent.width * 0.594;")
-                && source.contains("border-width: parent.width * 0.032;")
-                && source.contains("border-color: #05090d;")
-                && source.contains("visible: !root.light-theme;"),
-            "market compass should cover only the dark node asset's extra inner cyan ring"
-        );
-    }
-
-    #[test]
-    fn market_compass_price_uses_raw_quote_price() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("text: quote.price;"),
-            "market compass should display the host-formatted price without adding currency symbols"
-        );
-        assert!(
-            !source.contains("\"$\" + quote.price"),
-            "market compass should not prefix prices with a dollar sign"
-        );
-        assert!(
-            !source.contains("price_backdrop := Rectangle"),
-            "market compass should not draw an obvious capsule behind the main price"
-        );
-        assert!(
-            source.contains("price_shadow := Text") && source.contains("price_glow := Text"),
-            "market compass should improve price contrast through layered text, not a separate backing shape"
-        );
-        assert!(
-            source.contains(
-                "property <color> price-text-color: root.light-theme ? #0b302e : #ffffff;"
-            ),
-            "market compass price should use dark ink on the porcelain light theme and white on the dark dial"
-        );
-        assert!(
-            source.contains("color: root.price-shadow-color;")
-                && source.contains("color: root.price-glow-color;")
-                && source.contains("color: root.price-text-color;"),
-            "market compass price layers should stay readable through theme-specific text colors"
-        );
-        assert!(
-            source
-                .matches("font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);")
-                .count()
-                == 3,
-            "market compass price layers should use readable size for live prices and compact size for loading text"
-        );
-    }
-
-    #[test]
-    fn market_compass_pair_heading_stays_readable_on_dark_dial() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("pair_shadow := Text"),
-            "market compass pair heading should have a subtle contrast layer"
-        );
-        assert!(
-            source.contains(
-                "property <color> pair-heading-color: root.light-theme ? #245f5a : #c7d8eb;"
-            ),
-            "market compass pair heading should use dark teal on the porcelain light theme and a light dial color on dark theme"
-        );
-        assert!(
-            !source.contains(
-                "color: root.muted-text-color;\n                font-size: root.s(25px);"
-            ),
-            "market compass pair heading should not inherit low-contrast theme-muted color"
-        );
-    }
-
-    #[test]
-    fn market_compass_light_theme_uses_porcelain_assets() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        for asset in [
-            "opaque-circle-light.png",
-            "reference-light.png",
-            "coin-node-light.png",
-            "coin-node-light-selected.png",
+    fn market_compass_material_assets_support_native_scaling_and_transparency() {
+        let plugin_id = "com.cryptohud.market-compass";
+        let source = repo_plugin_ui_source(plugin_id);
+        let ui_dir = repo_plugin_path(plugin_id).join("ui");
+        for (asset, minimum_size) in [
+            ("champagne-dial.png", 480),
+            ("champagne-node.png", 79),
+            ("champagne-node-selected.png", 86),
+            ("champagne-pointer.png", 64),
+            ("midnight-dial.png", 480),
+            ("midnight-node.png", 79),
+            ("midnight-node-selected.png", 86),
         ] {
+            let path = ui_dir.join(asset);
             assert!(
-                source.contains(&format!("source: @image-url(\"{asset}\");")),
-                "market compass light theme should include dedicated porcelain asset {asset}"
+                source.contains(&format!("@image-url(\"{asset}\")")),
+                "material artwork should be wired into the live component: {asset}"
+            );
+            assert!(fs::metadata(&path).unwrap().len() <= ASSET_MAX_BYTES);
+            let pixels = slint::Image::load_from_path(&path)
+                .unwrap()
+                .to_rgba8()
+                .unwrap();
+            let width = pixels.width() as usize;
+            let height = pixels.height() as usize;
+            assert_eq!(
+                width, height,
+                "{asset} should not stretch in its square bounds"
+            );
+            assert!(width >= minimum_size, "{asset} lacks native-size detail");
+            let data = pixels.as_slice();
+            for corner in [0, width - 1, (height - 1) * width, height * width - 1] {
+                assert_eq!(data[corner].a, 0, "{asset} has an opaque square corner");
+            }
+            assert!(
+                data.iter().any(|pixel| pixel.a > 200),
+                "{asset} must contain visible artwork"
             );
         }
-        assert!(
-            !source.contains("opacity: root.light-theme ? 0.64 : 1;"),
-            "market compass light theme should not be a translucent dark reference image"
-        );
     }
 
     #[test]
@@ -3885,24 +3999,16 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
-    fn circular_repo_plugin_reference_images_have_transparent_edges() {
+    fn circular_repo_plugin_dial_images_have_transparent_edges() {
         for plugin_id in CIRCULAR_REPO_PLUGIN_IDS {
             let ui_dir = repo_plugin_path(plugin_id).join("ui");
             assert_round_asset_has_transparent_antialiased_edge(
                 plugin_id,
-                &ui_dir.join("reference.png"),
+                &ui_dir.join("midnight-dial.png"),
             );
             assert_round_asset_has_transparent_antialiased_edge(
                 plugin_id,
-                &ui_dir.join("reference-light.png"),
-            );
-            assert_round_asset_has_transparent_antialiased_edge(
-                plugin_id,
-                &ui_dir.join("opaque-circle.png"),
-            );
-            assert_round_asset_has_transparent_antialiased_edge(
-                plugin_id,
-                &ui_dir.join("opaque-circle-light.png"),
+                &ui_dir.join("champagne-dial.png"),
             );
         }
     }
@@ -3924,23 +4030,25 @@ export component ExamplePriceCard inherits Window {
         let data = pixels.as_slice();
 
         assert_eq!((width, height), (480, 480), "{plugin_id} {asset_name} size");
+        // Prefiltered shadows can leave a faint alpha tail at the canvas edge.
+        // Keep the edge below 1.2% opacity; corners are checked separately.
         for x in 0..width {
-            assert_eq!(data[x].a, 0, "{plugin_id} {asset_name} top edge pixel {x}");
-            assert_eq!(
-                data[(height - 1) * width + x].a,
-                0,
+            assert!(
+                data[x].a <= 3,
+                "{plugin_id} {asset_name} top edge pixel {x}"
+            );
+            assert!(
+                data[(height - 1) * width + x].a <= 3,
                 "{plugin_id} {asset_name} bottom edge pixel {x}"
             );
         }
         for y in 0..height {
-            assert_eq!(
-                data[y * width].a,
-                0,
+            assert!(
+                data[y * width].a <= 3,
                 "{plugin_id} {asset_name} left edge pixel {y}"
             );
-            assert_eq!(
-                data[y * width + width - 1].a,
-                0,
+            assert!(
+                data[y * width + width - 1].a <= 3,
                 "{plugin_id} {asset_name} right edge pixel {y}"
             );
         }

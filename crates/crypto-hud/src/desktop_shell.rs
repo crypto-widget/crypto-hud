@@ -190,7 +190,7 @@ pub(crate) fn show_settings_window(
     plugin_catalog: &plugin::PluginCatalog,
 ) {
     refresh_settings_window(ui, layouts, state_path, plugin_catalog, None);
-    request_symbol_catalog_refresh_from_store(ui, &layouts.borrow(), plugin_catalog);
+    request_symbol_catalog_refresh_from_store(ui, &layouts.borrow());
     enter_settings_mode(widgets, layouts, settings_mode_active);
     if let Err(error) = ui.show() {
         eprintln!("failed to show settings window: {error:#}");

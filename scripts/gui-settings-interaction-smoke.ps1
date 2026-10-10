@@ -1,5 +1,6 @@
 param(
-    [int]$TimeoutMs = 10000
+    [int]$TimeoutMs = 10000,
+    [string]$ExecutablePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,9 +72,17 @@ function Assert-Close([double]$Actual, [double]$Expected, [double]$Tolerance, [s
 
 Push-Location $RepoRoot
 try {
-    cargo run -p crypto-hud -- --widgets 1 --show-settings --gui-smoke-ms $TimeoutMs
-    if ($LASTEXITCODE -ne 0) {
-        throw "GUI settings interaction smoke process exited with code $LASTEXITCODE"
+    if ($ExecutablePath) {
+        $smokeProcess = Start-Process -FilePath $ExecutablePath `
+            -ArgumentList "--widgets", "1", "--show-settings", "--gui-smoke-ms", "$TimeoutMs" `
+            -PassThru -Wait -WindowStyle Hidden
+        $smokeExitCode = $smokeProcess.ExitCode
+    } else {
+        cargo run -p crypto-hud -- --widgets 1 --show-settings --gui-smoke-ms $TimeoutMs
+        $smokeExitCode = $LASTEXITCODE
+    }
+    if ($smokeExitCode -ne 0) {
+        throw "GUI settings interaction smoke process exited with code $smokeExitCode"
     }
 
     if (-not (Test-Path $ReadyFile)) {
@@ -101,8 +110,8 @@ try {
     if ([int]$widget.layoutWidth -ne 336) {
         throw "Widget layout width expected 336, saw $($widget.layoutWidth)"
     }
-    if ([int]$widget.layoutHeight -ne 152) {
-        throw "Widget layout height expected 152, saw $($widget.layoutHeight)"
+    if ([int]$widget.layoutHeight -ne 120) {
+        throw "Widget layout height expected 120, saw $($widget.layoutHeight)"
     }
     $windowScaleFactor = [double]$widget.windowScaleFactor
     if ([double]::IsNaN($windowScaleFactor) -or
@@ -111,8 +120,8 @@ try {
     }
     Assert-Close ([double]$widget.runtimeWidth) ([double]$widget.layoutWidth * $windowScaleFactor) 1 "Widget physical width"
     Assert-Close ([double]$widget.runtimeHeight) ([double]$widget.layoutHeight * $windowScaleFactor) 1 "Widget physical height"
-    if ([int]$widget.symbolCount -ne 2) {
-        throw "Widget symbol count expected 2, saw $($widget.symbolCount)"
+    if ([int]$widget.symbolCount -ne 1) {
+        throw "Offline symbol picker should not restore a local fallback; expected 1 symbol, saw $($widget.symbolCount)"
     }
     if ([int]$widget.scalePercent -ne 150) {
         throw "Widget scale_percent expected 150, saw $($widget.scalePercent)"

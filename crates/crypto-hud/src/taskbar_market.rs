@@ -13,8 +13,8 @@ use crate::{
     theme::{self, ResolvedTheme},
     AppTray, SettingsWindow,
 };
-use crypto_hud_core::{format_market_pair_symbol, format_pair_change, format_price};
-use crypto_hud_runtime::{data_health_for_symbols, QuoteCache};
+use crypto_hud_core::{format_market_pair_symbol, format_pair_change};
+use crypto_hud_runtime::{data_health_for_symbols, format_compact_price, QuoteCache};
 use crypto_hud_shell_state::AppSettings;
 
 const WORKER_COMMAND_CAPACITY: usize = 1;
@@ -370,7 +370,7 @@ fn taskbar_market_frame(
         };
     };
 
-    let price = format_price(quote.price);
+    let price = format_compact_price(quote.price);
     let change = format_pair_change(quote.change_percent_24h);
     let price_line = format!("{price} {change}");
     let accent_argb = taskbar_change_accent_argb(
@@ -1371,6 +1371,31 @@ mod tests {
     }
 
     #[test]
+    fn taskbar_price_uses_the_shared_eight_slot_budget() {
+        let settings = AppSettings::default();
+        let now = Instant::now();
+        for (symbol, price, expected) in [
+            ("binance:spot:BTC/USDT", 68000.12, "68000.12"),
+            ("binance:spot:PEPE/USDT", 0.000004110, "0.0₅4110"),
+            ("binance:spot:XRP/USDT", 99999999.9, "1.0000e8"),
+        ] {
+            let mut quotes = QuoteCache::new();
+            quotes.insert(
+                symbol.to_string(),
+                crypto_hud_runtime::QuoteState::new(
+                    price,
+                    1.25,
+                    Vec::new(),
+                    crypto_hud_core::MarketDataSource::Binance,
+                    now,
+                ),
+            );
+            let frame = taskbar_market_frame(symbol, &settings, &quotes, false, now);
+            assert_eq!(frame.price, format!("{expected} +1.25%"));
+        }
+    }
+
+    #[test]
     fn taskbar_frame_places_negative_change_after_price() {
         let settings = AppSettings::default();
         let symbol = "binance:spot:ETH/USDT";
@@ -1388,7 +1413,7 @@ mod tests {
         );
 
         let frame = taskbar_market_frame(symbol, &settings, &quotes, false, now);
-        assert_eq!(frame.price, "1921 -2.06%");
+        assert_eq!(frame.price, "1921.25 -2.06%");
         assert_ne!(frame.accent_argb, 0);
     }
 
