@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="ms-windows-store://pdp/?productid=9NCLXCSR8N2W"><strong>Tải từ Microsoft Store</strong></a>
+  <a href="https://apps.microsoft.com/detail/9NCLXCSR8N2W"><strong>Tải từ Microsoft Store</strong></a>
 </p>
 
 <p align="center">
