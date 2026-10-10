@@ -5,8 +5,8 @@
 <h1 align="center">Crypto HUD — Native Crypto Desktop Widget for Windows</h1>
 
 <p align="center">
-  <strong>Your market, always within a glance.</strong><br>
-  Native crypto widgets that stay on your Windows desktop without taking over it.
+  <strong>Markets, right beside you.</strong><br>
+  Native crypto market widgets for your Windows desktop.
 </p>
 
 <p align="center">
@@ -32,30 +32,35 @@
 </p>
 
 <p align="center">
-  <a href="ms-windows-store://pdp/?productid=9NCLXCSR8N2W"><strong>Get it from Microsoft Store</strong></a> ·
-  <a href="#quick-start"><strong>Run it locally</strong></a> ·
-  <a href="#widget-gallery"><strong>Explore widgets</strong></a> ·
-  <a href="CUSTOM_UI_PLUGIN_DEVELOPMENT.md"><strong>Build a widget</strong></a>
+  <a href="#download-for-windows"><strong>Download</strong></a> ·
+  <a href="#widget-gallery">Explore widgets</a> ·
+  <a href="#quick-start">Build from source</a> ·
+  <a href="CUSTOM_UI_PLUGIN_DEVELOPMENT.md">Build a widget</a>
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-light.png">
-    <img src="crates/crypto-hud/plugins/com.cryptohud.market-compass/ui/preview-dark.png" width="500" alt="Market Compass widget showing BTC price, a candlestick chart, and surrounding market pairs">
-  </picture>
+  <img src="docs/images/crypto-hud-desktop-en.png" width="1000" alt="Crypto HUD on a Windows laptop with Market Compass, Quote Board, and Mint Tile widgets">
 </p>
 
 <p align="center">
-  <sub>Live prices at the edge of your workspace. No exchange tab. No wallet connection. No noise.</sub>
+  <sub>Market Compass, Quote Board, and Mint Tile. Place widgets anywhere and make the desktop yours.</sub>
 </p>
+
+## Download for Windows
+
+Choose either download channel. Neither requires Rust or a development environment.
+
+| Microsoft Store | GitHub Releases |
+| --- | --- |
+| Install Crypto HUD through the Microsoft Store. | Download the portable Windows x64 ZIP, extract it to a fixed folder, and run `crypto-hud.exe`. |
+| **[Download from Microsoft Store](https://apps.microsoft.com/detail/9NCLXCSR8N2W)** | **[Download from GitHub Releases](https://github.com/crypto-widget/crypto-hud/releases/latest)** |
 
 ---
 
-Crypto HUD is a lightweight, local-first crypto desktop widget for Windows,
-built for people who want to follow a few coins without living inside a trading
-terminal. Place a widget where it feels natural, keep working, and glance over
-only when the market matters.
+Crypto HUD is a lightweight, local-first crypto market app for Windows. Follow
+your favorite pairs with desktop widgets, from a compact price list to a chart
+card or circular market view. Drag them into place, choose a theme, and keep
+prices and trends within a glance.
 
 <table>
   <tr>
@@ -145,8 +150,8 @@ Supported UI languages: `en`, `zh-CN`, `zh-TW`, `es-419`, `pt-BR`, `vi`, `id`,
 
 ## Quick start
 
-Crypto HUD is built for Windows. The repository uses `mise` to pin Rust
-`1.96` and provides a one-command local launch task.
+To build Crypto HUD from source on Windows, use `mise` to install the pinned
+Rust `1.96` toolchain and run the local launch task:
 
 ```powershell
 git clone https://github.com/crypto-widget/crypto-hud.git
