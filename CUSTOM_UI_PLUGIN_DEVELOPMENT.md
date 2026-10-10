@@ -252,6 +252,39 @@ empty/loading/error states, and keyboard/mouse locking. Set
 `CRYPTO_HUD_FOCUS_CAPTURE_DIR` to an output directory to render both themes as
 PPM files for PNG preview conversion; captures come from the real Slint component.
 
+### Market Compass reference implementation
+
+Market Compass uses a 480 × 480 circular dial for one to eight pairs. Its default
+light theme reproduces the champagne-gold reference with separate dial, ceramic
+medallion, pointer, and coin artwork. The matching dark theme uses graphite ceramic,
+smoked-gold brushed metal, and warm off-white type with the same geometry and
+controls. Both themes use prefiltered material assets; existing theme IDs remain
+compatible, and new instances default to light. Dark XRP and ADA icons use lighter tints
+to remain readable against the ceramic medallions.
+The 300px price column uses a stable 44px eight-character type size, independently
+of chart readiness. BTC, ETH, SOL, BNB, XRP, DOGE, ADA, and PEPE have bundled
+reference artwork; other assets use host icons, with readable ticker fallbacks.
+
+Clicking a medallion brings it to twelve o'clock along the shortest circular path.
+Labels remain upright. The configured automatic switch interval pauses on hover
+or keyboard focus; arrow keys switch pairs, and the floating lock supports
+Space/Return. The lock appears on hover or keyboard focus and reserves no space.
+
+The software renderer uses nearest-neighbor image sampling and solid Path fills.
+Artwork therefore includes prefiltered 100%, 125%, 150%, and 200% variants chosen
+from widget scale and display DPI. The light dial reaches 896px; the dark dial
+reuses its 720px variant above 150% to keep the complete two-theme plugin below
+the 5 MiB directory limit. Each file also stays below 1 MiB. The live chart area
+fades through physical-pixel-aligned clipped
+path strips; prices, paths, endpoints, and colors still come from runtime data.
+
+Run `scripts/gui-market-compass-smoke.ps1` for isolated offline native validation.
+It accepts `-Theme`, `-SymbolCount`, `-FirstAsset`, `-ScalePercent`, `-OpacityPercent`,
+`-Language`, `-RedUp`, `-NoLogos`, `-Locked`, and `-KeepOpen`.
+`cargo +1.96.0 test --locked -p crypto-hud market_compass` exercises rendering,
+rotation, input, empty/error states, and resource limits. Set
+`CRYPTO_HUD_MARKET_COMPASS_CAPTURE_DIR` to capture reproducible rendered PPM files.
+
 ## Theme And Change Colors
 
 The host passes the selected widget theme through `theme-name`. Declare supported themes in `widget.json`; if omitted, the widget has one `default` theme and the settings window will not show a theme selector.

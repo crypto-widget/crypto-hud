@@ -3471,7 +3471,7 @@ export component ExamplePriceCard inherits Window {
         ));
         let source = repo_plugin_ui_source("com.cryptohud.market-compass");
         assert!(source.contains("in property <int> config-switch-interval-seconds: 5;"));
-        assert!(source.contains("interval: root.config-switch-interval-seconds * 1s;"));
+        assert!(source.contains("interval: max(1, root.config-switch-interval-seconds) * 1s;"));
     }
 
     #[test]
@@ -3582,23 +3582,6 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
-    fn market_compass_loading_price_size_uses_state_not_localized_text() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            !source.contains("quote.price == \"Connecting\"")
-                && !source.contains("quote.price == \"连接中\""),
-            "market compass loading layout should not compare localized runtime text"
-        );
-        assert!(
-            source.contains(
-                "font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);"
-            ),
-            "market compass price size should follow chart readiness instead of localized labels"
-        );
-    }
-
-    #[test]
     fn circular_repo_plugins_use_direct_scaled_layout() {
         for plugin_id in CIRCULAR_REPO_PLUGIN_IDS {
             let source = repo_plugin_ui_source(plugin_id);
@@ -3649,162 +3632,52 @@ export component ExamplePriceCard inherits Window {
                 "{plugin_id} should scale visible text with the card"
             );
             assert!(
-                source.contains("opacity: root.content-opacity / 100;")
-                    && source.contains("source: @image-url(\"opaque-circle.png\");"),
-                "{plugin_id} should apply opacity to an opaque circular background while keeping the square outside transparent"
+                source.contains("opacity: root.content-opacity / 100;"),
+                "{plugin_id} should apply the host opacity to the complete circular surface"
             );
         }
     }
 
     #[test]
-    fn market_compass_orders_pairs_counterclockwise_for_clockwise_rotation() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("return root.bounded-rotation-step;"),
-            "market compass active pair should advance with the clockwise rotation step"
-        );
-        assert!(
-            source.contains("property <int> bounded-rotation-step: root.orbit-count <= 0 ? 0 : Math.mod(root.rotation-step, root.orbit-count);")
-                && source.contains(
-                    "slot-angle: -90deg + (root.rotation-step - index) * 1turn / root.orbit-denominator;"
-                ),
-            "market compass pairs should be laid out counterclockwise so the next pair enters 12 o'clock during clockwise rotation"
-        );
-        assert!(
-            source.contains("root.rotation-step += 1;")
-                && !source.contains("root.rotation-step = 0;"),
-            "market compass rotation should remain monotonic so the last-to-first transition continues clockwise"
-        );
-        assert!(
-            !source.contains("slot-angle: -90deg + (index + root.rotation-step)"),
-            "market compass should not lay out pairs clockwise"
-        );
-    }
-
-    #[test]
-    fn market_compass_nodes_follow_the_rail_without_self_rotation() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("animate slot-angle { duration: 620ms; easing: ease-in-out; }")
-                && !source.contains("animate x { duration: 620ms;")
-                && !source.contains("animate y { duration: 620ms;"),
-            "market compass should animate its polar angle instead of interpolating x/y across a chord"
-        );
-        assert!(
-            source.contains(
-                "x: root.orbit-center-x + root.orbit-radius * Math.cos(coin_node.slot-angle)"
-            ) && source.contains(
-                "y: root.orbit-center-y + root.orbit-radius * Math.sin(coin_node.slot-angle)"
-            ),
-            "market compass node centers should be derived from one shared circular rail"
-        );
-        assert!(
-            !source.contains("property <angle> rolling-angle:")
-                && !source.contains("rim_glint := Rectangle")
-                && !source.contains("quote-icon-rotation-sheets")
-                && !source.contains("source-clip-x: coin_node.icon-frame-index"),
-            "market compass coin shells and logos should stay upright while their nodes orbit"
-        );
-    }
-
-    #[test]
-    fn market_compass_dark_theme_removes_the_misaligned_inner_ring() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("dark_inner_ring_mask := Rectangle")
-                && source.contains("width: parent.width * 0.594;")
-                && source.contains("border-width: parent.width * 0.032;")
-                && source.contains("border-color: #05090d;")
-                && source.contains("visible: !root.light-theme;"),
-            "market compass should cover only the dark node asset's extra inner cyan ring"
-        );
-    }
-
-    #[test]
-    fn market_compass_price_uses_raw_quote_price() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("text: quote.price;"),
-            "market compass should display the host-formatted price without adding currency symbols"
-        );
-        assert!(
-            !source.contains("\"$\" + quote.price"),
-            "market compass should not prefix prices with a dollar sign"
-        );
-        assert!(
-            !source.contains("price_backdrop := Rectangle"),
-            "market compass should not draw an obvious capsule behind the main price"
-        );
-        assert!(
-            source.contains("price_shadow := Text") && source.contains("price_glow := Text"),
-            "market compass should improve price contrast through layered text, not a separate backing shape"
-        );
-        assert!(
-            source.contains(
-                "property <color> price-text-color: root.light-theme ? #0b302e : #ffffff;"
-            ),
-            "market compass price should use dark ink on the porcelain light theme and white on the dark dial"
-        );
-        assert!(
-            source.contains("color: root.price-shadow-color;")
-                && source.contains("color: root.price-glow-color;")
-                && source.contains("color: root.price-text-color;"),
-            "market compass price layers should stay readable through theme-specific text colors"
-        );
-        assert!(
-            source
-                .matches("font-size: active_panel.selected-chart-ready ? root.s(60px) : root.s(36px);")
-                .count()
-                == 3,
-            "market compass price layers should use readable size for live prices and compact size for loading text"
-        );
-    }
-
-    #[test]
-    fn market_compass_pair_heading_stays_readable_on_dark_dial() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        assert!(
-            source.contains("pair_shadow := Text"),
-            "market compass pair heading should have a subtle contrast layer"
-        );
-        assert!(
-            source.contains(
-                "property <color> pair-heading-color: root.light-theme ? #245f5a : #c7d8eb;"
-            ),
-            "market compass pair heading should use dark teal on the porcelain light theme and a light dial color on dark theme"
-        );
-        assert!(
-            !source.contains(
-                "color: root.muted-text-color;\n                font-size: root.s(25px);"
-            ),
-            "market compass pair heading should not inherit low-contrast theme-muted color"
-        );
-    }
-
-    #[test]
-    fn market_compass_light_theme_uses_porcelain_assets() {
-        let source = repo_plugin_ui_source("com.cryptohud.market-compass");
-
-        for asset in [
-            "opaque-circle-light.png",
-            "reference-light.png",
-            "coin-node-light.png",
-            "coin-node-light-selected.png",
+    fn market_compass_material_assets_support_native_scaling_and_transparency() {
+        let plugin_id = "com.cryptohud.market-compass";
+        let source = repo_plugin_ui_source(plugin_id);
+        let ui_dir = repo_plugin_path(plugin_id).join("ui");
+        for (asset, minimum_size) in [
+            ("champagne-dial.png", 480),
+            ("champagne-node.png", 79),
+            ("champagne-node-selected.png", 86),
+            ("champagne-pointer.png", 64),
+            ("midnight-dial.png", 480),
+            ("midnight-node.png", 79),
+            ("midnight-node-selected.png", 86),
         ] {
+            let path = ui_dir.join(asset);
             assert!(
-                source.contains(&format!("source: @image-url(\"{asset}\");")),
-                "market compass light theme should include dedicated porcelain asset {asset}"
+                source.contains(&format!("@image-url(\"{asset}\")")),
+                "material artwork should be wired into the live component: {asset}"
+            );
+            assert!(fs::metadata(&path).unwrap().len() <= ASSET_MAX_BYTES);
+            let pixels = slint::Image::load_from_path(&path)
+                .unwrap()
+                .to_rgba8()
+                .unwrap();
+            let width = pixels.width() as usize;
+            let height = pixels.height() as usize;
+            assert_eq!(
+                width, height,
+                "{asset} should not stretch in its square bounds"
+            );
+            assert!(width >= minimum_size, "{asset} lacks native-size detail");
+            let data = pixels.as_slice();
+            for corner in [0, width - 1, (height - 1) * width, height * width - 1] {
+                assert_eq!(data[corner].a, 0, "{asset} has an opaque square corner");
+            }
+            assert!(
+                data.iter().any(|pixel| pixel.a > 200),
+                "{asset} must contain visible artwork"
             );
         }
-        assert!(
-            !source.contains("opacity: root.light-theme ? 0.64 : 1;"),
-            "market compass light theme should not be a translucent dark reference image"
-        );
     }
 
     #[test]
@@ -3839,24 +3712,16 @@ export component ExamplePriceCard inherits Window {
     }
 
     #[test]
-    fn circular_repo_plugin_reference_images_have_transparent_edges() {
+    fn circular_repo_plugin_dial_images_have_transparent_edges() {
         for plugin_id in CIRCULAR_REPO_PLUGIN_IDS {
             let ui_dir = repo_plugin_path(plugin_id).join("ui");
             assert_round_asset_has_transparent_antialiased_edge(
                 plugin_id,
-                &ui_dir.join("reference.png"),
+                &ui_dir.join("midnight-dial.png"),
             );
             assert_round_asset_has_transparent_antialiased_edge(
                 plugin_id,
-                &ui_dir.join("reference-light.png"),
-            );
-            assert_round_asset_has_transparent_antialiased_edge(
-                plugin_id,
-                &ui_dir.join("opaque-circle.png"),
-            );
-            assert_round_asset_has_transparent_antialiased_edge(
-                plugin_id,
-                &ui_dir.join("opaque-circle-light.png"),
+                &ui_dir.join("champagne-dial.png"),
             );
         }
     }
@@ -3878,23 +3743,25 @@ export component ExamplePriceCard inherits Window {
         let data = pixels.as_slice();
 
         assert_eq!((width, height), (480, 480), "{plugin_id} {asset_name} size");
+        // Prefiltered shadows can leave a faint alpha tail at the canvas edge.
+        // Keep the edge below 1.2% opacity; corners are checked separately.
         for x in 0..width {
-            assert_eq!(data[x].a, 0, "{plugin_id} {asset_name} top edge pixel {x}");
-            assert_eq!(
-                data[(height - 1) * width + x].a,
-                0,
+            assert!(
+                data[x].a <= 3,
+                "{plugin_id} {asset_name} top edge pixel {x}"
+            );
+            assert!(
+                data[(height - 1) * width + x].a <= 3,
                 "{plugin_id} {asset_name} bottom edge pixel {x}"
             );
         }
         for y in 0..height {
-            assert_eq!(
-                data[y * width].a,
-                0,
+            assert!(
+                data[y * width].a <= 3,
                 "{plugin_id} {asset_name} left edge pixel {y}"
             );
-            assert_eq!(
-                data[y * width + width - 1].a,
-                0,
+            assert!(
+                data[y * width + width - 1].a <= 3,
                 "{plugin_id} {asset_name} right edge pixel {y}"
             );
         }

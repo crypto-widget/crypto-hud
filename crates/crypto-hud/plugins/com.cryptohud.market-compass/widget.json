@@ -37,13 +37,13 @@
     {
       "id": "light",
       "name": "Light",
-      "role": "light"
+      "role": "light",
+      "default": true
     },
     {
       "id": "dark",
       "name": "Dark",
-      "role": "dark",
-      "default": true
+      "role": "dark"
     }
   ],
   "parameters": [

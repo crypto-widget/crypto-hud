@@ -24,6 +24,9 @@ mod mint_tile_tests;
 mod focus_ticker_tests;
 
 #[cfg(test)]
+mod market_compass_tests;
+
+#[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
 use std::path::PathBuf;
