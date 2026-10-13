@@ -43,19 +43,25 @@ impl WidgetUi {
         match &plugin.renderer {
             plugin::PluginRendererDefinition::Builtin(renderer) => match renderer {
                 plugin::BuiltinRenderer::QuoteBoard | plugin::BuiltinRenderer::MiniTicker => {
-                    Ok(Self::BuiltinPriceCard(
-                        PriceCardWindow::new().context("failed to create Slint price card")?,
-                    ))
+                    let ui = PriceCardWindow::new().context("failed to create Slint price card")?;
+                    let icons =
+                        RefCell::new(crate::image_resampling::IconResamplingCache::default());
+                    ui.on_resample_icon(move |source, width, height| {
+                        icons.borrow_mut().resample(&source, width, height)
+                    });
+                    Ok(Self::BuiltinPriceCard(ui))
                 }
             },
             plugin::PluginRendererDefinition::Slint {
                 definition: Some(definition),
                 ..
-            } => Ok(Self::DynamicSlint(DynamicWidgetUi {
-                instance: definition
+            } => {
+                let instance = definition
                     .create()
-                    .context("failed to create dynamic Slint widget")?,
-            })),
+                    .context("failed to create dynamic Slint widget")?;
+                crate::image_resampling::install_image_resampling(&instance)?;
+                Ok(Self::DynamicSlint(DynamicWidgetUi { instance }))
+            }
             plugin::PluginRendererDefinition::Slint {
                 definition: None, ..
             } => bail_plugin_unavailable(plugin),

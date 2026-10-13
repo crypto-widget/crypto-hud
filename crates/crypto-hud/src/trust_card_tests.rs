@@ -130,6 +130,7 @@ fn instrument(source: String) -> String {
             &format!(
                 r#"{anchor}
     in property <int> probe-generation;
+    out property <image> inspected-icon-source: root.displayed-quote-icon;
     in-out property <length> inspected-price-width;
     in-out property <length> inspected-price-font;
     in-out property <length> fitted-price-width;
@@ -234,6 +235,7 @@ impl Harness {
             })
             .create()
             .unwrap();
+        crate::image_resampling::install_image_resampling(&ui).unwrap();
         let widget =
             crate::widget_host::WidgetUi::DynamicSlint(crate::widget_host::DynamicWidgetUi {
                 instance: ui.clone_strong(),
@@ -389,6 +391,14 @@ impl Harness {
 fn trust_card_fits_eight_slot_prices_and_preserves_localized_data_states() {
     use crate::i18n::Locale;
     let h = Harness::new();
+    crate::icon_sampling_tests::verify_card_icon_sampling(
+        &h.ui,
+        &h.widget,
+        &runtime_view("BTC", 68000.12, DataState::Ready, Locale::En),
+        (260.0, 180.0),
+        38.0,
+        |name| h.capture(&format!("trust-card-{name}")),
+    );
     for scale in [0.3, 1.0, 1.25, 2.0] {
         h.scale(scale, 1.0);
         for theme in ["light", "dark"] {

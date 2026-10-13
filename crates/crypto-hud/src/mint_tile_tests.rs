@@ -187,6 +187,7 @@ fn instrument(source: String) -> String {
             &format!(
                 r#"{root_marker}
     in property <int> probe-generation;
+    out property <image> inspected-icon-source: root.displayed-quote-icon;
     out property <length> fitted-price-width: fitted_measure.preferred-width;
     out property <string> inspected-chart-status: chart_status.text;
     out property <bool> inspected-chart-status-visible: chart_status.visible;
@@ -247,6 +248,7 @@ fn mint_tile_fits_prices_and_supports_mouse_and_keyboard_locking() {
         )
     });
     let ui = definition.create().unwrap();
+    crate::image_resampling::install_image_resampling(&ui).unwrap();
     let widget = crate::widget_host::WidgetUi::DynamicSlint(crate::widget_host::DynamicWidgetUi {
         instance: ui.clone_strong(),
     });
@@ -312,6 +314,15 @@ fn mint_tile_fits_prices_and_supports_mouse_and_keyboard_locking() {
         render(&window, capture_dir.as_deref().map(|folder| (folder, name)));
     };
     let btc = ["binance:spot:BTC/USDT".to_string()];
+
+    crate::icon_sampling_tests::verify_card_icon_sampling(
+        &ui,
+        &widget,
+        &runtime_view(&btc, QuoteFixture::default(), crate::i18n::Locale::En),
+        (360.0, 360.0),
+        32.0,
+        |name| capture(&format!("mint-tile-{name}")),
+    );
 
     for scale in [0.3, 1.0, 2.0] {
         set_scale(scale);
@@ -628,6 +639,7 @@ fn mint_tile_hover_partial_repaint_matches_a_fresh_frame() {
             .build_from_source(instrument(std::fs::read_to_string(&path).unwrap()), path),
     );
     let ui = result.component("MintTile").unwrap().create().unwrap();
+    crate::image_resampling::install_image_resampling(&ui).unwrap();
     let widget = crate::widget_host::WidgetUi::DynamicSlint(crate::widget_host::DynamicWidgetUi {
         instance: ui.clone_strong(),
     });

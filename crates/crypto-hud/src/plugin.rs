@@ -19,6 +19,7 @@ pub use crypto_hud_runtime::{
 };
 use i_slint_compiler::{
     diagnostics::BuildDiagnostics,
+    langtype::Type,
     parser::{self, SyntaxKind, SyntaxNode},
     EmbedResourcesKind,
 };
@@ -1828,6 +1829,25 @@ fn validate_slint_contract(
         }
     }
 
+    for callback in [
+        crate::image_resampling::RESAMPLE_IMAGE_CALLBACK,
+        crate::image_resampling::RESAMPLE_ICON_CALLBACK,
+    ] {
+        if let Some((_, (callback_type, _))) = definition
+            .properties_and_callbacks()
+            .find(|(name, _)| name == callback)
+        {
+            if !matches!(callback_type, Type::Callback(ref signature)
+                if signature.args == [Type::Image, Type::Int32, Type::Int32]
+                    && signature.return_type == Type::Image)
+            {
+                bail!(
+                    "Slint {callback} must be a callback with signature (image, int, int) -> image"
+                );
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -3183,6 +3203,52 @@ export component ExamplePriceCard inherits Window {
             .message
             .contains("may only import .slint files"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn image_resampling_callback_contract_is_optional_and_checks_its_signature() {
+        for (declaration, valid) in [
+            ("", true),
+            (
+                "pure callback resample-image(image, int, int) -> image;",
+                true,
+            ),
+            (
+                "callback resample-image(image, float, int) -> image;",
+                false,
+            ),
+            ("callback resample-image(image, int, int) -> int;", false),
+            ("callback resample-image(image, int) -> image;", false),
+            ("in property <image> resample-image;", false),
+            (
+                "pure callback resample-icon(image, int, int) -> image;",
+                true,
+            ),
+            ("callback resample-icon(image, float, int) -> image;", false),
+            ("callback resample-icon(image, int, int) -> int;", false),
+            ("callback resample-icon(image, int) -> image;", false),
+            ("in property <image> resample-icon;", false),
+        ] {
+            let source = valid_slint_source().replace(
+                "    callback drag-move(length, length);",
+                &format!("    {declaration}\n    callback drag-move(length, length);"),
+            );
+            let compiled = spin_on::spin_on(
+                Compiler::default()
+                    .build_from_source(source, PathBuf::from("resampling-test.slint")),
+            );
+            let definition = compiled.component("ExamplePriceCard").unwrap_or_else(|| {
+                panic!(
+                    "resampling fixture failed: {:?}",
+                    compiled.diagnostics().collect::<Vec<_>>()
+                )
+            });
+            let result = validate_slint_contract(&definition, &[]);
+            assert_eq!(result.is_ok(), valid, "{declaration}: {result:?}");
+            if let Err(error) = result {
+                assert!(error.to_string().contains("resample-"));
+            }
+        }
     }
 
     #[test]

@@ -54,7 +54,32 @@ export component MarketCompass inherits Window {
     property <float> content-scale: root.widget-scale;
     property <float> raster-scale: root.content-scale * (1px / 1phx);
     property <int> artwork-level: root.raster-scale < 1.125 ? 100 : root.raster-scale < 1.375 ? 125 : root.raster-scale < 1.75 ? 150 : 200;
-    property <float> atlas-factor: root.artwork-level / 400;
+    // Resample once when the source, widget scale, or display DPI changes. The
+    // software renderer otherwise drops source pixels when shrinking PNGs.
+    property <image> coin-atlas: root.resample-image(
+        root.artwork-level == 100 ? @image-url("champagne-coin-atlas.png")
+            : root.artwork-level == 125 ? @image-url("champagne-coin-atlas-125.png")
+            : root.artwork-level == 150 ? @image-url("champagne-coin-atlas-150.png") : @image-url("champagne-coin-atlas-200.png"),
+        max(1, Math.round(256 * root.raster-scale)), max(1, Math.round(128 * root.raster-scale)));
+    property <float> atlas-factor-x: root.coin-atlas.width / 1024;
+    property <float> atlas-factor-y: root.coin-atlas.height / 512;
+    // Share both badge sizes across repeater instances and quote updates.
+    property <image> node-artwork: root.resample-image(root.light-theme
+        ? (root.artwork-level == 100 ? @image-url("champagne-node.png")
+            : root.artwork-level == 125 ? @image-url("champagne-node-125.png")
+            : root.artwork-level == 150 ? @image-url("champagne-node-150.png") : @image-url("champagne-node-200.png"))
+        : (root.artwork-level == 100 ? @image-url("midnight-node.png")
+            : root.artwork-level == 125 ? @image-url("midnight-node-125.png")
+            : root.artwork-level == 150 ? @image-url("midnight-node-150.png") : @image-url("midnight-node-200.png")),
+        Math.round(68 / 0.86 * root.raster-scale), Math.round(68 / 0.86 * root.raster-scale));
+    property <image> selected-node-artwork: root.resample-image(root.light-theme
+        ? (root.artwork-level == 100 ? @image-url("champagne-node-selected.png")
+            : root.artwork-level == 125 ? @image-url("champagne-node-selected-125.png")
+            : root.artwork-level == 150 ? @image-url("champagne-node-selected-150.png") : @image-url("champagne-node-selected-200.png"))
+        : (root.artwork-level == 100 ? @image-url("midnight-node-selected.png")
+            : root.artwork-level == 125 ? @image-url("midnight-node-selected-125.png")
+            : root.artwork-level == 150 ? @image-url("midnight-node-selected-150.png") : @image-url("midnight-node-selected-200.png")),
+        Math.round(76 / 0.885 * root.raster-scale), Math.round(76 / 0.885 * root.raster-scale));
     function s(value: length) -> length { return value * root.content-scale; }
     property <int> orbit-count: min(8, root.quote-rows.length);
     property <int> orbit-denominator: max(1, root.orbit-count);
@@ -92,6 +117,11 @@ export component MarketCompass inherits Window {
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
+    pure callback resample-image(image, int, int) -> image;
+    pure callback resample-icon(image, int, int) -> image;
+    // Older hosts retain the original artwork without this optional callback.
+    resample-image(source, width, height) => { return source; }
+    resample-icon(source, width, height) => { return source; }
     title: root.widget-id;
     width: root.widget-width * 1px;
     height: root.widget-height * 1px;
@@ -151,19 +181,21 @@ export component MarketCompass inherits Window {
             drop-shadow-offset-y: root.s(7px);
             drop-shadow-color: root.light-theme ? #00000038 : #00000070;
         }
-        Image {
+        light_dial := Image {
             width: parent.width; height: parent.height;
-            source: root.artwork-level == 100 ? @image-url("champagne-dial.png")
+            property <image> artwork: root.artwork-level == 100 ? @image-url("champagne-dial.png")
                 : root.artwork-level == 125 ? @image-url("champagne-dial-125.png")
                 : root.artwork-level == 150 ? @image-url("champagne-dial-150.png") : @image-url("champagne-dial-200.png");
+            source: root.resample-image(self.artwork, Math.round(self.width / 1phx), Math.round(self.height / 1phx));
             image-fit: fill;
             visible: root.light-theme;
         }
-        Image {
+        dark_dial := Image {
             width: parent.width; height: parent.height;
-            source: root.artwork-level == 100 ? @image-url("midnight-dial.png")
+            property <image> artwork: root.artwork-level == 100 ? @image-url("midnight-dial.png")
                 : root.artwork-level == 125 ? @image-url("midnight-dial-125.png")
                 : @image-url("midnight-dial-150.png");
+            source: root.resample-image(self.artwork, Math.round(self.width / 1phx), Math.round(self.height / 1phx));
             image-fit: fill;
             visible: !root.light-theme;
         }
@@ -311,44 +343,26 @@ export component MarketCompass inherits Window {
             Image {
                 x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
                 width: parent.width / (coin_node.selected ? 0.885 : 0.86); height: self.width;
-                source: coin_node.selected
-                    ? (root.artwork-level == 100 ? @image-url("champagne-node-selected.png")
-                        : root.artwork-level == 125 ? @image-url("champagne-node-selected-125.png")
-                        : root.artwork-level == 150 ? @image-url("champagne-node-selected-150.png") : @image-url("champagne-node-selected-200.png"))
-                    : (root.artwork-level == 100 ? @image-url("champagne-node.png")
-                        : root.artwork-level == 125 ? @image-url("champagne-node-125.png")
-                        : root.artwork-level == 150 ? @image-url("champagne-node-150.png") : @image-url("champagne-node-200.png"));
-                image-fit: fill; visible: root.light-theme;
+                source: coin_node.selected ? root.selected-node-artwork : root.node-artwork;
+                image-fit: fill;
             }
-            Image {
-                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-                width: parent.width / (coin_node.selected ? 0.885 : 0.86); height: self.width;
-                source: coin_node.selected
-                    ? (root.artwork-level == 100 ? @image-url("midnight-node-selected.png")
-                        : root.artwork-level == 125 ? @image-url("midnight-node-selected-125.png")
-                        : root.artwork-level == 150 ? @image-url("midnight-node-selected-150.png") : @image-url("midnight-node-selected-200.png"))
-                    : (root.artwork-level == 100 ? @image-url("midnight-node.png")
-                        : root.artwork-level == 125 ? @image-url("midnight-node-125.png")
-                        : root.artwork-level == 150 ? @image-url("midnight-node-150.png") : @image-url("midnight-node-200.png"));
-                image-fit: fill; visible: !root.light-theme;
-            }
-            Image {
+            fallback_icon := Image {
                 x: (parent.width - self.width) / 2; y: coin_node.icon-top;
                 width: coin_node.icon-size; height: self.width;
-                source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
+                source: root.resample-icon(
+                    root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon,
+                    Math.round(self.width / 1phx), Math.round(self.height / 1phx));
                 image-fit: contain;
                 visible: coin_node.icon-ready && coin_node.reference-logo < 0;
             }
             reference_icon := Image {
                 x: (parent.width - self.width) / 2; y: coin_node.icon-top;
                 width: coin_node.icon-size; height: self.width;
-                source: root.artwork-level == 100 ? @image-url("champagne-coin-atlas.png")
-                    : root.artwork-level == 125 ? @image-url("champagne-coin-atlas-125.png")
-                    : root.artwork-level == 150 ? @image-url("champagne-coin-atlas-150.png") : @image-url("champagne-coin-atlas-200.png");
-                source-clip-x: Math.round(root.logo-x[coin_node.reference-logo] * root.atlas-factor);
-                source-clip-y: Math.round(root.logo-y[coin_node.reference-logo] * root.atlas-factor);
-                source-clip-width: Math.round(root.logo-width[coin_node.reference-logo] * root.atlas-factor);
-                source-clip-height: Math.round(root.logo-height[coin_node.reference-logo] * root.atlas-factor);
+                source: root.coin-atlas;
+                source-clip-x: Math.round(root.logo-x[coin_node.reference-logo] * root.atlas-factor-x);
+                source-clip-y: Math.round(root.logo-y[coin_node.reference-logo] * root.atlas-factor-y);
+                source-clip-width: Math.round(root.logo-width[coin_node.reference-logo] * root.atlas-factor-x);
+                source-clip-height: Math.round(root.logo-height[coin_node.reference-logo] * root.atlas-factor-y);
                 image-fit: contain;
                 visible: coin_node.icon-ready && coin_node.reference-logo >= 0;
             }

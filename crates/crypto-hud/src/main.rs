@@ -5,6 +5,7 @@ mod coin_icons;
 mod desktop_shell;
 mod feature_flags;
 mod i18n;
+mod image_resampling;
 mod notifications;
 mod plugin;
 mod runtime_bridge;
@@ -23,6 +24,10 @@ mod mint_tile_tests;
 #[cfg(test)]
 mod focus_ticker_tests;
 
+#[cfg(test)]
+mod coin_icon_tests;
+#[cfg(test)]
+mod icon_sampling_tests;
 #[cfg(test)]
 mod market_compass_tests;
 #[cfg(test)]

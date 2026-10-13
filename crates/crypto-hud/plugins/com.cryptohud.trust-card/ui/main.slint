@@ -39,6 +39,11 @@ export component TrustCard inherits Window {
 
     property <bool> light-theme: root.theme-name == "light";
     property <float> content-scale: root.widget-scale;
+    property <length> quote-icon-size: root.s(38px);
+    // Keep the filtered first-quote icon outside the model's recreated delegate.
+    property <image> displayed-quote-icon: root.resample-icon(
+        root.quote-icons.length > 0 ? root.quote-icons[0] : root.empty-quote-icon,
+        round(root.quote-icon-size / 1phx), round(root.quote-icon-size / 1phx));
     property <length> card-x: 10px;
     property <length> card-y: 10px;
     property <length> card-width: 240px;
@@ -79,6 +84,8 @@ export component TrustCard inherits Window {
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
+    pure callback resample-icon(image, int, int) -> image;
+    resample-icon(source, width, height) => { return source; }
 
     function s(value: length) -> length {
         return value * root.content-scale;
@@ -188,8 +195,8 @@ export component TrustCard inherits Window {
 
             quote_icon := Image {
                 x: root.s(16px); y: root.s(14px);
-                width: root.s(38px); height: root.s(38px);
-                source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
+                width: root.quote-icon-size; height: root.quote-icon-size;
+                source: root.displayed-quote-icon;
                 image-fit: contain;
                 visible: root.quote-icons.length > index;
             }

@@ -334,7 +334,9 @@ this works around Slint 1.17 software Path rendering outside the dirty region.
 Run `cargo +1.96.0 test --locked -p crypto-hud trust_card` for real Slint rendering,
 text fitting, data states, mouse/keyboard locking and saved-layout normalization.
 Set `CRYPTO_HUD_TRUST_CARD_CAPTURE_DIR` to capture deterministic PPM images for
-visual verification. `scripts/gui-trust-card-runtime-smoke.ps1` checks isolated
+visual verification. Run `powershell -File scripts/update-trust-card-previews.ps1`
+to rebuild both 260 × 180 BTC previews at 100% scale from those deterministic captures.
+`scripts/gui-trust-card-runtime-smoke.ps1` checks isolated
 offline native loading, old-size normalization and desktop DPI geometry. It
 accepts themes, scale, opacity, language, color direction, lock/logo settings,
 and 1–8 requested pairs (normalized to the single-pair limit). `-PreviewMatrix`
@@ -364,7 +366,12 @@ The software renderer uses nearest-neighbor image sampling and solid Path fills.
 Artwork therefore includes prefiltered 100%, 125%, 150%, and 200% variants chosen
 from widget scale and display DPI. The light dial reaches 896px; the dark dial
 reuses its 720px variant above 150% to keep the complete two-theme plugin below
-the 5 MiB directory limit. Each file also stays below 1 MiB. The live chart area
+the 5 MiB directory limit. Each file also stays below 1 MiB. When shrinking the
+dial, medallions, or coin atlas, the optional `resample-image` host callback averages
+source pixel coverage at the requested physical size, including alpha. This keeps
+small circles and fine detail smooth at fractional widget scales and display DPI.
+Slint caches the returned image in its property binding until its inputs change;
+ordinary redraws and rotation do not resample unchanged artwork. The live chart area
 fades through physical-pixel-aligned clipped
 path strips; prices, paths, endpoints, and colors still come from runtime data.
 
@@ -374,6 +381,8 @@ It accepts `-Theme`, `-SymbolCount`, `-FirstAsset`, `-ScalePercent`, `-OpacityPe
 `cargo +1.96.0 test --locked -p crypto-hud market_compass` exercises rendering,
 rotation, input, empty/error states, and resource limits. Set
 `CRYPTO_HUD_MARKET_COMPASS_CAPTURE_DIR` to capture reproducible rendered PPM files.
+Run `scripts/update-market-compass-previews.ps1` to refresh both transparent previews
+from the deterministic native renderer.
 
 ## Theme And Change Colors
 
@@ -515,6 +524,42 @@ Parameter constraints:
 Extended kinds (`boolean`, `choice`, `decimal`, `color`, and `string`) require Host API 0.2.0. The manifest schema remains version 3.
 
 ## Scaling And Dragging
+
+Bitmap-heavy plugins can optionally expose a pure callback to prefilter images
+before the software renderer shrinks them:
+
+```slint
+pure callback resample-image(image, int, int) -> image;
+resample-image(source, width, height) => { return source; }
+```
+
+Pass the target width and height in physical pixels, for example
+`Math.round(image-item.width / 1phx)`. The host performs alpha-aware area sampling
+only when both dimensions shrink or stay equal and at least one shrinks. Source
+and target dimensions must be positive and at most 2048; unsupported images and
+out-of-range requests retain the original image. Keep the source aspect ratio.
+For an atlas, filter the complete image and derive source-clip coordinates from
+the returned image dimensions. The default handler above preserves rendering on
+older hosts. Plugins that omit this callback keep their existing behavior.
+
+For individual coin icons, use the optional aspect-preserving callback instead:
+
+```slint
+pure callback resample-icon(image, int, int) -> image;
+resample-icon(source, width, height) => { return source; }
+```
+
+Pass the icon's physical display box, using `Math.round(image-item.width / 1phx)`
+and the corresponding height. The host fits raster images inside that box without
+upscaling, rounds the fitted dimensions to whole pixels, and applies the same
+alpha-aware filter. SVG images remain vectors. Invalid sizes and unsupported
+images retain their original source; the same 2048-pixel limit applies. Each
+widget caches filtered icons by source image identity and fitted dimensions,
+bounded to 64 entries and 32 MiB of retained source/output pixels, so quote model
+refreshes reuse the result. A changed source or physical size selects a new result.
+Use `image-fit: contain` on the image item and retain the default handler for older
+hosts. Mint Tile, Trust Card, and Market Compass's external coin icons use this
+callback; the built-in Quote Board and Mini Ticker share the same host filter.
 
 The host stores widget scale and passes the real window state through `widget-scale`, `widget-width`, and `widget-height`. Do not infer scale from `root.width` or `root.height`.
 

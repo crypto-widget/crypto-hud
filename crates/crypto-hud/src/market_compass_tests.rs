@@ -89,6 +89,75 @@ fn render(window: &MinimalSoftwareWindow, capture: Option<(&Path, &str)>) {
     }
 }
 
+fn assert_half_size_artwork_is_filtered(ui: &ComponentInstance) {
+    let Value::Image(original) = ui.get_property("inspected-dial-artwork").unwrap() else {
+        panic!("dial artwork must be an image");
+    };
+    let Value::Image(filtered) = ui.get_property("inspected-dial-source").unwrap() else {
+        panic!("dial source must be an image");
+    };
+    let original = original.to_rgba8().unwrap();
+    let filtered = filtered.to_rgba8().unwrap();
+    assert_eq!(original.width(), filtered.width() * 2);
+    assert_eq!(original.height(), filtered.height() * 2);
+    let mut compared = 0;
+    let mut changed_from_nearest = 0;
+    for y in 0..filtered.height() as usize {
+        for x in 0..filtered.width() as usize {
+            let offset = 2 * y * original.width() as usize + 2 * x;
+            let source = [
+                original.as_slice()[offset],
+                original.as_slice()[offset + 1],
+                original.as_slice()[offset + original.width() as usize],
+                original.as_slice()[offset + original.width() as usize + 1],
+            ];
+            // With uniform alpha, 2:1 area coverage is independently known:
+            // every output channel is the mean of the four covered texels.
+            // Ignore transparent boundaries here; the filter's own tests cover
+            // alpha weighting, and these checks exercise the plugin's binding.
+            if source[0].a < 200 || source.iter().any(|pixel| pixel.a != source[0].a) {
+                continue;
+            }
+            let actual = filtered.as_slice()[y * filtered.width() as usize + x];
+            for (channel, expected_sum) in [
+                (
+                    actual.r,
+                    source.iter().map(|pixel| u32::from(pixel.r)).sum::<u32>(),
+                ),
+                (
+                    actual.g,
+                    source.iter().map(|pixel| u32::from(pixel.g)).sum::<u32>(),
+                ),
+                (
+                    actual.b,
+                    source.iter().map(|pixel| u32::from(pixel.b)).sum::<u32>(),
+                ),
+            ] {
+                let expected = ((expected_sum + 2) / 4) as u8;
+                assert!(
+                    channel.abs_diff(expected) <= 1,
+                    "unfiltered dial at ({x}, {y})"
+                );
+            }
+            compared += 1;
+            if actual.r.abs_diff(source[0].r) > 2
+                || actual.g.abs_diff(source[0].g) > 2
+                || actual.b.abs_diff(source[0].b) > 2
+            {
+                changed_from_nearest += 1;
+            }
+        }
+    }
+    assert!(
+        compared > 1_000,
+        "check a substantial area of the visible dial"
+    );
+    assert!(
+        changed_from_nearest > 100,
+        "shrinking the textured dial must average pixels instead of dropping them"
+    );
+}
+
 fn runtime_view(
     symbols: &[String],
     price: Option<f64>,
@@ -178,9 +247,12 @@ fn instrument(source: String) -> String {
     source
         .replacen(root_marker, &format!(r#"{root_marker}
     in property <int> probe-generation;
+    in property <bool> transparent-capture;
     out property <int> inspected-active-index: root.active-index();
     out property <int> inspected-orbit-count: root.orbit-count;
     out property <int> inspected-artwork-level: root.artwork-level;
+    out property <image> inspected-dial-artwork: root.light-theme ? light_dial.artwork : dark_dial.artwork;
+    out property <image> inspected-dial-source: root.light-theme ? light_dial.source : dark_dial.source;
     out property <length> inspected-orbit-x: card.x + root.orbit-center-x;
     out property <length> inspected-orbit-y: card.y + root.orbit-center-y;
     out property <length> inspected-orbit-radius: root.orbit-radius;
@@ -241,7 +313,7 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
         .join("plugins/com.cryptohud.market-compass/ui/main.slint");
     let source = instrument(std::fs::read_to_string(&path).unwrap()).replacen(
         "background: transparent;",
-        "background: #dedbd5;",
+        "background: root.transparent-capture ? transparent : #dedbd5;",
         1,
     );
     let compiled = spin_on::spin_on(Compiler::default().build_from_source(source, path));
@@ -252,6 +324,21 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
         )
     });
     let ui = definition.create().unwrap();
+    crate::image_resampling::install_image_resampling(&ui).unwrap();
+    let resampling_calls = Rc::new(Cell::new(0));
+    let observed_resampling_calls = resampling_calls.clone();
+    ui.set_callback("resample-image", move |args| {
+        let [Value::Image(image), Value::Number(width), Value::Number(height)] = args else {
+            panic!("invalid image resampling request: {args:?}");
+        };
+        observed_resampling_calls.set(observed_resampling_calls.get() + 1);
+        Value::Image(crate::image_resampling::resample_image(
+            image,
+            *width as u32,
+            *height as u32,
+        ))
+    })
+    .unwrap();
     let widget = crate::widget_host::WidgetUi::DynamicSlint(crate::widget_host::DynamicWidgetUi {
         instance: ui.clone_strong(),
     });
@@ -327,7 +414,7 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
         .map(|asset| format!("binance:spot:{asset}/USDT"));
     let capture_dir = std::env::var_os("CRYPTO_HUD_MARKET_COMPASS_CAPTURE_DIR").map(PathBuf::from);
 
-    for scale in [0.3, 1.0, 2.0] {
+    for scale in [0.3, 0.5, 0.65, 0.75, 0.85, 1.0, 2.0] {
         ui.set_property("widget-scale", Value::Number(scale))
             .unwrap();
         ui.set_property("widget-width", Value::Number(480.0 * scale))
@@ -369,7 +456,7 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
                 let name = format!("market-compass-{theme}-{count}-{}", (scale * 100.0) as i32);
                 let capture = capture_dir
                     .as_deref()
-                    .filter(|_| scale == 1.0 && [0, 1, 8].contains(&count));
+                    .filter(|_| [0, 1, 8].contains(&count));
                 render(&window, capture.map(|folder| (folder, name.as_str())));
                 measure();
                 assert_eq!(number(&ui, "inspected-orbit-count"), count as f64);
@@ -535,6 +622,101 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
     ui.window().set_size(slint::LogicalSize::new(480.0, 480.0));
     assert_eq!(number(&ui, "inspected-artwork-level"), 100.0);
 
+    // Small logical sizes and desktop DPI combine at rasterization time. Exercise
+    // the complete dial, selected/unselected node artwork, and all eight local
+    // logos at integer and fractional output sizes, after animation has settled.
+    for theme in ["light", "dark"] {
+        ui.set_property("theme-name", Value::String(theme.into()))
+            .unwrap();
+        for dpi in [1.0_f32, 1.25, 1.5, 2.0] {
+            ui.window()
+                .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
+            for scale in [0.3_f32, 0.5, 0.65, 0.75, 0.85, 1.0] {
+                ui.set_property("widget-scale", Value::Number(f64::from(scale)))
+                    .unwrap();
+                let logical_size = 480.0 * scale;
+                ui.set_property("widget-width", Value::Number(f64::from(logical_size)))
+                    .unwrap();
+                ui.set_property("widget-height", Value::Number(f64::from(logical_size)))
+                    .unwrap();
+                ui.window()
+                    .set_size(slint::LogicalSize::new(logical_size, logical_size));
+                ui.window().dispatch_event(WindowEvent::PointerMoved {
+                    position: LogicalPosition::new(240.0 * scale, 235.0 * scale),
+                });
+                apply(&ready_view, scale, true);
+                ui.set_property("rotation-step", Value::Number(0.0))
+                    .unwrap();
+                advance(&elapsed, 700);
+                let name = format!(
+                    "market-compass-logos-{theme}-scale-{}-dpi-{}",
+                    (scale * 100.0).round() as u32,
+                    (dpi * 100.0).round() as u32,
+                );
+                render(
+                    &window,
+                    capture_dir.as_deref().map(|folder| (folder, name.as_str())),
+                );
+                let calls_after_render = resampling_calls.get();
+                assert!(calls_after_render > 0, "{name}: artwork must be resampled");
+                render(&window, None);
+                assert_eq!(
+                    resampling_calls.get(),
+                    calls_after_render,
+                    "{name}: redrawing unchanged artwork must reuse filtered images"
+                );
+                // Runtime refresh replaces the quote model and its delegates.
+                // Shared material images must survive that routine update.
+                apply(&ready_view, scale, true);
+                render(&window, None);
+                assert_eq!(
+                    resampling_calls.get(),
+                    calls_after_render,
+                    "{name}: refreshing quotes must reuse the dial and medallion images"
+                );
+                ui.set_property("rotation-step", Value::Number(1.0))
+                    .unwrap();
+                for milliseconds in [300, 400] {
+                    advance(&elapsed, milliseconds);
+                    render(&window, None);
+                    assert_eq!(
+                        resampling_calls.get(),
+                        calls_after_render,
+                        "{name}: rotating and selecting another coin must reuse filtered images"
+                    );
+                }
+                assert_eq!(number(&ui, "inspected-active-index"), 1.0);
+                measure();
+                let physical_size = (logical_size * dpi).round() as u32;
+                assert_eq!(
+                    window.size(),
+                    slint::PhysicalSize::new(physical_size, physical_size),
+                    "{name}: widget scale and desktop DPI must both affect output size"
+                );
+                if dpi == 1.0 && scale == 0.5 {
+                    assert_half_size_artwork_is_filtered(&ui);
+                }
+                assert_eq!(nodes.borrow().len(), 8, "{name}: all nodes remain visible");
+                let observed = panel.borrow().as_ref().unwrap().clone();
+                assert_eq!(observed.price, "88888888", "{name}");
+                assert!(
+                    observed.glyph_width > 0.0
+                        && observed.glyph_width <= observed.available_width + 0.1,
+                    "{name}: eight digits must remain complete: {observed:?}"
+                );
+            }
+        }
+    }
+    ui.window()
+        .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+    ui.set_property("widget-scale", Value::Number(1.0)).unwrap();
+    ui.set_property("widget-width", Value::Number(480.0))
+        .unwrap();
+    ui.set_property("widget-height", Value::Number(480.0))
+        .unwrap();
+    ui.window().set_size(slint::LogicalSize::new(480.0, 480.0));
+    apply(&ready_view, 1.0, false);
+
     // Deterministic timer advancement exercises the actual production Timer.
     ui.window().dispatch_event(WindowEvent::PointerExited);
     ui.set_property("config-switch-interval-seconds", Value::Number(1.0))
@@ -692,7 +874,9 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
     advance(&elapsed, 5000);
     assert_eq!(number(&ui, "rotation-step"), 0.0);
 
-    if let Some(folder) = capture_dir.as_deref() {
+    let update_previews =
+        std::env::var("CRYPTO_HUD_UPDATE_MARKET_COMPASS_PREVIEWS").as_deref() == Ok("1");
+    if capture_dir.is_some() || update_previews {
         // Reproducible reference captures use real runtime paths and price formatting.
         let now = Instant::now();
         let mut cache = crypto_hud_runtime::QuoteCache::new();
@@ -758,10 +942,35 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
         for theme in ["light", "dark"] {
             ui.set_property("theme-name", Value::String(theme.into()))
                 .unwrap();
+            let name = format!("market-compass-reference-{theme}");
             render(
                 &window,
-                Some((folder, &format!("market-compass-reference-{theme}"))),
+                capture_dir.as_deref().map(|folder| (folder, name.as_str())),
             );
+            if update_previews {
+                ui.set_property("transparent-capture", Value::Bool(true))
+                    .unwrap();
+                let snapshot = ui.window().take_snapshot().unwrap();
+                assert_eq!((snapshot.width(), snapshot.height()), (480, 480));
+                assert_eq!(
+                    snapshot.as_slice()[0].a,
+                    0,
+                    "preview corners stay transparent"
+                );
+                assert!(snapshot.as_slice().iter().any(|pixel| pixel.a == 255));
+                let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp");
+                std::fs::create_dir_all(&folder).unwrap();
+                let mut bytes = snapshot.width().to_le_bytes().to_vec();
+                bytes.extend_from_slice(&snapshot.height().to_le_bytes());
+                bytes.extend_from_slice(snapshot.as_bytes());
+                std::fs::write(
+                    folder.join(format!("market-compass-preview-{theme}.rgba")),
+                    bytes,
+                )
+                .unwrap();
+                ui.set_property("transparent-capture", Value::Bool(false))
+                    .unwrap();
+            }
         }
         for theme in ["light", "dark"] {
             ui.set_property("theme-name", Value::String(theme.into()))
@@ -771,12 +980,10 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
                     .dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: dpi });
                 ui.window().set_size(slint::LogicalSize::new(480.0, 480.0));
                 assert_eq!(number(&ui, "inspected-artwork-level"), f64::from(level));
+                let name = format!("market-compass-reference-{theme}-dpi-{level}");
                 render(
                     &window,
-                    Some((
-                        folder,
-                        &format!("market-compass-reference-{theme}-dpi-{level}"),
-                    )),
+                    capture_dir.as_deref().map(|folder| (folder, name.as_str())),
                 );
             }
         }
@@ -789,9 +996,10 @@ fn market_compass_preserves_price_layout_rotation_and_controls() {
         for theme in ["light", "dark"] {
             ui.set_property("theme-name", Value::String(theme.into()))
                 .unwrap();
+            let name = format!("market-compass-reference-pepe-{theme}");
             render(
                 &window,
-                Some((folder, &format!("market-compass-reference-pepe-{theme}"))),
+                capture_dir.as_deref().map(|folder| (folder, name.as_str())),
             );
         }
         ui.set_property("config-switch-interval-seconds", Value::Number(1.0))

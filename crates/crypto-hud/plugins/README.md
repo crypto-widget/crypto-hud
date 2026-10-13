@@ -269,6 +269,8 @@ Trust Card 使用 260 × 180 的紧凑窗口，卡片为 240 × 160；上方为�
 位置保持不变，以兼容 Slint 1.17 软件 Path 超出脏区域重复混色的问题。
 运行 `cargo +1.96.0 test --locked -p crypto-hud trust_card` 检查真实 Slint 渲染、文字适配、
 行情状态、锁定/拖动和旧尺寸规范化；设置 `CRYPTO_HUD_TRUST_CARD_CAPTURE_DIR` 可输出 PPM。
+运行 `powershell -File scripts/update-trust-card-previews.ps1`，可从确定性的真实渲染截图重新生成
+100% 缩放、260 × 180 的浅色和深色 BTC 预览。
 运行 `scripts/gui-trust-card-runtime-smoke.ps1` 验证隔离原生窗口、离线数据和 DPI，支持主题、
 缩放、透明度、语言、配色方向、锁定、图标与 1–8 个请求币对（规范化为 1 个）。
 `-PreviewMatrix` 展示 BTC/PEPE 两套主题，`-IconCacheDir` 可提供离线币种图稿，
@@ -285,11 +287,15 @@ Market Compass 的默认浅色主题采用香槟金表盘、陶瓷徽章和独�
 软件渲染器采用最近邻纹理采样、不支持 Path 渐变，因此素材按 100/125/150/200% 预滤波，
 结合系统 DPI 和组件缩放选择；浅色表盘最高 896px，深色在 150% 以上复用 720px 素材，
 以满足单素材 1 MiB 和整个双主题插件目录 5 MiB 限制。
+缩小表盘、徽章和币种图集时，通过可选的 `resample-image` 宿主回调按实际物理像素尺寸
+进行包含透明度的面积采样，避免最近邻缩小造成的圆边锯齿和细纹跳变。
+滤波结果由 Slint 属性绑定缓存，只在素材、组件缩放或 DPI 改变时重算，不随普通重绘重复处理。
 动态图表填充使用物理像素对齐的裁剪带衰减透明度，价格、路径、尾点和涨跌方向来自真实宿主数据。
 运行 `scripts/gui-market-compass-smoke.ps1` 检查隔离原生窗口，支持主题、数量、PEPE、缩放、
 透明度、语言、涨跌配色、图标和锁定参数；`-KeepOpen` 保留窗口一小时。
 运行 `cargo +1.96.0 test --locked -p crypto-hud market_compass` 验证轮播、输入、渲染和素材限制；
 设置 `CRYPTO_HUD_MARKET_COMPASS_CAPTURE_DIR` 可输出真实 Slint 参考渲染图。
+运行 `scripts/update-market-compass-previews.ps1` 可从确定性原生渲染更新两套透明预览图。
 
 插件 Slint 文件中需要定义 `QuoteRow`：
 
@@ -506,6 +512,35 @@ Trust Wallet assets 的顺序后台查找；Trust Wallet 会先尝试原生链�
 `image` 兜底。
 
 ## 尺寸和等比缩放
+
+大量使用位图的插件可以声明可选的纯回调，在软件渲染器缩小图片前预滤波：
+
+```slint
+pure callback resample-image(image, int, int) -> image;
+resample-image(source, width, height) => { return source; }
+```
+
+后两个参数为目标物理像素宽高，例如 `Math.round(image-item.width / 1phx)`。
+宿主仅在宽高均不增大且至少一边缩小时进行包含透明度的面积采样；源和目标每边需为
+1–2048 像素，不支持的图像或越界请求保留原图。保持素材宽高比；图集应整体滤波，
+再按返回图片的真实尺寸计算裁切坐标。上述默认处理器兼容旧宿主，不声明回调的插件
+继续使用现有行为。
+
+单个币种图标使用另一个可选回调，自动保持宽高比：
+
+```slint
+pure callback resample-icon(image, int, int) -> image;
+resample-icon(source, width, height) => { return source; }
+```
+
+传入图标显示框的物理像素宽高，例如 `Math.round(image-item.width / 1phx)`。
+宿主将栅格图等比缩小到框内，把目标尺寸取整到像素后进行相同的透明度感知滤波；
+不会放大素材，SVG 保持矢量形式。无效尺寸和不支持的图像保留原图，同样适用
+2048 像素上限。每个组件按源图身份和实际目标尺寸缓存结果，最多保留 64 项、
+32 MiB 的源图及结果像素，行情模型刷新时可直接复用；源图或物理尺寸改变时重新选择
+结果。图标仍使用 `image-fit: contain`，并保留上述默认处理器以兼容旧宿主。
+薄荷行情卡、信任卡片及市场罗盘的外部币种图标使用此回调；内置行情面板和迷你行情
+使用同一宿主滤波实现。
 
 `defaultSize` 和可选 `sizePolicy` 描述插件的自然尺寸。宿主会保存 `scale_percent`
 作为缩放真值，再用“当前自然尺寸 × scale_percent”派生真实桌面窗口宽高，并通过

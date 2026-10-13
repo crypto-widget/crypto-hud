@@ -161,6 +161,8 @@ export component PriceCardWindow inherits Window {
 
     callback drag-move(length, length);
     callback toggle-layout-lock();
+    pure callback resample-icon(image, int, int) -> image;
+    resample-icon(source, width, height) => { return source; }
     function s(value: length) -> length {
         return value * root.content-scale;
     }
@@ -298,12 +300,14 @@ export component PriceCardWindow inherits Window {
                 visible: !root.compact-mode && index + 1 < root.quote-board-row-count;
             }
 
-            Image {
+            quote_icon := Image {
                 x: root.s(root.compact-mode ? 6px : 0px);
                 y: root.s(root.compact-mode ? 6px : 3px);
                 width: root.s(root.compact-mode ? 18px : 18px);
                 height: root.s(root.compact-mode ? 18px : 18px);
-                source: root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon;
+                source: root.resample-icon(
+                    root.quote-icons.length > index ? root.quote-icons[index] : root.empty-quote-icon,
+                    Math.round(self.width / 1phx), Math.round(self.height / 1phx));
                 image-fit: contain;
                 visible: root.show-coin-logos && root.quote-icons.length > index;
             }

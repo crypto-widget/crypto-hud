@@ -149,6 +149,7 @@ fn bundled_widgets_render_eight_slot_prices_without_elision() {
             .component(&component)
             .unwrap_or_else(|| panic!("{id}: {:?}", compiled.diagnostics().collect::<Vec<_>>()));
         let ui = definition.create().unwrap();
+        crate::image_resampling::install_image_resampling(&ui).unwrap();
         let widget =
             crate::widget_host::WidgetUi::DynamicSlint(crate::widget_host::DynamicWidgetUi {
                 instance: ui.clone_strong(),
