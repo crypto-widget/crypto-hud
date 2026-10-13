@@ -239,8 +239,8 @@ mise run run-app
 
   ```powershell
   # Run this only after the version commit is on the default branch and CI passes.
-  git tag -a v1.0.4 -m "Release v1.0.4"
-  git push origin v1.0.4
+  git tag -a v1.0.5 -m "Release v1.0.5"
+  git push origin v1.0.5
   ```
 
   Without Authenticode signing, Windows may show a SmartScreen warning. The
@@ -248,7 +248,7 @@ mise run run-app
   A local copy of the same portable package can be produced with:
 
   ```powershell
-  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v1.0.4
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-portable-windows.ps1 -Version v1.0.5
   ```
 
   The existing installable package path remains separate. It creates a zip,
@@ -267,7 +267,7 @@ mise run run-app
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-smoke.ps1 -SkipBuild
   # Configure CRYPTO_HUD_SIGN_CERT_PATH (or CRYPTO_HUD_SIGN_CERT_BASE64) and
   # CRYPTO_HUD_SIGN_CERT_PASSWORD first. Signed packages always rebuild.
-  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v1.0.4 -Sign
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-windows.ps1 -Version v1.0.5 -Sign
   ```
 
   For a production first install, verify the installer before executing any of

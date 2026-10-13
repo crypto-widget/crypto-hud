@@ -4,6 +4,27 @@ All notable changes to Crypto HUD will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## 1.0.5 - 2026-10-13
+
+### Fixed
+
+- Smooth downscaled widget artwork and coin icons with alpha-aware sampling
+  across widget scales and display DPI.
+- Preserve vector SVG icons and reuse bounded raster icon caches during quote
+  refreshes.
+
+### Changed
+
+- Add optional, backward-compatible image and icon resampling callbacks for
+  local Slint plugins.
+- Move native GUI, packaging, and update smoke checks to tag-triggered releases
+  while retaining daily code quality checks and dependency auditing.
+
+### Documentation
+
+- Refresh Market Compass and Trust Card previews and document image sampling
+  and reproducible preview generation.
+
 ## 1.0.4 - 2026-10-10
 
 ### Added
