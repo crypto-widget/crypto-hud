@@ -4,6 +4,17 @@ All notable changes to Crypto HUD will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## 1.0.6 - 2026-11-25
+
+### Fixed
+
+- Follow the system language on first launch and when saved settings omit a
+  language preference.
+- Select the first supported language from the operating system's preferred
+  languages, falling back to English when none match.
+- Preserve explicitly saved language choices, including English, and continue
+  accepting legacy locale tags.
+
 ## 1.0.5 - 2026-10-13
 
 ### Fixed
