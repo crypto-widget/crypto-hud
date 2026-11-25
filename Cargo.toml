@@ -21,5 +21,5 @@ rust-version = "1.96"
 publish = false
 
 [workspace.dependencies]
-# Keep ureq's shared TLS implementation above the RUSTSEC-2026-0285 fix.
-rustls = { version = "0.23.45", default-features = false }
+# Keep ureq's shared TLS implementation on a patched release.
+rustls = { version = "0.23.46", default-features = false }

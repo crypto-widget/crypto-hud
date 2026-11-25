@@ -15,6 +15,11 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 - Preserve explicitly saved language choices, including English, and continue
   accepting legacy locale tags.
 
+### Security
+
+- Update TLS and certificate trust, Markdown parsing, URL handling, and system
+  dependencies to address RustSec advisories.
+
 ## 1.0.5 - 2026-10-13
 
 ### Fixed
