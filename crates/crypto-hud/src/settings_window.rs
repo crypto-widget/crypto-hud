@@ -7158,7 +7158,10 @@ mod tests {
 
     #[test]
     fn failed_persistence_never_reports_saved_status() {
-        let english = AppSettings::default();
+        let english = AppSettings {
+            language: LanguagePreference::En,
+            ..AppSettings::default()
+        };
         let failed: Result<()> = Err(anyhow::anyhow!("access denied"));
         assert_eq!(
             persistence_status(&english, status_saved(english.clone()), &failed),

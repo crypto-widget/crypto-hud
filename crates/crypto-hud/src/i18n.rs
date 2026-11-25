@@ -2230,17 +2230,19 @@ pub fn resolve_locale(preference: LanguagePreference) -> Locale {
     }
 }
 
-pub fn locale_from_system() -> Locale {
-    sys_locale::get_locale()
-        .as_deref()
-        .map(locale_from_tag)
+fn locale_from_system() -> Locale {
+    locale_from_tags(sys_locale::get_locales())
+}
+
+fn locale_from_tags(locales: impl IntoIterator<Item = impl AsRef<str>>) -> Locale {
+    locales
+        .into_iter()
+        .find_map(|locale| locale_from_tag(locale.as_ref()))
         .unwrap_or(Locale::En)
 }
 
-pub fn locale_from_tag(locale: &str) -> Locale {
-    LanguagePreference::from_locale_tag(locale)
-        .and_then(locale_from_language_preference)
-        .unwrap_or(Locale::En)
+fn locale_from_tag(locale: &str) -> Option<Locale> {
+    LanguagePreference::from_locale_tag(locale).and_then(locale_from_language_preference)
 }
 
 fn locale_from_language_preference(preference: LanguagePreference) -> Option<Locale> {
@@ -4413,12 +4415,8 @@ mod tests {
             ("es-CO", Locale::Es419),
             ("es-US", Locale::Es419),
             ("es-PE", Locale::Es419),
-            ("es", Locale::En),
-            ("es-ES", Locale::En),
             ("pt-BR", Locale::PtBr),
             ("pt_BR.UTF-8", Locale::PtBr),
-            ("pt", Locale::En),
-            ("pt-PT", Locale::En),
             ("vi-VN", Locale::Vi),
             ("id-ID", Locale::Id),
             ("in_ID.UTF-8", Locale::Id),
@@ -4430,11 +4428,10 @@ mod tests {
             ("ar-SA", Locale::Ar),
             ("ar-AE", Locale::Ar),
             ("ar_EG.UTF-8", Locale::Ar),
-            ("C.UTF-8", Locale::En),
         ] {
             assert_eq!(
                 locale_from_tag(tag),
-                expected_locale,
+                Some(expected_locale),
                 "{tag} should resolve to {expected_locale:?}"
             );
         }
@@ -4461,15 +4458,26 @@ mod tests {
                 .unwrap_or_else(|| panic!("{tag} should map to a language preference"));
             assert_eq!(
                 locale_from_tag(tag),
-                locale_from_language_preference(preference).unwrap(),
+                locale_from_language_preference(preference),
                 "{tag} should resolve through the shared language-preference parser"
             );
         }
 
         for unsupported_tag in ["es", "es-ES", "pt", "pt-PT", "C.UTF-8"] {
             assert!(LanguagePreference::from_locale_tag(unsupported_tag).is_none());
-            assert_eq!(locale_from_tag(unsupported_tag), Locale::En);
+            assert_eq!(locale_from_tag(unsupported_tag), None);
         }
+    }
+
+    #[test]
+    fn system_locale_uses_first_supported_preferred_language() {
+        assert_eq!(
+            locale_from_tags(["fr-FR", "zh-HK", "ja-JP"]),
+            Locale::ZhHant
+        );
+        assert_eq!(locale_from_tags(["en-US", "zh-CN"]), Locale::En);
+        assert_eq!(locale_from_tags(["fr-FR", "es-ES", "pt-PT"]), Locale::En);
+        assert_eq!(locale_from_tags(std::iter::empty::<&str>()), Locale::En);
     }
 
     #[test]

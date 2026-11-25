@@ -1419,7 +1419,10 @@ mod tests {
 
     #[test]
     fn missing_quote_distinguishes_connecting_from_market_failure() {
-        let settings = AppSettings::default();
+        let settings = AppSettings {
+            language: crypto_hud_shell_state::LanguagePreference::En,
+            ..AppSettings::default()
+        };
         let quotes = QuoteCache::new();
         let now = Instant::now();
         let connecting = taskbar_market_frame("BTC", &settings, &quotes, false, now);

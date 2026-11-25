@@ -661,8 +661,8 @@ impl ShortcutPreference {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum LanguagePreference {
-    System,
     #[default]
+    System,
     En,
     ZhHans,
     ZhHant,
@@ -3559,6 +3559,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn new_settings_follow_system_and_saved_language_choices_are_preserved() {
+        assert_eq!(
+            LayoutStore::default().settings.language,
+            LanguagePreference::System
+        );
+
+        for (tag, expected) in [
+            ("system", LanguagePreference::System),
+            ("en", LanguagePreference::En),
+            ("zh_hant", LanguagePreference::ZhHant),
+        ] {
+            let settings = serde_json::from_value::<AppSettings>(serde_json::json!({
+                "language": tag,
+            }))
+            .unwrap()
+            .normalized();
+            assert_eq!(settings.language, expected);
+        }
+    }
+
+    #[test]
     fn legacy_settings_json_defaults_new_fields() {
         let settings = serde_json::from_str::<AppSettings>(
             r#"{"widgets_always_on_top":false,"opacity_percent":77,"market_fallback_enabled":true}"#,
@@ -3590,7 +3611,7 @@ mod tests {
         assert!(settings.show_main_window_on_startup);
         assert_eq!(settings.shortcut, ShortcutPreference::AltC);
         assert_eq!(settings.theme, ThemePreference::System);
-        assert_eq!(settings.language, LanguagePreference::En);
+        assert_eq!(settings.language, LanguagePreference::System);
         assert!(settings.tray_icon_enabled);
         assert!(!settings.tray_hover_display_enabled);
         assert!(!settings.tray_market_enabled);
