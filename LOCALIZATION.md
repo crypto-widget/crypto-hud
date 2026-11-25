@@ -10,7 +10,7 @@ Keep this list in the same order as `LanguagePreference::ALL`,
 
 | Locale | Preference | Audience |
 | --- | --- | --- |
-| `en` | `En` | Default English UI |
+| `en` | `En` | English UI and fallback |
 | `zh-CN` | `ZhHans` | Simplified Chinese communities |
 | `zh-TW` | `ZhHant` | Traditional Chinese for Taiwan, Hong Kong, Macau, and overseas Chinese users |
 | `es-419` | `Es419` | Latin American Spanish |
@@ -65,6 +65,12 @@ belong in `ALLOWED_IDENTICAL_TECHNICAL_UI_FIELDS` with a reason. The test
 exceptions honest too.
 
 ## Locale Detection
+
+The language preference defaults to System on first launch and when saved
+settings lack a language. System uses the first supported language in the OS
+display-language preference list, or English if the list is unavailable or has
+no supported entries. A saved language selection takes precedence, including
+English.
 
 `LanguagePreference::from_locale_tag` is the shared parsing source for system
 locale detection and persisted language preference compatibility. It accepts
@@ -199,6 +205,7 @@ For localization changes, run at least:
 cargo +1.96.0 fmt --all
 cargo +1.96.0 check -p crypto-hud
 cargo +1.96.0 test -p crypto-hud locale_tags_resolve_to_supported_locales
+cargo +1.96.0 test -p crypto-hud system_locale_uses_first_supported_preferred_language
 cargo +1.96.0 test -p crypto-hud-core -p crypto-hud-runtime -p crypto-hud-shell-state -p crypto-hud
 ```
 
